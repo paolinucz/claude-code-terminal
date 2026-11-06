@@ -41,6 +41,16 @@ Nota: con la status line attiva, Claude Code non mostra più i suoi suggerimenti
 - Se un file cambia fuori dall'app (per esempio «Sì, e ricorda» nel terminale), il pannello si aggiorna e mostra cosa è cambiato; se avevi modifiche non salvate in quell'ambito ti chiede se ricaricare o tenere le tue.
 - Un file con JSON non valido viene mostrato in sola lettura, con l'errore.
 
+**Fase 6 completata**: file, editor e language server (F1–F3).
+- **Esplora file**: albero del progetto e delle cartelle aggiuntive (`add-dir`) delle sessioni; file segnati M, A, D, R, U secondo git, etichetta «Claude» sui file con modifiche in revisione, numero di errori; si aggiorna da solo quando i file cambiano. Menu: Apri, Mostra in Esplora risorse, Copia percorso.
+- **Editor** (Monaco): un file per pannello, ● nel titolo se non salvato, Ctrl+S per salvare. Se il file cambia su disco (per esempio dopo una modifica di Claude) si ricarica da solo; se hai modifiche non salvate chiede cosa fare.
+- **Language server**: completamento, descrizioni al passaggio del mouse, «vai alla definizione» (anche in altri file) ed errori sottolineati.
+  - TypeScript/JavaScript: server nativo di TypeScript 7 (`tsc --lsp`).
+  - Python: Pyright. YAML: yaml-language-server.
+  - Java: jdtls. Al primo file `.java` l'editor propone di scaricare il supporto Java nella cartella dell'app: un JRE 25 (Eclipse Temurin) e jdtls, circa 105 MB, con verifica SHA-256. I progetti Maven e Gradle vengono importati da jdtls.
+  - XML e SQL per ora hanno solo la colorazione della sintassi.
+- **Problemi**: errori e avvisi di tutti i server, per file; un clic porta alla riga.
+
 Le modifiche fatte da Claude con comandi di shell (per esempio `sed` o `git checkout`) non passano dagli strumenti di modifica e quindi non compaiono nel pannello.
 
 Claude Code viene cercato nel PATH, poi in `%USERPROFILE%\.local\bin` (installer ufficiale), poi nella copia dell'app desktop di Claude.

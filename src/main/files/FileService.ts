@@ -1,0 +1,147 @@
+import { execFile } from 'node:child_process'
+import { watch, type FSWatcher } from 'node:fs'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { isAbsolute, join, resolve } from 'node:path'
+import { promisify } from 'node:util'
+import type { DirEntry, FileContent, GitMark, GitStatus, SaveFileResult } from '@shared/files'
+import { normPath } from '@shared/files'
+
+const run = promisify(execFile)
+const MAX_TEXT = 5 * 1024 * 1024
+/** Cartelle nascoste nell'albero (rumore). */
+const HIDDEN = new Set(['.git'])
+
+/**
+ * File del workspace per l'esplora file e l'editor (F1, F2): elenco delle cartelle, lettura e
+ * scrittura, stato git (M/A/D) e osservazione delle modifiche.
+ */
+export class FileService {
+  private watchers = new Map<string, { w: FSWatcher; refs: number }>()
+  private pending = new Map<string, Set<string>>()
+  private timers = new Map<string, NodeJS.Timeout>()
+
+  constructor(private readonly onChange: (root: string, paths: string[]) => void) {}
+
+  async list(dir: string): Promise<DirEntry[]> {
+    const entries = await readdir(dir, { withFileTypes: true })
+    return entries
+      .filter((e) => !HIDDEN.has(e.name))
+      .map((e) => ({ name: e.name, path: join(dir, e.name), dir: e.isDirectory() }))
+      .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }) : a.dir ? -1 : 1))
+  }
+
+  async read(path: string): Promise<FileContent> {
+    const s = await stat(path)
+    if (s.size > MAX_TEXT) return { path, text: '', mtime: s.mtimeMs, binary: false, tooLarge: true }
+    const buf = await readFile(path)
+    const binary = buf.subarray(0, 8000).includes(0)
+    return { path, text: binary ? '' : buf.toString('utf8').replace(/^﻿/, ''), mtime: s.mtimeMs, binary, tooLarge: false }
+  }
+
+  /** Salva. Se il file è cambiato su disco dopo `expectedMtime` serve `force` (F2: niente sovrascritture a sorpresa). */
+  async write(path: string, text: string, expectedMtime?: number, force = false): Promise<SaveFileResult> {
+    try {
+      if (expectedMtime !== undefined && !force) {
+        const s = await stat(path).catch(() => null)
+        if (s && Math.abs(s.mtimeMs - expectedMtime) > 1) return { ok: false, conflict: true }
+      }
+      await writeFile(path, text, 'utf8')
+      return { ok: true, mtime: (await stat(path)).mtimeMs }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  }
+
+  /** F1: stato git dei file (M, A, D, R, U) per la cartella indicata. */
+  async gitStatus(dir: string): Promise<GitStatus> {
+    let root: string
+    try {
+      root = (await run('git', ['rev-parse', '--show-toplevel'], { cwd: dir, windowsHide: true, timeout: 5000 })).stdout.trim()
+    } catch {
+      return { root: null, branch: null, files: {} }
+    }
+    root = resolve(root)
+    const files: Record<string, GitMark> = {}
+    let branch: string | null = null
+    try {
+      const { stdout } = await run('git', ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all'], {
+        cwd: root,
+        windowsHide: true,
+        timeout: 10000,
+        maxBuffer: 32 * 1024 * 1024
+      })
+      const parts = stdout.split('\0')
+      for (let i = 0; i < parts.length; i++) {
+        const entry = parts[i]
+        if (!entry) continue
+        if (entry.startsWith('## ')) {
+          branch = entry.slice(3).split('...')[0].replace(/^No commits yet on /, '') || null
+          continue
+        }
+        const xy = entry.slice(0, 2)
+        const file = entry.slice(3)
+        let mark: GitMark = 'M'
+        if (xy === '??' || xy.includes('A')) mark = 'A'
+        else if (xy.includes('D')) mark = 'D'
+        else if (xy.includes('R')) {
+          mark = 'R'
+          i++ // il percorso di origine della rinomina è il pezzo successivo
+        } else if (xy.includes('U')) mark = 'U'
+        files[normPath(isAbsolute(file) ? file : join(root, file))] = mark
+      }
+    } catch {
+      // stato non leggibile: niente segni
+    }
+    return { root, branch, files }
+  }
+
+  /** Osserva una cartella (anche le sottocartelle). Più pannelli possono osservare la stessa cartella. */
+  watch(root: string): void {
+    const key = normPath(root)
+    const existing = this.watchers.get(key)
+    if (existing) {
+      existing.refs++
+      return
+    }
+    try {
+      const w = watch(root, { recursive: true }, (_event, name) => {
+        if (!name) return
+        const rel = name.toString()
+        // Dentro .git interessano solo i file che cambiano lo stato (index, HEAD).
+        if (/^\.git[\\/]/.test(rel) && !/^\.git[\\/](index|HEAD)$/.test(rel)) return
+        const set = this.pending.get(key) ?? new Set<string>()
+        set.add(join(root, rel))
+        this.pending.set(key, set)
+        clearTimeout(this.timers.get(key))
+        this.timers.set(
+          key,
+          setTimeout(() => {
+            const paths = [...(this.pending.get(key) ?? [])]
+            this.pending.delete(key)
+            this.onChange(root, paths)
+          }, 300)
+        )
+      })
+      w.on('error', () => this.unwatch(root, true))
+      this.watchers.set(key, { w, refs: 1 })
+    } catch {
+      // cartella non osservabile
+    }
+  }
+
+  unwatch(root: string, force = false): void {
+    const key = normPath(root)
+    const entry = this.watchers.get(key)
+    if (!entry) return
+    entry.refs--
+    if (entry.refs <= 0 || force) {
+      entry.w.close()
+      this.watchers.delete(key)
+    }
+  }
+
+  dispose(): void {
+    for (const { w } of this.watchers.values()) w.close()
+    this.watchers.clear()
+  }
+}

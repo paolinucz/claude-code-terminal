@@ -2,6 +2,16 @@
 import type { ChangeContents, FileChange, RejectResult, ReviewNote, RevisionResult } from './changes'
 import type { ExternalChange, PermissionScope, PermissionsState, SaveResult, ScopeData } from './permissions'
 import type {
+  DirEntry,
+  FileContent,
+  FileDiagnostics,
+  GitStatus,
+  JavaInstallProgress,
+  LspLanguage,
+  LspStatus,
+  SaveFileResult
+} from './files'
+import type {
   ClaudeCliInfo,
   ClaudeEffort,
   ClaudeModel,
@@ -65,6 +75,31 @@ export interface AppApi {
     /** F8: invia accortezze e divieti a Claude; la modifica torna in revisione quando Claude riscrive il file. */
     requestRevision(id: string, notes: ReviewNote[]): Promise<RevisionResult>
     onChanged(cb: (changes: FileChange[]) => void): () => void
+  }
+  /** File del workspace (F1, F2). */
+  files: {
+    list(dir: string): Promise<DirEntry[]>
+    read(path: string): Promise<FileContent>
+    write(path: string, text: string, expectedMtime?: number, force?: boolean): Promise<SaveFileResult>
+    gitStatus(dir: string): Promise<GitStatus>
+    watch(root: string): void
+    unwatch(root: string): void
+    reveal(path: string): Promise<void>
+    onChanged(cb: (root: string, paths: string[]) => void): () => void
+  }
+  /** Language server dell'editor (F2, F3) e supporto Java scaricato al primo uso. */
+  lsp: {
+    open(language: LspLanguage, path: string, text: string, workspace?: string): void
+    change(language: LspLanguage, path: string, text: string, workspace?: string): void
+    save(language: LspLanguage, path: string, text: string, workspace?: string): void
+    close(language: LspLanguage, path: string, workspace?: string): void
+    request(language: LspLanguage, path: string, method: string, params: Record<string, unknown>, workspace?: string): Promise<unknown>
+    statuses(): Promise<LspStatus[]>
+    onDiagnostics(cb: (d: FileDiagnostics) => void): () => void
+    onStatus(cb: (s: LspStatus) => void): () => void
+    javaInstalled(): Promise<boolean>
+    installJava(): Promise<{ ok: boolean; error?: string }>
+    onJavaProgress(cb: (p: JavaInstallProgress) => void): () => void
   }
   /** Permessi di Claude Code nei tre file di impostazioni (P1–P6). */
   permissions: {

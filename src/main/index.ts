@@ -10,6 +10,10 @@ import { SessionManager } from './sessions/SessionManager'
 import { HookServer } from './sessions/HookServer'
 import { ChangeTracker } from './changes/ChangeTracker'
 import { PermissionsService } from './permissions/PermissionsService'
+import { FileService } from './files/FileService'
+import { jdtlsDataDir, LanguageServerManager } from './lsp/LanguageServerManager'
+import { JavaToolchain } from './lsp/JavaToolchain'
+import type { LspLanguage } from '@shared/files'
 import type { PermissionScope, ScopeData } from '@shared/permissions'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
@@ -33,6 +37,44 @@ const hookServer = new HookServer({
 let changes: ChangeTracker | null = null
 /** Fase 5: file dei permessi di Claude Code. */
 let permissions: PermissionsService | null = null
+
+// ---- Fase 6: file, editor, language server ----
+const sendToMain = (channel: string, ...args: unknown[]) => {
+  const win = mainWindow()
+  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+}
+const files = new FileService((root, paths) => sendToMain('files:changed', root, paths))
+let java: JavaToolchain | null = null
+
+/** Cartella dei pacchetti dell'app (nell'app installata, la parte fuori dall'archivio asar). */
+function appModules(...parts: string[]): string {
+  return join(app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked'), 'node_modules', ...parts)
+}
+
+/** Come avviare ogni language server. I server JavaScript girano con Electron in modalità Node. */
+const lsp = new LanguageServerManager(
+  (language, root) => {
+    const asNode = { ELECTRON_RUN_AS_NODE: '1' }
+    switch (language) {
+      case 'typescript':
+        // TypeScript 7 (nativo) ha un server LSP incluso.
+        return { file: appModules('@typescript', 'typescript-win32-x64', 'lib', 'tsc.exe'), args: ['--lsp', '--stdio'] }
+      case 'python':
+        return { file: process.execPath, args: [appModules('pyright', 'langserver.index.js'), '--stdio'], env: asNode }
+      case 'yaml':
+        return { file: process.execPath, args: [appModules('yaml-language-server', 'bin', 'yaml-language-server'), '--stdio'], env: asNode }
+      case 'java': {
+        if (!java?.installed()) return 'needs-install'
+        const cmd = java.command(jdtlsDataDir(app.getPath('userData'), root))
+        return { ...cmd, initializationOptions: { settings: { java: { import: { maven: { enabled: true }, gradle: { enabled: true } } } } } }
+      }
+      default:
+        return null
+    }
+  },
+  (d) => sendToMain('lsp:diagnostics', d),
+  (s) => sendToMain('lsp:status', s)
+)
 const sessions = new SessionManager(
   (id) => hookServer.claudeSettings(id),
   join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`)
@@ -191,6 +233,49 @@ function registerIpc(store: AppDb): void {
     return { ok: true }
   })
 
+  // ---- File (F1, F2) ----
+  ipcMain.handle('files:list', (_e, dir: string) => files.list(dir))
+  ipcMain.handle('files:read', (_e, path: string) => files.read(path))
+  ipcMain.handle('files:write', (_e, path: string, text: string, expectedMtime?: number, force?: boolean) =>
+    files.write(path, text, expectedMtime, force)
+  )
+  ipcMain.handle('files:gitStatus', (_e, dir: string) => files.gitStatus(dir))
+  ipcMain.on('files:watch', (_e, root: string) => files.watch(root))
+  ipcMain.on('files:unwatch', (_e, root: string) => files.unwatch(root))
+  ipcMain.handle('files:reveal', (_e, path: string) => shell.showItemInFolder(path))
+
+  // ---- Language server (F2, F3) ----
+  ipcMain.on('lsp:open', (_e, language: LspLanguage, path: string, text: string, workspace?: string) =>
+    void lsp.open(language, path, text, workspace).catch(() => {})
+  )
+  ipcMain.on('lsp:change', (_e, language: LspLanguage, path: string, text: string, workspace?: string) =>
+    void lsp.change(language, path, text, workspace).catch(() => {})
+  )
+  ipcMain.on('lsp:save', (_e, language: LspLanguage, path: string, text: string, workspace?: string) =>
+    void lsp.save(language, path, text, workspace).catch(() => {})
+  )
+  ipcMain.on('lsp:close', (_e, language: LspLanguage, path: string, workspace?: string) =>
+    void lsp.close(language, path, workspace).catch(() => {})
+  )
+  ipcMain.handle('lsp:request', async (_e, language: LspLanguage, path: string, method: string, params: Record<string, unknown>, workspace?: string) => {
+    try {
+      return await lsp.request(language, path, method, params, workspace)
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle('lsp:statuses', () => lsp.statuses())
+  ipcMain.handle('java:installed', () => java?.installed() ?? false)
+  ipcMain.handle('java:install', async () => {
+    if (!java) return { ok: false, error: 'Non pronto' }
+    try {
+      await java.install((p) => sendToMain('java:progress', p))
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
   // ---- Permessi di Claude Code (P1–P6) ----
   ipcMain.handle('permissions:read', (_e, cwd: string) => {
     if (!permissions) return null
@@ -293,6 +378,7 @@ app.whenReady().then(async () => {
     if (win && !win.isDestroyed() && changes) win.webContents.send('changes:changed', changes.list())
   })
   changes.cleanup()
+  java = new JavaToolchain(join(app.getPath('userData'), 'toolchains', 'java'))
   permissions = new PermissionsService(
     db,
     (cwd) => sessions.list().some((s) => s.kind === 'claude' && s.status !== 'exited' && s.cwd.toLowerCase() === cwd.toLowerCase()),
@@ -312,6 +398,8 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   sessions.killAll()
   hookServer.stop()
+  lsp.stopAll()
+  files.dispose()
 })
 
 app.on('window-all-closed', () => {

@@ -1,6 +1,7 @@
 import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
 import type { SessionAttention, SessionInfo } from '@shared/sessions'
 import { isOpen, type FileChange, type RevisionRequest } from '@shared/changes'
+import type { FileDiagnostics } from '@shared/files'
 import type {
   Decision,
   ExternalChange,
@@ -60,6 +61,7 @@ function createLocalStorageApi(): AppApi {
         write(LAYOUTS, read<NamedLayout[]>(LAYOUTS, []).filter((l) => l.id !== id))
       }
     },
+    ...createDemoFiles(),
     changes: createDemoChanges(),
     permissions: createDemoPermissions(),
     settings: {
@@ -71,6 +73,80 @@ function createLocalStorageApi(): AppApi {
       }
     },
     ...createDemoSessions()
+  }
+}
+
+/** File e language server finti per il browser: il progetto Java del mockup, con una diagnostica di prova. */
+function createDemoFiles(): Pick<AppApi, 'files' | 'lsp'> {
+  const root = 'C:\\Users\\demo'
+  const pkg = `${root}\\src\\main\\java\\it\\acme\\orders`
+  const contents: Record<string, string> = {
+    [`${root}\\pom.xml`]: '<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>it.acme</groupId>\n  <artifactId>api-server</artifactId>\n</project>\n',
+    [`${root}\\README.md`]: '# api-server\n',
+    [`${pkg}\\OrderService.java`]: 'package it.acme.orders;\n\npublic class OrderService {\n  private final OrderRepository repo;\n\n  public void cancel(Long id) {\n    Order o = repo.findById(id).orElseThrow();\n    o.setStatus(Status.CANCELLED)\n    repo.save(o);\n  }\n}\n',
+    [`${pkg}\\Order.java`]: 'package it.acme.orders;\n\npublic class Order {\n}\n',
+    [`${pkg}\\OrderMapper.java`]: 'package it.acme.orders;\n\npublic class OrderMapper {\n}\n',
+    [`${root}\\src\\main\\resources\\application.yml`]: 'server:\n  port: 8080\n'
+  }
+  const isDir = (p: string) => Object.keys(contents).some((f) => f.toLowerCase().startsWith(p.toLowerCase() + '\\'))
+  const diagListeners = new Set<(d: FileDiagnostics) => void>()
+  return {
+    files: {
+      async list(dir) {
+        const names = new Set<string>()
+        for (const f of Object.keys(contents)) {
+          if (!f.toLowerCase().startsWith(dir.toLowerCase() + '\\')) continue
+          names.add(f.slice(dir.length + 1).split('\\')[0])
+        }
+        return [...names]
+          .map((name) => ({ name, path: `${dir}\\${name}`, dir: isDir(`${dir}\\${name}`) }))
+          .sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1))
+      },
+      async read(path) {
+        return { path, text: contents[path] ?? '', mtime: 1, binary: false, tooLarge: false }
+      },
+      async write(path, text) {
+        contents[path] = text
+        return { ok: true, mtime: Date.now() }
+      },
+      async gitStatus() {
+        return { root, branch: 'feature/order-cancel', files: { [`${pkg}\\orderservice.java`.toLowerCase()]: 'M', [`${pkg}\\ordermapper.java`.toLowerCase()]: 'A' } }
+      },
+      watch() {},
+      unwatch() {},
+      async reveal() {},
+      onChanged: () => () => {}
+    },
+    lsp: {
+      open(language, path) {
+        if (!path.endsWith('OrderService.java')) return
+        setTimeout(
+          () =>
+            diagListeners.forEach((cb) =>
+              cb({ path, language, diagnostics: [{ severity: 1, message: "Syntax error, insert \";\" to complete BlockStatements", source: 'Java', range: { startLine: 8, startColumn: 34, endLine: 8, endColumn: 35 } }, { severity: 2, message: 'The value of the field OrderService.repo is not used', source: 'Java', range: { startLine: 4, startColumn: 33, endLine: 4, endColumn: 37 } }] })
+            ),
+          600
+        )
+      },
+      change() {},
+      save() {},
+      close() {},
+      async request() {
+        return null
+      },
+      async statuses() {
+        return []
+      },
+      onDiagnostics: (cb) => (diagListeners.add(cb), () => diagListeners.delete(cb)),
+      onStatus: () => () => {},
+      async javaInstalled() {
+        return true
+      },
+      async installJava() {
+        return { ok: true }
+      },
+      onJavaProgress: () => () => {}
+    }
   }
 }
 

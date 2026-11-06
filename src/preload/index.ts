@@ -29,6 +29,29 @@ const api: AppApi = {
     requestRevision: (id, notes) => ipcRenderer.invoke('changes:requestRevision', id, notes),
     onChanged: (cb) => on('changes:changed', cb)
   },
+  files: {
+    list: (dir) => ipcRenderer.invoke('files:list', dir),
+    read: (path) => ipcRenderer.invoke('files:read', path),
+    write: (path, text, expectedMtime, force) => ipcRenderer.invoke('files:write', path, text, expectedMtime, force),
+    gitStatus: (dir) => ipcRenderer.invoke('files:gitStatus', dir),
+    watch: (root) => ipcRenderer.send('files:watch', root),
+    unwatch: (root) => ipcRenderer.send('files:unwatch', root),
+    reveal: (path) => ipcRenderer.invoke('files:reveal', path),
+    onChanged: (cb) => on('files:changed', cb)
+  },
+  lsp: {
+    open: (language, path, text, workspace) => ipcRenderer.send('lsp:open', language, path, text, workspace),
+    change: (language, path, text, workspace) => ipcRenderer.send('lsp:change', language, path, text, workspace),
+    save: (language, path, text, workspace) => ipcRenderer.send('lsp:save', language, path, text, workspace),
+    close: (language, path, workspace) => ipcRenderer.send('lsp:close', language, path, workspace),
+    request: (language, path, method, params, workspace) => ipcRenderer.invoke('lsp:request', language, path, method, params, workspace),
+    statuses: () => ipcRenderer.invoke('lsp:statuses'),
+    onDiagnostics: (cb) => on('lsp:diagnostics', cb),
+    onStatus: (cb) => on('lsp:status', cb),
+    javaInstalled: () => ipcRenderer.invoke('java:installed'),
+    installJava: () => ipcRenderer.invoke('java:install'),
+    onJavaProgress: (cb) => on('java:progress', cb)
+  },
   permissions: {
     read: (cwd) => ipcRenderer.invoke('permissions:read', cwd),
     save: (cwd, scope, data) => ipcRenderer.invoke('permissions:save', cwd, scope, data),

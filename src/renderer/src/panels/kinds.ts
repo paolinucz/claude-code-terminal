@@ -24,14 +24,14 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     kind: 'explorer',
     title: 'Esplora file',
     description: 'Albero del workspace e delle cartelle aggiuntive, con i file modificati segnati M, A o D.',
-    phase: 6,
+    phase: 0,
     requirements: 'F1'
   },
   editor: {
     kind: 'editor',
     title: 'Editor',
     description: 'Monaco con language server: Java, TypeScript/JavaScript, Python, XML, YAML e SQL.',
-    phase: 6,
+    phase: 0,
     requirements: 'F2'
   },
   changes: {
@@ -45,7 +45,7 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     kind: 'problems',
     title: 'Problemi',
     description: 'Errori e avvisi di tutti i language server attivi.',
-    phase: 6,
+    phase: 0,
     requirements: 'F3'
   },
   permissions: {
@@ -84,6 +84,8 @@ export interface PanelParams {
   sessionId?: string
   /** Solo terminali: dati dell'ultima sessione mostrata, per «Riprendi». */
   hint?: SessionHint
-  /** Solo permessi: cartella del progetto. */
+  /** Permessi, esplora file, editor: cartella del progetto. */
   cwd?: string
+  /** Solo editor: file aperto. */
+  filePath?: string
 }

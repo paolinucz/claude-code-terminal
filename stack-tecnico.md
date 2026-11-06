@@ -102,6 +102,14 @@ Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di 
 - I server partono solo quando apri un file di quel linguaggio, per contenere memoria e tempi d'avvio.
 - Il pannello Problemi (F3) unisce i `publishDiagnostics` di tutti i server.
 
+*Realizzato nella fase 6, con alcune differenze:*
+- **Client LSP proprio** invece di `monaco-languageclient`: il processo principale parla con i server tramite `vscode-jsonrpc`; l'editor registra in Monaco completamento, hover e definizione. Sincronizzazione del testo completa (non incrementale). Supporta sia la diagnostica inviata dal server sia quella «a richiesta» (`textDocument/diagnostic`).
+- **TypeScript/JavaScript**: il server nativo di TypeScript 7 (`tsc --lsp --stdio`), non typescript-language-server. Il servizio TypeScript integrato in Monaco è disattivato per non fare doppio lavoro.
+- **Python** con Pyright e **YAML** con yaml-language-server: girano con Electron in modalità Node.
+- **Java**: jdtls recente richiede **Java 25**, non 21. L'app scarica al primo uso un JRE 25 Temurin (api.adoptium.net) e jdtls (download.eclipse.org/jdtls/snapshots), verificati con SHA-256 ed estratti con `tar` di Windows in `%APPDATA%\Claude Code Terminal\toolchains\java` (~240 MB estratti). jdtls usa l'archivio certificati di Windows (`-Djavax.net.ssl.trustStoreType=Windows-ROOT`): senza, con antivirus o proxy che ispezionano HTTPS, Maven non scarica i plugin.
+- **XML (LemMinX) e SQL (sqls)**: non ancora; solo colorazione della sintassi.
+- Nell'installer `@typescript`, `pyright` e `yaml-language-server` restano fuori dall'archivio asar (`asarUnpack`).
+
 ### Widget (G1–G4, A1–A5, I1–I8)
 
 - **Isolamento.** iframe con `sandbox="allow-scripts"` senza `allow-same-origin`, servito da un protocollo personalizzato `ccwidget://<id>/` con una CSP rigida: niente rete diretta, `connect-src 'none'`.
@@ -145,6 +153,6 @@ Le fasi 1–3 danno già un'app usabile tutti i giorni come terminale per Claude
 ## 7. Decisioni ancora da prendere
 
 - [x] Dimensione del terminale con più viste: comanda la vista con il focus o che ha scritto per ultima; le altre si adeguano (fase 2).
-- [ ] JDK per jdtls: incluso nell'installer o scaricato al primo uso?
+- [x] JDK per jdtls: scaricato al primo uso nella cartella dell'app (JRE 25, fase 6).
 - [ ] Shell predefinita per i nuovi terminali.
 - [ ] Aggiornamenti automatici dell'app sin dalla v1?
