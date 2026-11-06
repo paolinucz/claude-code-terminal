@@ -1,0 +1,201 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import 'dockview/dist/styles/dockview.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Tema scuro dell'app (v1). Tutti i colori sono variabili CSS, così un tema chiaro
+ * si potrà aggiungere sostituendo solo questo blocco (requisiti §1, G3).
+ * Palette presa dal mockup.
+ */
+:root {
+  --cct-bg: #09090b;
+  --cct-surface: #18181b;
+  --cct-surface-2: #1f1f23;
+  --cct-border: #27272a;
+  --cct-border-strong: #3f3f46;
+  --cct-text: #fafafa;
+  --cct-text-muted: #d4d4d8;
+  --cct-text-subtle: #a1a1aa;
+  --cct-text-faint: #71717a;
+  --cct-accent: #e8875f;
+  --cct-accent-soft: #f0a27a;
+  --cct-on-accent: #1a0f0a;
+  --cct-ok: #6fd39b;
+  --cct-warn: #f5c46b;
+  --cct-danger: #ff8a8a;
+  --cct-info: #6ea8fe;
+
+  /* Variabili attese dai componenti shadcn / Animate UI */
+  --radius: 0.625rem;
+  --background: var(--cct-bg);
+  --foreground: var(--cct-text);
+  --card: var(--cct-surface);
+  --card-foreground: var(--cct-text);
+  --popover: var(--cct-surface);
+  --popover-foreground: var(--cct-text);
+  --primary: var(--cct-accent);
+  --primary-foreground: var(--cct-on-accent);
+  --secondary: var(--cct-border);
+  --secondary-foreground: var(--cct-text);
+  --muted: var(--cct-border);
+  --muted-foreground: var(--cct-text-subtle);
+  --accent: var(--cct-border);
+  --accent-foreground: var(--cct-text);
+  --destructive: var(--cct-danger);
+  --border: var(--cct-border);
+  --input: var(--cct-border-strong);
+  --ring: var(--cct-accent);
+}
+
+@theme inline {
+  --font-sans: 'Geist Variable', system-ui, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-surface: var(--cct-surface);
+  --color-surface-2: var(--cct-surface-2);
+  --color-strong: var(--cct-border-strong);
+  --color-text-muted: var(--cct-text-muted);
+  --color-text-subtle: var(--cct-text-subtle);
+  --color-text-faint: var(--cct-text-faint);
+  --color-brand: var(--cct-accent);
+  --color-brand-soft: var(--cct-accent-soft);
+  --color-on-brand: var(--cct-on-accent);
+  --color-ok: var(--cct-ok);
+  --color-warn: var(--cct-warn);
+  --color-danger: var(--cct-danger);
+  --color-info: var(--cct-info);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    margin: 0;
+    font-size: 13px;
+    overflow: hidden;
+    user-select: none;
+  }
+  input,
+  textarea {
+    user-select: text;
+  }
+  :focus-visible {
+    outline: 2px solid var(--cct-accent);
+    outline-offset: 1px;
+  }
+}
+
+/* La barra superiore fa da barra del titolo (finestra senza cornice). */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Dockview: tema dell'app (vedi workspace/theme.ts) ---------- */
+.dockview-theme-cct {
+  color-scheme: dark;
+  --dv-paneview-active-outline-color: var(--cct-accent);
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-height: 34px;
+  --dv-drag-over-background-color: rgb(232 135 95 / 0.14);
+  --dv-drag-over-border-color: var(--cct-accent);
+  --dv-drag-over-border: 1px solid var(--cct-accent);
+  --dv-edge-dock-indicator-color: var(--cct-accent);
+  --dv-tabs-container-scrollbar-color: var(--cct-border-strong);
+  --dv-scrollbar-background-color: var(--cct-border-strong);
+  --dv-icon-hover-background-color: var(--cct-border);
+  --dv-floating-box-shadow: 0 12px 32px rgb(0 0 0 / 0.55);
+  --dv-floating-border: 1px solid var(--cct-border-strong);
+  --dv-floating-group-border: 1px solid var(--cct-border-strong);
+  --dv-floating-group-dragging-opacity: 0.6;
+  --dv-floating-titlebar-height: 22px;
+  --dv-floating-titlebar-background-color: var(--cct-surface-2);
+  --dv-floating-titlebar-border-bottom: 1px solid var(--cct-border);
+  --dv-overlay-z-index: 999;
+  --dv-tab-font-size: inherit;
+  --dv-border-radius: 10px;
+  --dv-tab-margin: 0;
+  --dv-spacing-padding: 0px;
+  --dv-tab-border-radius: 0px;
+  --dv-sash-border-radius: 2px;
+  --dv-dropdown-border-radius: 8px;
+  --dv-tab-close-icon-size: inherit;
+  --dv-active-sash-transition-duration: 0.1s;
+  --dv-active-sash-transition-delay: 0.3s;
+  --dv-context-menu-background-color: var(--cct-surface);
+  --dv-context-menu-color: var(--cct-text);
+  --dv-tab-group-line-height: 2px;
+  --dv-tab-group-line-opacity: 0.6;
+
+  --dv-group-view-background-color: var(--cct-surface);
+  --dv-tabs-and-actions-container-background-color: var(--cct-surface);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--cct-bg);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--cct-surface);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--cct-surface-2);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--cct-surface);
+  --dv-tab-divider-color: var(--cct-border);
+  --dv-activegroup-visiblepanel-tab-color: var(--cct-text);
+  --dv-activegroup-hiddenpanel-tab-color: var(--cct-text-subtle);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--cct-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--cct-text-faint);
+  --dv-separator-border: var(--cct-border);
+  --dv-paneview-header-border-color: var(--cct-border);
+  --dv-background-color: var(--cct-bg);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--cct-accent);
+
+  background: var(--cct-bg);
+  font-family: var(--font-sans);
+}
+
+/* Gruppi come "carte" con bordo e angoli arrotondati, come nel mockup. */
+.dockview-theme-cct .dv-groupview {
+  border: 1px solid var(--cct-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.dockview-theme-cct .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--cct-border);
+}
+.dockview-theme-cct .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 var(--cct-accent);
+}
+.dockview-theme-cct .dv-resize-container {
+  border-radius: 10px;
+}
