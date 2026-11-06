@@ -1,5 +1,5 @@
 import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
-import type { SessionInfo } from '@shared/sessions'
+import type { SessionAttention, SessionInfo } from '@shared/sessions'
 
 /**
  * In Electron usa `window.api` (SQLite nel processo principale).
@@ -72,6 +72,7 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
   const data = new Set<(id: string, seq: number, d: string) => void>()
   const resized = new Set<(id: string, c: number, r: number) => void>()
   const exited = new Set<(id: string, code: number) => void>()
+  const attention = new Set<(a: SessionAttention) => void>()
   const list = () => [...sessions.values()].map((s) => ({ ...s.info, views: s.views.size }))
   const notify = () => setTimeout(() => changed.forEach((cb) => cb(list())), 0)
   const prompt = (s: SessionInfo) => (s.kind === 'claude' ? '\r\n\x1b[38;2;232;135;95m>\x1b[0m ' : `\r\n\x1b[32m${s.cwd}\x1b[0m $ `)
@@ -139,6 +140,13 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
           window.clearTimeout(idleTimer)
           idleTimer = window.setTimeout(() => {
             s.info.status = 'idle'
+            if (s.info.kind === 'claude') {
+              // Simula la status line e l'hook Stop di Claude Code (fase 3).
+              s.info.hooks = true
+              s.info.contextPercent = Math.min(99, (s.info.contextPercent ?? 3) + 9)
+              s.info.modelLabel ??= 'Sonnet'
+              attention.forEach((cb) => cb({ sessionId: id, kind: 'finished', title: s.info.title, message: 'Ho risposto al tuo messaggio (demo).' }))
+            }
             notify()
           }, 1200)
         } else if (d === '\x7f') emit(id, '\b \b')
@@ -171,7 +179,9 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
       onChanged: (cb) => (changed.add(cb), () => changed.delete(cb)),
       onData: (cb) => (data.add(cb), () => data.delete(cb)),
       onResize: (cb) => (resized.add(cb), () => resized.delete(cb)),
-      onExit: (cb) => (exited.add(cb), () => exited.delete(cb))
+      onExit: (cb) => (exited.add(cb), () => exited.delete(cb)),
+      onAttention: (cb) => (attention.add(cb), () => attention.delete(cb)),
+      onReveal: () => () => {}
     },
     env: {
       async claudeCli() {

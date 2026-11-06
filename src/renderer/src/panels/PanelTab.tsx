@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { IDockviewPanelHeaderProps } from 'dockview-react'
 import { X } from 'lucide-react'
-import { STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/sessions'
+import { ATTENTION_LABELS, STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/sessions'
 import { useWorkspace } from '@/state/workspace'
 import type { PanelParams } from './kinds'
 
@@ -13,6 +13,9 @@ export function PanelTab(props: IDockviewPanelHeaderProps<PanelParams>) {
   const [title, setTitle] = useState(props.api.title ?? '')
   const sessionId = props.params.kind === 'terminal' ? props.params.sessionId : undefined
   const session = useSessions((s) => (sessionId ? s.sessions[sessionId] : undefined))
+  const attention = useSessions((s) => (sessionId ? s.attention[sessionId] : undefined))
+  const attentionColor =
+    attention?.kind === 'finished' ? 'var(--cct-ok)' : attention?.kind === 'error' ? 'var(--cct-danger)' : 'var(--cct-info)'
 
   useEffect(() => {
     const sub = props.api.onDidTitleChange((e) => setTitle(e.title))
@@ -39,12 +42,17 @@ export function PanelTab(props: IDockviewPanelHeaderProps<PanelParams>) {
       }}
     >
       {props.params.kind === 'terminal' && (
-        <span
-          className="size-2 shrink-0 rounded-full"
-          style={{ background: session ? STATUS_COLORS[session.status] : 'var(--cct-border-strong)' }}
-          title={session ? STATUS_LABELS[session.status] : 'nessuna sessione'}
-          aria-label={session ? `Stato: ${STATUS_LABELS[session.status]}` : undefined}
-        />
+        <span className="relative inline-flex size-2 shrink-0">
+          {attention && (
+            <span className="absolute inset-0 animate-ping rounded-full" style={{ background: attentionColor }} aria-hidden="true" />
+          )}
+          <span
+            className="relative size-2 rounded-full"
+            style={{ background: attention ? attentionColor : session ? STATUS_COLORS[session.status] : 'var(--cct-border-strong)' }}
+            title={attention ? `${ATTENTION_LABELS[attention.kind]}: ${attention.message}` : session ? STATUS_LABELS[session.status] : 'nessuna sessione'}
+            aria-label={attention ? ATTENTION_LABELS[attention.kind] : session ? `Stato: ${STATUS_LABELS[session.status]}` : undefined}
+          />
+        </span>
       )}
       {props.params.kind === 'terminal' && session?.kind && (
         <span className="text-[11px] text-text-faint">{session.kind === 'claude' ? 'Claude' : 'Shell'}</span>

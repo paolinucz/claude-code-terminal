@@ -12,6 +12,7 @@ import {
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { getPanelData } from 'dockview-react'
 import type { PanelParams } from '@/panels/kinds'
+import { ATTENTION_LABELS, useSessions } from '@/state/sessions'
 import { moveTerminalToSheet } from './panels'
 import { dockRegistry } from './registry'
 
@@ -132,6 +133,7 @@ export function SheetTabs() {
                     <span>{sheet.name}</span>
                   )}
                   <PanelCount sheetId={sheet.id} />
+                  <SheetAttention sheetId={sheet.id} />
                   {sheets.length > 1 && editing !== sheet.id && (
                     <button
                       type="button"
@@ -223,6 +225,21 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (name: stri
       className="w-28 rounded border border-brand bg-background px-1.5 py-0.5 text-[13px] text-foreground outline-none"
     />
   )
+}
+
+/** S7: pallino sul foglio se una sua sessione ha finito o chiede qualcosa e non l'hai ancora guardata. */
+function SheetAttention({ sheetId }: { sheetId: string }) {
+  const attention = useSessions((s) => s.attention)
+  // Ricalcola anche quando cambiano i pannelli del foglio.
+  useWorkspace((s) => s.panelCounts[sheetId])
+  const ids = new Set(Object.keys(attention))
+  if (ids.size === 0) return null
+  const panels = dockRegistry.get(sheetId)?.panels ?? []
+  const hit = panels.map((p) => (p.params as PanelParams | undefined)?.sessionId).find((id) => id && ids.has(id))
+  if (!hit) return null
+  const kind = attention[hit].kind
+  const color = kind === 'finished' ? 'var(--cct-ok)' : kind === 'error' ? 'var(--cct-danger)' : 'var(--cct-info)'
+  return <span className="size-2 rounded-full" style={{ background: color }} title={ATTENTION_LABELS[kind]} aria-label={ATTENTION_LABELS[kind]} />
 }
 
 /** Numero di pannelli nel foglio (aggiornato da SheetView a ogni cambio di layout). */

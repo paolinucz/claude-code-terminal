@@ -5,8 +5,11 @@ import type { WebContents } from 'electron'
 import * as pty from 'node-pty'
 import { Terminal as HeadlessTerminal } from '@xterm/headless'
 import { SerializeAddon } from '@xterm/addon-serialize'
-import type { CreateSessionRequest, SessionInfo, SessionSnapshot } from '@shared/sessions'
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import type { CreateSessionRequest, SessionAttention, SessionInfo, SessionSnapshot } from '@shared/sessions'
 import { childPath, detectShells, findClaudeCli, gitBranch, shellCommand } from './environment'
+import type { HookEvent, StatusLinePayload } from './HookServer'
 
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 32
@@ -64,6 +67,7 @@ class Session {
     this.proc.onExit(({ exitCode }) => this.onExit(exitCode))
 
     this.statusTimer = setInterval(() => {
+      if (this.info.hooks) return
       if (this.info.status === 'working' && Date.now() - this.lastOutputAt > IDLE_AFTER_MS) this.setStatus('idle')
     }, 400)
 
@@ -74,7 +78,8 @@ class Session {
   private onOutput(data: string): void {
     const now = Date.now()
     this.lastOutputAt = now
-    if (now - this.lastInputAt > ECHO_WINDOW_MS && this.info.status === 'idle') this.setStatus('working')
+    // Senza hook (shell, o Claude prima del primo evento) lo stato si deduce dall'output.
+    if (!this.info.hooks && now - this.lastInputAt > ECHO_WINDOW_MS && this.info.status === 'idle') this.setStatus('working')
     this.pending += data
     this.flushTimer ??= setTimeout(() => this.flush(), FLUSH_MS)
   }
@@ -96,13 +101,96 @@ class Session {
     return set
   }
 
+  /** Chiamata quando il processo termina (anche se ci sono ancora viste aperte). */
+  onExited?: () => void
+
   private onExit(exitCode: number): void {
+    this.onExited?.()
     this.flush()
     this.info.exitCode = exitCode
     this.setStatus('exited')
     for (const wc of this.targets()) wc.send('session:exit', this.info.id, exitCode)
     this.dispose()
     if (this.views.size === 0) this.ended(this.info.id)
+  }
+
+  private lastAttention: { kind: string; at: number } | null = null
+
+  /**
+   * Evento di un hook di Claude Code (fase 3): aggiorna lo stato (S6) e, se serve,
+   * restituisce una richiesta di attenzione da notificare (S7).
+   */
+  applyHook(e: HookEvent): SessionAttention | null {
+    const first = !this.info.hooks
+    this.info.hooks = true
+    let attention: SessionAttention['kind'] | null = null
+    let message = ''
+    switch (e.hook_event_name) {
+      case 'SessionStart':
+        // Dopo /clear Claude Code apre una nuova conversazione con un nuovo id: serve per «Riprendi».
+        if (e.session_id) this.info.claudeSessionId = e.session_id
+        this.setStatus('idle')
+        break
+      case 'UserPromptSubmit':
+      case 'PreToolUse':
+      case 'PostToolUse':
+        this.setStatus('working')
+        break
+      case 'PermissionRequest':
+        this.setStatus('waiting')
+        attention = 'permission'
+        message = e.tool_name ? `Chiede il permesso per ${e.tool_name}` : 'Chiede un permesso'
+        break
+      case 'Notification':
+        if (e.notification_type === 'permission_prompt') {
+          this.setStatus('waiting')
+          attention = 'permission'
+          message = e.message || 'Chiede un permesso'
+        } else if (e.notification_type === 'elicitation_dialog' || e.notification_type === 'agent_needs_input') {
+          this.setStatus('waiting')
+          attention = 'input'
+          message = e.message || 'Aspetta una tua risposta'
+        }
+        break
+      case 'Stop':
+        this.setStatus('idle')
+        attention = 'finished'
+        message = summarize(e.last_assistant_message) || 'Ha finito'
+        break
+      case 'StopFailure':
+        this.setStatus('idle')
+        attention = 'error'
+        message = typeof e.error === 'string' ? e.error : 'Si è fermata per un errore'
+        break
+    }
+    if (first) this.changed()
+    if (!attention) return null
+    // PermissionRequest e Notification(permission_prompt) arrivano insieme: una sola notifica.
+    const now = Date.now()
+    if (this.lastAttention && this.lastAttention.kind === attention && now - this.lastAttention.at < 3000) return null
+    this.lastAttention = { kind: attention, at: now }
+    return { sessionId: this.info.id, kind: attention, title: this.info.title, message }
+  }
+
+  /** Dati della status line di Claude Code (W5): modello, effort, contesto, costo. */
+  applyStatusLine(p: StatusLinePayload): void {
+    const percent = p.context_window?.used_percentage
+    const next = {
+      contextPercent: typeof percent === 'number' ? Math.round(percent) : this.info.contextPercent,
+      modelLabel: p.model?.display_name ?? this.info.modelLabel,
+      effortLevel: p.effort?.level ?? this.info.effortLevel,
+      costUsd: typeof p.cost?.total_cost_usd === 'number' ? p.cost.total_cost_usd : this.info.costUsd
+    }
+    if (p.session_id) this.info.claudeSessionId = p.session_id
+    if (
+      next.contextPercent !== this.info.contextPercent ||
+      next.modelLabel !== this.info.modelLabel ||
+      next.effortLevel !== this.info.effortLevel ||
+      next.costUsd !== this.info.costUsd
+    ) {
+      Object.assign(this.info, next)
+      this.changed()
+    }
   }
 
   private setStatus(status: SessionInfo['status']): void {
@@ -226,6 +314,23 @@ function childEnv(): Record<string, string> {
   return env
 }
 
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** Prima frase (o primi 140 caratteri) della risposta di Claude, per il testo della notifica. */
+function summarize(text: unknown): string {
+  if (typeof text !== 'string') return ''
+  const clean = text.replace(/[`*_#>]/g, '').replace(/\s+/g, ' ').trim()
+  const sentence = clean.match(/^.{20,140}?[.!?](\s|$)/)?.[0] ?? clean
+  return sentence.length > 140 ? sentence.slice(0, 139) + '…' : sentence
+}
+
 function quote(arg: string): string {
   return /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg
 }
@@ -257,7 +362,77 @@ export class SessionManager {
   private remove = (id: string): void => {
     this.sessions.get(id)?.dispose()
     this.sessions.delete(id)
+    this.removeSettingsFile(id)
     this.notify()
+  }
+
+  private readonly attentionListeners = new Set<(a: SessionAttention) => void>()
+
+  /**
+   * @param hookSettings impostazioni da passare a Claude Code (hook e status line) per una sessione.
+   * @param settingsDir cartella dei file temporanei passati con --settings.
+   */
+  constructor(
+    private readonly hookSettings: (appSessionId: string) => Record<string, unknown> = () => ({}),
+    private readonly settingsDir: string | null = null
+  ) {}
+
+  /**
+   * Toglie le cartelle di impostazioni lasciate da copie dell'app che non sono più in esecuzione
+   * (per esempio dopo un arresto improvviso). Le cartelle sono «settings-<pid>».
+   */
+  cleanStaleSettings(): void {
+    if (!this.settingsDir) return
+    const parent = dirname(this.settingsDir)
+    let entries: string[] = []
+    try {
+      entries = readdirSync(parent)
+    } catch {
+      return
+    }
+    for (const name of entries) {
+      const pid = Number(/^settings-(\d+)$/.exec(name)?.[1])
+      if (!pid || pid === process.pid || isRunning(pid)) continue
+      try {
+        rmSync(join(parent, name), { recursive: true, force: true })
+      } catch {
+        // in uso o già rimossa
+      }
+    }
+  }
+
+  onAttention(listener: (a: SessionAttention) => void): () => void {
+    this.attentionListeners.add(listener)
+    return () => this.attentionListeners.delete(listener)
+  }
+
+  /** Evento di un hook di Claude Code per una sessione dell'app. */
+  handleHook(id: string, event: HookEvent): void {
+    const attention = this.sessions.get(id)?.applyHook(event)
+    if (attention) for (const l of this.attentionListeners) l(attention)
+  }
+
+  handleStatusLine(id: string, payload: StatusLinePayload): void {
+    this.sessions.get(id)?.applyStatusLine(payload)
+  }
+
+  /** Scrive il file JSON passato con --settings (in un file, per evitare problemi di virgolette sulla riga di comando). */
+  private writeSettingsFile(id: string): string | null {
+    const settings = this.hookSettings(id)
+    if (!this.settingsDir || Object.keys(settings).length === 0) return null
+    mkdirSync(this.settingsDir, { recursive: true })
+    const file = join(this.settingsDir, `${id}.json`)
+    writeFileSync(file, JSON.stringify(settings, null, 2), 'utf8')
+    return file
+  }
+
+  private removeSettingsFile(id: string): void {
+    if (!this.settingsDir) return
+    try {
+      rmSync(join(this.settingsDir, `${id}.json`), { force: true })
+    } catch {
+      // file già rimosso
+    }
   }
 
   async create(req: CreateSessionRequest): Promise<SessionInfo> {
@@ -271,6 +446,9 @@ export class SessionManager {
       const args: string[] = []
       if (o.resumeId) args.push('--resume', o.resumeId)
       else args.push('--session-id', claudeSessionId)
+      // Fase 3: hook e status line dell'app, solo per questa sessione (non tocca i settings.json dell'utente).
+      const settingsFile = this.writeSettingsFile(id)
+      if (settingsFile) args.push('--settings', settingsFile)
       if (o.model !== 'default') args.push('--model', o.model)
       if (o.effort !== 'default') args.push('--effort', o.effort)
       for (const dir of o.addDirs) args.push('--add-dir', dir)
@@ -292,6 +470,7 @@ export class SessionManager {
         this.notify,
         this.remove
       )
+      session.onExited = () => this.removeSettingsFile(id)
       this.sessions.set(id, session)
     } else {
       if (!existsSync(req.cwd)) throw new Error(`La cartella non esiste: ${req.cwd}`)
@@ -363,9 +542,10 @@ export class SessionManager {
   }
 
   killAll(): void {
-    for (const s of this.sessions.values()) {
+    for (const [id, s] of this.sessions) {
       s.kill()
       s.dispose()
+      this.removeSettingsFile(id)
     }
     this.sessions.clear()
   }

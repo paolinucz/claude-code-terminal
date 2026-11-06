@@ -68,8 +68,25 @@ export interface SessionInfo {
   exitCode?: number
   /** Numero di viste collegate (pannelli aperti) in questo momento. */
   views: number
+  /** Dalla status line di Claude Code (W5): percentuale di contesto usata. */
+  contextPercent?: number
+  /** Nome del modello come lo mostra Claude Code (es. «Opus»): segue anche i cambi fatti con /model. */
+  modelLabel?: string
+  /** Effort attuale riportato da Claude Code. */
+  effortLevel?: string
+  costUsd?: number
+  /** Gli hook di Claude Code stanno inviando eventi: lo stato viene da lì e non dall'attività del terminale. */
+  hooks?: boolean
   cols: number
   rows: number
+}
+
+/** Una sessione chiede attenzione (S7): ha finito, chiede un permesso, aspetta input o si è fermata per un errore. */
+export interface SessionAttention {
+  sessionId: string
+  kind: 'finished' | 'permission' | 'input' | 'error'
+  title: string
+  message: string
 }
 
 /** Sessione di Claude Code salvata su disco, per l'elenco «Riprendi» (S8). */

@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui-kit'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
-import { bindPanelToSession, hintOf } from '@/workspace/panels'
+import { bindPanelToSession, hintOf, sheetOfPanel } from '@/workspace/panels'
 import { NewSessionForm } from './NewSessionForm'
 import { TerminalView } from './TerminalView'
 
@@ -48,6 +48,19 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
   useEffect(() => {
     if (session && props.api.title !== session.title) props.api.setTitle(session.title)
   }, [session?.title, props.api, session])
+
+  // S7: guardare la sessione (scheda attiva nel foglio aperto, finestra in primo piano) toglie il segnale di attenzione.
+  const sheetActive = useWorkspace((s) => s.activeSheetId === sheetOfPanel(props.containerApi))
+  const hasAttention = useSessions((s) => (sessionId ? Boolean(s.attention[sessionId]) : false))
+  useEffect(() => {
+    if (!sessionId || !hasAttention) return
+    const check = () => {
+      if (active && sheetActive && props.api.isVisible && document.hasFocus()) useSessions.getState().seen(sessionId)
+    }
+    check()
+    window.addEventListener('focus', check)
+    return () => window.removeEventListener('focus', check)
+  }, [sessionId, hasAttention, active, sheetActive, props.api])
 
   if (!sessionId || missing) {
     return (
@@ -115,6 +128,29 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
   )
 }
 
+/** Contesto usato (W5), dalla status line di Claude Code. Giallo oltre il 70%, rosso oltre l'85%. */
+function ContextMeter({ session }: { session: SessionInfo }) {
+  const p = session.contextPercent
+  if (p === undefined) {
+    return (
+      <span title={session.hooks ? 'In attesa del primo aggiornamento di Claude Code' : 'Disponibile dopo il primo messaggio'}>
+        Contesto —
+      </span>
+    )
+  }
+  const color = p >= 85 ? 'var(--cct-danger)' : p >= 70 ? 'var(--cct-warn)' : 'var(--cct-ok)'
+  const cost = session.costUsd !== undefined ? ` · costo stimato $${session.costUsd.toFixed(2)}` : ''
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5" title={`Contesto usato: ${p}%${cost}`}>
+      Contesto
+      <span className="relative h-1.5 w-12 overflow-hidden rounded-full bg-border" role="progressbar" aria-valuenow={p} aria-valuemin={0} aria-valuemax={100} aria-label="Contesto usato">
+        <span className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, p)}%`, background: color }} />
+      </span>
+      <span style={{ color: p >= 70 ? color : undefined }}>{p}%</span>
+    </span>
+  )
+}
+
 /** Dimensione del carattere dei terminali (vale per tutti). Anche con Ctrl +, Ctrl −, Ctrl 0 e Ctrl + rotellina. */
 function FontSizeControl() {
   const { fontSize, bigger, smaller, reset } = useTerminalSettings()
@@ -158,8 +194,9 @@ function StatusBar({ session }: { session: SessionInfo }) {
   const setStatus = useWorkspace((s) => s.setStatus)
   const [confirmKill, setConfirmKill] = useState(false)
   const isClaude = session.kind === 'claude'
-  const modelLabel = CLAUDE_MODELS.find((m) => m.id === session.model)?.label ?? 'Predefinito'
-  const effortLabel = CLAUDE_EFFORTS.find((m) => m.id === session.effort)?.label ?? 'Predefinito'
+  // Con la status line (fase 3) modello ed effort sono quelli veri, anche dopo un /model scritto a mano.
+  const modelLabel = session.modelLabel ?? CLAUDE_MODELS.find((m) => m.id === session.model)?.label ?? 'Predefinito'
+  const effortLabel = session.effortLevel ?? CLAUDE_EFFORTS.find((m) => m.id === session.effort)?.label ?? 'Predefinito'
   const live = session.status !== 'exited'
 
   return (
@@ -209,9 +246,7 @@ function StatusBar({ session }: { session: SessionInfo }) {
         <span className="px-1.5 text-text-muted">{session.title}</span>
       )}
 
-      {isClaude && (
-        <span title="La percentuale di contesto arriva nella fase 3 (status line di Claude Code)">Contesto —</span>
-      )}
+      {isClaude && <ContextMeter session={session} />}
 
       {session.gitBranch && (
         <span className="inline-flex items-center gap-1" title="Branch git">

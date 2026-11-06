@@ -6,6 +6,7 @@ import type {
   CreateSessionRequest,
   ProjectPrefs,
   ResumableSession,
+  SessionAttention,
   SessionInfo,
   SessionSnapshot,
   ShellInfo
@@ -71,6 +72,10 @@ export interface AppApi {
     onData(cb: (sessionId: string, seq: number, data: string) => void): () => void
     onResize(cb: (sessionId: string, cols: number, rows: number) => void): () => void
     onExit(cb: (sessionId: string, exitCode: number) => void): () => void
+    /** S7: una sessione ha finito, chiede un permesso o aspetta una risposta. */
+    onAttention(cb: (a: SessionAttention) => void): () => void
+    /** Clic su una notifica di Windows: mostrare la sessione. */
+    onReveal(cb: (sessionId: string) => void): () => void
   }
   env: {
     claudeCli(refresh?: boolean): Promise<ClaudeCliInfo>

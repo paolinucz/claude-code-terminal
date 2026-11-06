@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Toasts } from '@/components/Toasts'
 import { useSessions } from '@/state/sessions'
 import { useTerminalSettings } from '@/state/terminalSettings'
 import { useWorkspace } from '@/state/workspace'
@@ -28,6 +29,7 @@ export function App() {
         ))}
       </main>
       <SheetTabs />
+      <Toasts />
     </div>
   )
 }

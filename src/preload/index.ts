@@ -36,7 +36,9 @@ const api: AppApi = {
     onChanged: (cb) => on('sessions:changed', cb),
     onData: (cb) => on('session:data', cb),
     onResize: (cb) => on('session:resize', cb),
-    onExit: (cb) => on('session:exit', cb)
+    onExit: (cb) => on('session:exit', cb),
+    onAttention: (cb) => on('session:attention', cb),
+    onReveal: (cb) => on('session:reveal', cb)
   },
   env: {
     claudeCli: (refresh) => ipcRenderer.invoke('env:claudeCli', refresh),

@@ -74,7 +74,9 @@ Le sessioni vivono nel processo principale, le finestre contengono solo viste. C
 
 ### Integrazione senza toccare i file dell'utente
 
-Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di ogni sessione, non scritti nei `settings.json` dell'utente o del progetto. Lo script di hook è un piccolo eseguibile Node incluso nell'app, che inoltra l'evento al processo principale tramite named pipe.
+Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di ogni sessione, non scritti nei `settings.json` dell'utente o del progetto. Il file passato a `--settings` è temporaneo e viene cancellato quando la sessione termina.
+
+*Aggiornato nella fase 3:* invece di uno script e di una named pipe si usano gli **hook HTTP** di Claude Code, che inviano l'evento in POST a un server locale dell'app (127.0.0.1, porta e token casuali a ogni avvio). La status line, che supporta solo comandi, usa `curl.exe` incluso in Windows.
 
 ### Permessi (P1–P6)
 
@@ -133,7 +135,8 @@ Le fasi 1–3 danno già un'app usabile tutti i giorni come terminale per Claude
 | ~~Popout di Dockview dentro Electron~~ | **Risolto nella fase 1.** Dockview 8 rifiuta le finestre staccate da `file://`: l'interfaccia è servita da un protocollo `app://` e le finestre si aprono con `setWindowOpenHandler`. Verificato anche il ripristino al riavvio. |
 | ~~Moduli nativi da compilare (node-pty)~~ | **Risolto nella fase 2.** node-pty 1.1 include binari precompilati per Windows che funzionano in Electron 45 senza compilare. SQLite usa `node:sqlite` integrato. Nell'installer node-pty resta fuori dall'archivio asar (`asarUnpack`). |
 | Dimensione del PTY con più viste | Prototipo nella fase 2 |
-| Dati esposti dalla status line e dagli hook di Claude Code, che possono cambiare tra versioni | Fissare una versione minima di Claude Code e testarla a ogni aggiornamento |
+| Dati esposti dalla status line e dagli hook di Claude Code, che possono cambiare tra versioni | Verificato con Claude Code 2.1.319 (fase 3). Gli hook sono di tipo HTTP verso un server locale (127.0.0.1, porta e token casuali); la status line usa `curl.exe` di Windows. Da ritestare a ogni aggiornamento importante di Claude Code. |
+| La status line dell'app nasconde i suggerimenti da tastiera di Claude Code e sostituisce un'eventuale status line dell'utente | Accettato per avere contesto, modello ed effort reali (W5). Da rivedere se diventa fastidioso: si può rendere facoltativa. |
 | Peso di jdtls (RAM, avvio, JDK) | Misurare su un progetto Maven reale |
 
 ## 7. Decisioni ancora da prendere

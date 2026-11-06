@@ -16,7 +16,13 @@ App desktop per Windows che riunisce in una finestra i terminali di Claude Code,
 - Stato sulla scheda (al lavoro / inattiva / terminata), barra di stato con modello, effort e branch git; modello ed effort si cambiano a sessione aperta.
 - Ogni progetto ricorda modello, effort e cartelle aggiuntive.
 
-Arrivano nella fase 3 (hook di Claude Code): stato «in attesa di input», notifiche (S7) e percentuale di contesto (W5).
+**Fase 3 completata**: integrazione con Claude Code tramite hook e status line.
+- Le sessioni aperte dall'app ricevono hook HTTP e una status line con `--settings` (file temporaneo): i `settings.json` dell'utente e del progetto non vengono toccati.
+- Stato preciso sulle schede (S6): al lavoro, in attesa (permesso o domanda), inattiva.
+- Notifiche (S7): toast nell'app e notifica di Windows quando l'app non è in primo piano; pallino sulla scheda e sul foglio finché non guardi la sessione; «Mostra» porta alla sessione.
+- Barra di stato (W5): modello ed effort reali (anche dopo un `/model` scritto a mano), percentuale di contesto, costo stimato nel suggerimento.
+
+Nota: con la status line attiva, Claude Code non mostra più i suoi suggerimenti da tastiera nel piè di pagina (per esempio «esc to interrupt»).
 
 Claude Code viene cercato nel PATH, poi in `%USERPROFILE%\.local\bin` (installer ufficiale), poi nella copia dell'app desktop di Claude.
 

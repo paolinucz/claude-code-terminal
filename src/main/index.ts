@@ -1,17 +1,50 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell, type WebContents } from 'electron'
-import { homedir } from 'node:os'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, shell, type WebContents } from 'electron'
+import { homedir, tmpdir } from 'node:os'
 import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SerializedLayout, Sheet } from '@shared/types'
 import type { ClaudeEffort, ClaudeModel, CreateSessionRequest, ProjectPrefs } from '@shared/sessions'
 import { AppDb } from './db'
 import { SessionManager } from './sessions/SessionManager'
+import { HookServer } from './sessions/HookServer'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
 
 const isDev = !app.isPackaged
 let db: AppDb | null = null
-const sessions = new SessionManager()
+
+// Fase 3: gli hook HTTP e la status line di Claude Code arrivano a questo server locale.
+const hookServer = new HookServer({
+  onHook: (id, event) => sessions.handleHook(id, event),
+  onStatusLine: (id, payload) => sessions.handleStatusLine(id, payload)
+})
+const sessions = new SessionManager(
+  (id) => hookServer.claudeSettings(id),
+  join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`)
+)
+
+/** S7: notifica quando una sessione finisce o chiede un permesso, anche se il suo foglio non è aperto. */
+sessions.onAttention((a) => {
+  const win = mainWindow()
+  if (!win || win.isDestroyed()) return
+  win.webContents.send('session:attention', a)
+  // Notifica di Windows solo se l'app non è in primo piano; dentro l'app ci pensa l'interfaccia.
+  if (!BrowserWindow.getFocusedWindow() && Notification.isSupported()) {
+    const titles = { finished: 'ha finito', permission: 'chiede un permesso', input: 'aspetta una risposta', error: 'si è fermata' }
+    const n = new Notification({ title: `«${a.title}» ${titles[a.kind]}`, body: a.message, silent: a.kind === 'finished' })
+    n.on('click', () => {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      win.webContents.send('session:reveal', a.sessionId)
+    })
+    n.show()
+  }
+})
+
+function mainWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().includes('popout.html'))
+}
 /** Finestre che ricevono gli aggiornamenti sull'elenco delle sessioni. */
 const sessionWatchers = new Set<WebContents>()
 
@@ -191,7 +224,7 @@ if (!primaryInstance) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    const win = BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().includes('popout.html'))
+    const win = mainWindow()
     if (win) {
       if (win.isMinimized()) win.restore()
       win.focus()
@@ -199,10 +232,18 @@ if (!primaryInstance) {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!primaryInstance) return
+  // Su Windows le notifiche richiedono un AppUserModelID (lo stesso dell'installer).
+  app.setAppUserModelId('it.coletta.claude-code-terminal')
   Menu.setApplicationMenu(null)
   serveRenderer()
+  sessions.cleanStaleSettings()
+  try {
+    await hookServer.start()
+  } catch (err) {
+    console.error('Server degli hook non avviato: stato e notifiche useranno solo l\'attività del terminale', err)
+  }
   db = new AppDb(join(app.getPath('userData'), 'claude-code-terminal.db'))
   registerIpc(db)
   createMainWindow()
@@ -212,7 +253,10 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => sessions.killAll())
+app.on('before-quit', () => {
+  sessions.killAll()
+  hookServer.stop()
+})
 
 app.on('window-all-closed', () => {
   sessions.killAll()
