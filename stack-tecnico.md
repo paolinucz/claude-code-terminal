@@ -91,6 +91,8 @@ Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di 
 - **Diff (F6).** DiffEditor di Monaco affiancato, lo stesso usato per l'editor.
 - **Rifiuto (F7).** Ripristino dello snapshot. La notifica alla sessione passa dall'hook `UserPromptSubmit`: al prompt successivo viene aggiunto un contesto del tipo «l'utente ha rifiutato la modifica a X, il file è stato ripristinato». Così non si scrive nel terminale mentre Claude lavora.
 - Nota: la modifica è già su disco quando arriva nel pannello. «Approva» la conferma, «Rifiuta» la annulla.
+- *Realizzato nella fase 4* come descritto. La risposta a `UserPromptSubmit` arriva dallo stesso server HTTP degli hook (`hookSpecificOutput.additionalContext`). Verificato con Claude Code 2.1.319: dopo un rifiuto Claude riconosce il file ripristinato.
+- Monaco 0.57 include i worker dei linguaggi (TypeScript, JSON, CSS, HTML): circa 15 MB in più nella build, caricati solo quando si apre un diff.
 
 ### Editor e language server (F1–F3)
 

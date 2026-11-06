@@ -412,6 +412,36 @@ export class SessionManager {
     if (attention) for (const l of this.attentionListeners) l(attention)
   }
 
+  /**
+   * La sessione può ricevere un messaggio scritto dall'app? Non se è terminata, e non se sta
+   * mostrando una domanda o un permesso: il testo finirebbe come risposta a quella domanda.
+   */
+  canReceivePrompt(id: string): { ok: true } | { ok: false; error: string } {
+    const s = this.sessions.get(id)
+    if (!s) return { ok: false, error: 'La sessione non è più attiva: riprendila per chiedere modifiche.' }
+    if (s.info.kind !== 'claude') return { ok: false, error: 'La sessione non è di Claude Code.' }
+    if (s.info.status === 'exited') return { ok: false, error: 'La sessione è terminata: riprendila per chiedere modifiche.' }
+    if (s.info.status === 'waiting') return { ok: false, error: 'Claude sta aspettando una tua risposta nel terminale: rispondi prima lì.' }
+    return { ok: true }
+  }
+
+  /**
+   * Scrive un messaggio nella sessione come se lo digitasse l'utente: incolla (bracketed paste, così
+   * gli a capo restano nel testo) e poi Invio. Se Claude sta lavorando, Claude Code lo mette in coda.
+   */
+  sendPrompt(id: string, text: string): void {
+    const s = this.sessions.get(id)
+    if (!s) return
+    s.write(`\x1b[200~${text.replace(/\r?\n/g, '\r')}\x1b[201~`)
+    setTimeout(() => s.write('\r'), 250)
+  }
+
+  /** Titolo e cartella di una sessione (per registrare le modifiche ai file). */
+  ref(id: string): { title: string; cwd: string } | undefined {
+    const s = this.sessions.get(id)
+    return s ? { title: s.info.title, cwd: s.info.cwd } : undefined
+  }
+
   handleStatusLine(id: string, payload: StatusLinePayload): void {
     this.sessions.get(id)?.applyStatusLine(payload)
   }

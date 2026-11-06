@@ -1,5 +1,6 @@
 import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
 import type { SessionAttention, SessionInfo } from '@shared/sessions'
+import { isOpen, type FileChange, type RevisionRequest } from '@shared/changes'
 
 /**
  * In Electron usa `window.api` (SQLite nel processo principale).
@@ -50,6 +51,7 @@ function createLocalStorageApi(): AppApi {
         write(LAYOUTS, read<NamedLayout[]>(LAYOUTS, []).filter((l) => l.id !== id))
       }
     },
+    changes: createDemoChanges(),
     settings: {
       async get(key) {
         return read<unknown>(`cct.setting.${key}`, undefined)
@@ -59,6 +61,101 @@ function createLocalStorageApi(): AppApi {
       }
     },
     ...createDemoSessions()
+  }
+}
+
+/** Modifiche finte per il browser (dal mockup): servono a provare il pannello Modifiche senza Electron. */
+function createDemoChanges(): AppApi['changes'] {
+  const before = `package it.acme.orders;
+
+public class OrderService {
+  private final OrderRepository repo;
+
+  public void cancel(Long id) {
+    Order o = repo.findById(id)
+        .orElseThrow();
+    o.setStatus("CANCELLED");
+    repo.save(o);
+  }
+}
+`
+  const after = `package it.acme.orders;
+
+public class OrderService {
+  private final OrderRepository repo;
+  private final EventPublisher events;
+
+  public void cancel(Long id) {
+    Order o = repo.findById(id)
+        .orElseThrow();
+    if (o.isShipped()) throw new
+      IllegalStateException("spedito");
+    o.setStatus(Status.CANCELLED);
+    repo.save(o); events.publish(o);
+  }
+}
+`
+  const now = new Date().toISOString()
+  const mk = (id: string, file: string, created: boolean, added: number, removed: number): FileChange => ({
+    id, sessionId: 'demo', sessionTitle: 'api-server', cwd: 'C:\\progetti\\api-server',
+    filePath: `C:\\progetti\\api-server\\src\\main\\java\\it\\acme\\orders\\${file}`, tools: ['Edit'], created,
+    status: 'pending', added, removed, requests: 0, createdAt: now, updatedAt: now
+  })
+  let list: FileChange[] = [mk('c1', 'OrderService.java', false, 5, 2), mk('c2', 'OrderRepository.java', false, 4, 1), mk('c3', 'OrderMapper.java', true, 38, 0)]
+  const afters = new Map<string, string>()
+  const requests = new Map<string, RevisionRequest[]>()
+  const bases = new Map<string, string>()
+  const listeners = new Set<(c: FileChange[]) => void>()
+  const emit = () => listeners.forEach((cb) => cb(list))
+  const decide = (id: string, status: FileChange['status']) => {
+    list = list.map((c) => (c.id === id && isOpen(c) ? { ...c, status, decidedAt: new Date().toISOString() } : c))
+    emit()
+  }
+  return {
+    async list() {
+      return list
+    },
+    async contents(id) {
+      const change = list.find((c) => c.id === id)
+      if (!change) return null
+      return {
+        change,
+        before: change.created ? '' : before,
+        after: afters.get(id) ?? after,
+        lastRequestBase: bases.get(id) ?? null,
+        requests: requests.get(id) ?? [],
+        modifiedSince: false,
+        binary: false
+      }
+    },
+    async requestRevision(id, notes) {
+      const current = afters.get(id) ?? after
+      bases.set(id, current)
+      requests.set(id, [...(requests.get(id) ?? []), { id: crypto.randomUUID(), changeId: id, notes, createdAt: new Date().toISOString() }])
+      list = list.map((c) => (c.id === id ? { ...c, status: 'revision', requests: c.requests + 1 } : c))
+      emit()
+      // Simula Claude che corregge il file seguendo le indicazioni.
+      setTimeout(() => {
+        afters.set(id, current.replace('    repo.save(o); events.publish(o);', '    repo.save(o);\n    events.publish(new OrderCancelled(o.getId()));'))
+        list = list.map((c) => (c.id === id ? { ...c, status: 'pending', added: c.added + 1, updatedAt: new Date().toISOString() } : c))
+        emit()
+      }, 2000)
+      return { ok: true }
+    },
+    async approve(id) {
+      decide(id, 'approved')
+    },
+    async approveAll() {
+      const n = list.filter((c) => c.status === 'pending').length
+      list = list.map((c) => (c.status === 'pending' ? { ...c, status: 'approved' } : c))
+      emit()
+      return n
+    },
+    async reject(id) {
+      decide(id, 'rejected')
+      return { ok: true }
+    },
+    onChanged: (cb) => (listeners.add(cb), () => listeners.delete(cb))
   }
 }
 

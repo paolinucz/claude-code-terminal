@@ -1,4 +1,5 @@
 // Tipi condivisi tra processo principale, preload e interfaccia.
+import type { ChangeContents, FileChange, RejectResult, ReviewNote, RevisionResult } from './changes'
 import type {
   ClaudeCliInfo,
   ClaudeEffort,
@@ -51,6 +52,18 @@ export interface AppApi {
     list(): Promise<NamedLayout[]>
     save(name: string, layout: SerializedLayout): Promise<NamedLayout>
     remove(id: string): Promise<void>
+  }
+  /** Modifiche di Claude ai file (F4–F7). */
+  changes: {
+    list(): Promise<FileChange[]>
+    contents(id: string): Promise<ChangeContents | null>
+    approve(id: string): Promise<void>
+    approveAll(sessionId?: string): Promise<number>
+    /** Rifiuta: ripristina il file e avvisa la sessione al prossimo prompt. */
+    reject(id: string, force?: boolean): Promise<RejectResult>
+    /** F8: invia accortezze e divieti a Claude; la modifica torna in revisione quando Claude riscrive il file. */
+    requestRevision(id: string, notes: ReviewNote[]): Promise<RevisionResult>
+    onChanged(cb: (changes: FileChange[]) => void): () => void
   }
   /** Impostazioni dell'app, salvate come JSON. */
   settings: {

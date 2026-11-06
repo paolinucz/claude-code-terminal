@@ -1,6 +1,6 @@
 # Claude Code Terminal – Requisiti funzionali
 
-Versione 0.2 · 6 novembre 2026 · Paolo Coletta
+Versione 0.3 · 6 novembre 2026 · Paolo Coletta
 
 ## 1. Visione
 
@@ -78,6 +78,7 @@ Tutto succede dentro l'app, senza aprire editor esterni. Ogni modifica di Claude
 | F5 | Il pannello Modifiche elenca i file toccati da ogni sessione, con lo stato: in attesa, approvata, rifiutata. |
 | F6 | Il diff è affiancato (prima e dopo), con i pulsanti Approva e Rifiuta per ogni file e Approva tutte. |
 | F7 | Se rifiuti, l'app ripristina la versione precedente del file e lo comunica alla sessione di Claude. |
+| F8 | Oltre ad Approva e Rifiuta c'è **Richiedi modifiche**: aggiungi accortezze (cosa fare o a cosa stare attento) e divieti (cosa non fare), anche riferiti a righe precise del diff. Le indicazioni arrivano a Claude come un tuo messaggio nella sessione; quando Claude riscrive il file, la modifica torna da rivedere e puoi di nuovo approvare, rifiutare o chiedere altre modifiche. Il diff si può confrontare con l'originale o con la versione al momento dell'ultima richiesta, e lo storico delle richieste resta visibile. |
 
 ## 7. Widget
 

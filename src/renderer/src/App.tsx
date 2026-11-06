@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Toasts } from '@/components/Toasts'
+import { useChanges } from '@/state/changes'
 import { useSessions } from '@/state/sessions'
 import { useTerminalSettings } from '@/state/terminalSettings'
 import { useWorkspace } from '@/state/workspace'
@@ -14,6 +15,7 @@ export function App() {
     void load()
     void useSessions.getState().init()
     void useTerminalSettings.getState().load()
+    void useChanges.getState().init()
   }, [load])
 
   if (!loaded) {

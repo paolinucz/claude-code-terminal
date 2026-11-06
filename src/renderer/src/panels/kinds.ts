@@ -38,7 +38,7 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     kind: 'changes',
     title: 'Modifiche',
     description: 'Ogni Edit o Write di Claude, con diff affiancato e i pulsanti Approva e Rifiuta.',
-    phase: 4,
+    phase: 0,
     requirements: 'F4–F7'
   },
   problems: {

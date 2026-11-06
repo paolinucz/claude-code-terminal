@@ -20,6 +20,15 @@ const api: AppApi = {
     save: (name, layout) => ipcRenderer.invoke('layouts:save', name, layout),
     remove: (id) => ipcRenderer.invoke('layouts:remove', id)
   },
+  changes: {
+    list: () => ipcRenderer.invoke('changes:list'),
+    contents: (id) => ipcRenderer.invoke('changes:contents', id),
+    approve: (id) => ipcRenderer.invoke('changes:approve', id),
+    approveAll: (sessionId) => ipcRenderer.invoke('changes:approveAll', sessionId),
+    reject: (id, force) => ipcRenderer.invoke('changes:reject', id, force),
+    requestRevision: (id, notes) => ipcRenderer.invoke('changes:requestRevision', id, notes),
+    onChanged: (cb) => on('changes:changed', cb)
+  },
   settings: {
     get: (key) => ipcRenderer.invoke('settings:get', key),
     set: (key, value) => ipcRenderer.invoke('settings:set', key, value)

@@ -3,6 +3,7 @@ import type { IDockviewPanelHeaderProps } from 'dockview-react'
 import { X } from 'lucide-react'
 import { ATTENTION_LABELS, STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/sessions'
 import { useWorkspace } from '@/state/workspace'
+import { pendingCount, useChanges } from '@/state/changes'
 import type { PanelParams } from './kinds'
 
 /**
@@ -14,6 +15,7 @@ export function PanelTab(props: IDockviewPanelHeaderProps<PanelParams>) {
   const sessionId = props.params.kind === 'terminal' ? props.params.sessionId : undefined
   const session = useSessions((s) => (sessionId ? s.sessions[sessionId] : undefined))
   const attention = useSessions((s) => (sessionId ? s.attention[sessionId] : undefined))
+  const pending = useChanges((s) => (props.params.kind === 'changes' ? pendingCount(s.changes) : 0))
   const attentionColor =
     attention?.kind === 'finished' ? 'var(--cct-ok)' : attention?.kind === 'error' ? 'var(--cct-danger)' : 'var(--cct-info)'
 
@@ -58,6 +60,11 @@ export function PanelTab(props: IDockviewPanelHeaderProps<PanelParams>) {
         <span className="text-[11px] text-text-faint">{session.kind === 'claude' ? 'Claude' : 'Shell'}</span>
       )}
       <span className="truncate">{title}</span>
+      {props.params.kind === 'changes' && pending > 0 && (
+        <span className="rounded-full bg-warn px-1.5 font-mono text-[10px] leading-4 font-semibold text-on-brand" title={`${pending} da rivedere`}>
+          {pending}
+        </span>
+      )}
       <button
         type="button"
         aria-label={`Chiudi ${title}`}

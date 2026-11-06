@@ -24,6 +24,16 @@ App desktop per Windows che riunisce in una finestra i terminali di Claude Code,
 
 Nota: con la status line attiva, Claude Code non mostra più i suoi suggerimenti da tastiera nel piè di pagina (per esempio «esc to interrupt»).
 
+**Fase 4 completata**: revisione delle modifiche di Claude (F4–F7).
+- Ogni Edit, Write, MultiEdit o NotebookEdit di una sessione aperta dall'app viene registrato con la versione precedente del file (hook PreToolUse, prima che Claude scriva) e quella nuova (PostToolUse). Più modifiche allo stesso file si sommano finché non decidi.
+- Pannello **Modifiche**: file raggruppati per sessione con +righe/−righe e stato; contatore sulla scheda; filtro «In attesa / Tutte».
+- Diff affiancato con Monaco (in una colonna se il pannello è stretto), con le parti invariate compresse.
+- **Approva**, **Approva sessione**, **Approva tutte**. **Rifiuta** ripristina il file (o lo cancella se l'aveva creato Claude) e Claude lo viene a sapere al messaggio successivo. Se il file è cambiato dopo la modifica di Claude, l'app chiede conferma prima di sovrascriverlo.
+- **Richiedi modifiche** (F8): accortezze e divieti, anche su righe selezionate nel diff, inviati a Claude come tuo messaggio nella sessione. Quando Claude riscrive il file, la modifica torna «da rivedere»; il diff può mostrare solo cosa è cambiato dall'ultima richiesta e lo storico delle richieste resta consultabile. Non si può inviare se la sessione è terminata o se Claude sta aspettando una tua risposta nel terminale.
+- Le versioni dei file stanno in `%APPDATA%\Claude Code Terminal\snapshots`; le modifiche decise vengono dimenticate dopo 30 giorni.
+
+Le modifiche fatte da Claude con comandi di shell (per esempio `sed` o `git checkout`) non passano dagli strumenti di modifica e quindi non compaiono nel pannello.
+
 Claude Code viene cercato nel PATH, poi in `%USERPROFILE%\.local\bin` (installer ufficiale), poi nella copia dell'app desktop di Claude.
 
 ## Comandi

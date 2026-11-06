@@ -4,9 +4,11 @@ import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SerializedLayout, Sheet } from '@shared/types'
 import type { ClaudeEffort, ClaudeModel, CreateSessionRequest, ProjectPrefs } from '@shared/sessions'
+import type { ReviewNote, RevisionResult } from '@shared/changes'
 import { AppDb } from './db'
 import { SessionManager } from './sessions/SessionManager'
 import { HookServer } from './sessions/HookServer'
+import { ChangeTracker } from './changes/ChangeTracker'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
 
@@ -15,9 +17,18 @@ let db: AppDb | null = null
 
 // Fase 3: gli hook HTTP e la status line di Claude Code arrivano a questo server locale.
 const hookServer = new HookServer({
-  onHook: (id, event) => sessions.handleHook(id, event),
+  onHook: (id, event) => {
+    // Fase 4: prima registra la modifica (PreToolUse deve leggere il file prima che Claude scriva).
+    const context = changes?.onHook(id, sessions.ref(id), event) ?? null
+    sessions.handleHook(id, event)
+    if (context && event.hook_event_name === 'UserPromptSubmit') {
+      return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } }
+    }
+  },
   onStatusLine: (id, payload) => sessions.handleStatusLine(id, payload)
 })
+/** Fase 4: modifiche di Claude ai file (creato quando il database è pronto). */
+let changes: ChangeTracker | null = null
 const sessions = new SessionManager(
   (id) => hookServer.claudeSettings(id),
   join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`)
@@ -158,6 +169,24 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('layouts:save', (_e, name: string, layout: SerializedLayout) => store.saveLayout(name, layout))
   ipcMain.handle('layouts:remove', (_e, id: string) => store.removeLayout(id))
 
+  // ---- Modifiche di Claude (F4–F7) ----
+  ipcMain.handle('changes:list', () => changes?.list() ?? [])
+  ipcMain.handle('changes:contents', (_e, id: string) => changes?.contents(id) ?? null)
+  ipcMain.handle('changes:approve', (_e, id: string) => changes?.approve(id))
+  ipcMain.handle('changes:approveAll', (_e, sessionId?: string) => changes?.approveAll(sessionId) ?? 0)
+  ipcMain.handle('changes:reject', (_e, id: string, force?: boolean) => changes?.reject(id, force) ?? { ok: false })
+  // F8: richiedi modifiche: le indicazioni vanno a Claude come messaggio nella sua sessione.
+  ipcMain.handle('changes:requestRevision', (_e, id: string, notes: ReviewNote[]): RevisionResult => {
+    const contents = changes?.contents(id)
+    if (!changes || !contents) return { ok: false, error: 'Modifica non trovata.' }
+    const can = sessions.canReceivePrompt(contents.change.sessionId)
+    if (!can.ok) return can
+    const res = changes.requestRevision(id, notes)
+    if (!res.ok) return res
+    sessions.sendPrompt(res.sessionId, res.message)
+    return { ok: true }
+  })
+
   ipcMain.handle('settings:get', (_e, key: string) => store.getSetting(key))
   ipcMain.handle('settings:set', (_e, key: string, value: unknown) => store.setSetting(key, value))
 
@@ -245,6 +274,11 @@ app.whenReady().then(async () => {
     console.error('Server degli hook non avviato: stato e notifiche useranno solo l\'attività del terminale', err)
   }
   db = new AppDb(join(app.getPath('userData'), 'claude-code-terminal.db'))
+  changes = new ChangeTracker(db, join(app.getPath('userData'), 'snapshots'), () => {
+    const win = mainWindow()
+    if (win && !win.isDestroyed() && changes) win.webContents.send('changes:changed', changes.list())
+  })
+  changes.cleanup()
   registerIpc(db)
   createMainWindow()
 

@@ -26,7 +26,8 @@ export interface StatusLinePayload {
 }
 
 type Handler = {
-  onHook(appSessionId: string, event: HookEvent): void
+  /** Può restituire un oggetto JSON come risposta all'hook (es. additionalContext per UserPromptSubmit). */
+  onHook(appSessionId: string, event: HookEvent): Record<string, unknown> | void
   onStatusLine(appSessionId: string, payload: StatusLinePayload): void
 }
 
@@ -66,14 +67,18 @@ export class HookServer {
         } catch {
           // corpo non valido: si ignora
         }
+        let reply: Record<string, unknown> | void = undefined
         try {
           if (body && typeof body === 'object') {
-            if (kind === 'hook') this.handler.onHook(appSessionId, body as HookEvent)
+            if (kind === 'hook') reply = this.handler.onHook(appSessionId, body as HookEvent)
             else this.handler.onStatusLine(appSessionId, body as StatusLinePayload)
           }
+        } catch (err) {
+          console.error('Errore nella gestione di un hook', err)
         } finally {
           // Risposta vuota: per gli hook significa «nessuna decisione», per la status line «niente da mostrare».
-          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end('')
+          if (reply) res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(reply))
+          else res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end('')
         }
       })
     })
@@ -105,6 +110,7 @@ export class HookServer {
       'UserPromptSubmit',
       'PreToolUse',
       'PostToolUse',
+      'PostToolUseFailure',
       'PermissionRequest',
       'Notification',
       'Stop',
