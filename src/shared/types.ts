@@ -1,5 +1,6 @@
 // Tipi condivisi tra processo principale, preload e interfaccia.
 import type { ChangeContents, FileChange, RejectResult, ReviewNote, RevisionResult } from './changes'
+import type { ExternalChange, PermissionScope, PermissionsState, SaveResult, ScopeData } from './permissions'
 import type {
   ClaudeCliInfo,
   ClaudeEffort,
@@ -64,6 +65,13 @@ export interface AppApi {
     /** F8: invia accortezze e divieti a Claude; la modifica torna in revisione quando Claude riscrive il file. */
     requestRevision(id: string, notes: ReviewNote[]): Promise<RevisionResult>
     onChanged(cb: (changes: FileChange[]) => void): () => void
+  }
+  /** Permessi di Claude Code nei tre file di impostazioni (P1–P6). */
+  permissions: {
+    /** Legge i tre ambiti e inizia a osservarne i file (una cartella di progetto alla volta). */
+    read(cwd: string): Promise<PermissionsState | null>
+    save(cwd: string, scope: PermissionScope, data: ScopeData): Promise<SaveResult>
+    onExternalChange(cb: (change: ExternalChange) => void): () => void
   }
   /** Impostazioni dell'app, salvate come JSON. */
   settings: {

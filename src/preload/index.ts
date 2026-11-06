@@ -29,6 +29,11 @@ const api: AppApi = {
     requestRevision: (id, notes) => ipcRenderer.invoke('changes:requestRevision', id, notes),
     onChanged: (cb) => on('changes:changed', cb)
   },
+  permissions: {
+    read: (cwd) => ipcRenderer.invoke('permissions:read', cwd),
+    save: (cwd, scope, data) => ipcRenderer.invoke('permissions:save', cwd, scope, data),
+    onExternalChange: (cb) => on('permissions:external', cb)
+  },
   settings: {
     get: (key) => ipcRenderer.invoke('settings:get', key),
     set: (key, value) => ipcRenderer.invoke('settings:set', key, value)

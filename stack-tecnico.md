@@ -83,6 +83,7 @@ Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di 
 - Lettura e scrittura diretta dei tre file, con validazione dello schema prima di salvare e anteprima del JSON (P5).
 - chokidar osserva i file. Una modifica esterna o un «Sì, e ricorda» nel terminale (P3) ricarica l'elenco e mostra il diff (P6).
 - Si riscrive solo la sezione `permissions`, conservando il resto del file com'è.
+- *Realizzato nella fase 5.* Invece di chokidar si usa `fs.watchFile` (controllo ogni secondo) sui tre file: funziona anche se il file o la cartella `.claude` non esistono, senza crearli nel progetto. I file non hanno metadati, quindi origine e data delle regole stanno in SQLite (`permission_meta`). «Salvata dal terminale» è una deduzione: una regola nuova comparsa mentre una sessione di Claude dell'app è aperta in quel progetto; altrimenti è «aggiunta fuori dall'app».
 
 ### Modifiche di Claude (F4–F7)
 

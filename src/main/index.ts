@@ -9,6 +9,8 @@ import { AppDb } from './db'
 import { SessionManager } from './sessions/SessionManager'
 import { HookServer } from './sessions/HookServer'
 import { ChangeTracker } from './changes/ChangeTracker'
+import { PermissionsService } from './permissions/PermissionsService'
+import type { PermissionScope, ScopeData } from '@shared/permissions'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
 
@@ -29,6 +31,8 @@ const hookServer = new HookServer({
 })
 /** Fase 4: modifiche di Claude ai file (creato quando il database è pronto). */
 let changes: ChangeTracker | null = null
+/** Fase 5: file dei permessi di Claude Code. */
+let permissions: PermissionsService | null = null
 const sessions = new SessionManager(
   (id) => hookServer.claudeSettings(id),
   join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`)
@@ -187,6 +191,16 @@ function registerIpc(store: AppDb): void {
     return { ok: true }
   })
 
+  // ---- Permessi di Claude Code (P1–P6) ----
+  ipcMain.handle('permissions:read', (_e, cwd: string) => {
+    if (!permissions) return null
+    permissions.watch(cwd)
+    return permissions.read(cwd)
+  })
+  ipcMain.handle('permissions:save', (_e, cwd: string, scope: PermissionScope, data: ScopeData) =>
+    permissions?.save(cwd, scope, data) ?? { ok: false, error: 'Servizio non pronto' }
+  )
+
   ipcMain.handle('settings:get', (_e, key: string) => store.getSetting(key))
   ipcMain.handle('settings:set', (_e, key: string, value: unknown) => store.setSetting(key, value))
 
@@ -279,6 +293,14 @@ app.whenReady().then(async () => {
     if (win && !win.isDestroyed() && changes) win.webContents.send('changes:changed', changes.list())
   })
   changes.cleanup()
+  permissions = new PermissionsService(
+    db,
+    (cwd) => sessions.list().some((s) => s.kind === 'claude' && s.status !== 'exited' && s.cwd.toLowerCase() === cwd.toLowerCase()),
+    (change) => {
+      const win = mainWindow()
+      if (win && !win.isDestroyed()) win.webContents.send('permissions:external', change)
+    }
+  )
   registerIpc(db)
   createMainWindow()
 

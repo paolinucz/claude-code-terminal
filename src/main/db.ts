@@ -137,6 +137,42 @@ export class AppDb {
         `)
       })
     }
+    if (version < 5) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE permission_meta (
+            file      TEXT NOT NULL COLLATE NOCASE,
+            rule      TEXT NOT NULL,
+            decision  TEXT NOT NULL,
+            origin    TEXT NOT NULL,
+            added_at  TEXT,
+            PRIMARY KEY (file, rule, decision)
+          );
+          PRAGMA user_version = 5;
+        `)
+      })
+    }
+  }
+
+  // ---- Origine delle regole dei permessi (P3) ----
+
+  permissionMeta(file: string): Map<string, { origin: string; addedAt: string | null }> {
+    const rows = this.db.prepare('SELECT rule, decision, origin, added_at FROM permission_meta WHERE file = ?').all(file) as {
+      rule: string
+      decision: string
+      origin: string
+      added_at: string | null
+    }[]
+    return new Map(rows.map((r) => [`${r.decision}\u0000${r.rule}`, { origin: r.origin, addedAt: r.added_at }]))
+  }
+
+  setPermissionMeta(file: string, rule: string, decision: string, origin: string, addedAt: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO permission_meta (file, rule, decision, origin, added_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(file, rule, decision) DO UPDATE SET origin = excluded.origin, added_at = excluded.added_at`
+      )
+      .run(file, rule, decision, origin, addedAt)
   }
 
   // ---- Richieste di modifiche (F8) ----

@@ -32,6 +32,15 @@ Nota: con la status line attiva, Claude Code non mostra più i suoi suggerimenti
 - **Richiedi modifiche** (F8): accortezze e divieti, anche su righe selezionate nel diff, inviati a Claude come tuo messaggio nella sessione. Quando Claude riscrive il file, la modifica torna «da rivedere»; il diff può mostrare solo cosa è cambiato dall'ultima richiesta e lo storico delle richieste resta consultabile. Non si può inviare se la sessione è terminata o se Claude sta aspettando una tua risposta nel terminale.
 - Le versioni dei file stanno in `%APPDATA%\Claude Code Terminal\snapshots`; le modifiche decise vengono dimenticate dopo 30 giorni.
 
+**Fase 5 completata**: schermata Permessi (P1–P6), come pannello (pulsante «Permessi» nella barra in alto: si apre sul progetto del terminale attivo).
+- Tre ambiti, ognuno con il suo file: Locale (`.claude\settings.local.json`), Progetto (`.claude\settings.json`), Utente (`~\.claude\settings.json`).
+- Ogni regola: Consenti, Chiedi, Nega o Revoca; «Nuova regola» con strumento, specificatore e anteprima; ricerca.
+- Origine e data di ogni regola: salvata dal terminale, aggiunta a mano, aggiunta fuori dall'app, già presente / condivisa col team / tutti i progetti.
+- Cartelle aggiuntive (`additionalDirectories`) per ambito.
+- Le modifiche si salvano con «Salva» dopo averle viste nell'anteprima del file, con le righe cambiate evidenziate. Le altre chiavi del file restano com'erano.
+- Se un file cambia fuori dall'app (per esempio «Sì, e ricorda» nel terminale), il pannello si aggiorna e mostra cosa è cambiato; se avevi modifiche non salvate in quell'ambito ti chiede se ricaricare o tenere le tue.
+- Un file con JSON non valido viene mostrato in sola lettura, con l'errore.
+
 Le modifiche fatte da Claude con comandi di shell (per esempio `sed` o `git checkout`) non passano dagli strumenti di modifica e quindi non compaiono nel pannello.
 
 Claude Code viene cercato nel PATH, poi in `%USERPROFILE%\.local\bin` (installer ufficiale), poi nella copia dell'app desktop di Claude.

@@ -1,7 +1,7 @@
 import type { ClaudeEffort, ClaudeModel, SessionKind, ShellId } from '@shared/sessions'
 
 /** Tipi di pannello (L2). Nella fase 1 sono segnaposto: i contenuti veri arrivano nelle fasi indicate. */
-export type PanelKind = 'terminal' | 'explorer' | 'editor' | 'changes' | 'problems' | 'widgets'
+export type PanelKind = 'terminal' | 'explorer' | 'editor' | 'changes' | 'problems' | 'widgets' | 'permissions'
 
 export interface PanelKindInfo {
   kind: PanelKind
@@ -48,6 +48,13 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     phase: 6,
     requirements: 'F3'
   },
+  permissions: {
+    kind: 'permissions',
+    title: 'Permessi',
+    description: 'Regole di Claude Code nei file Locale, Progetto e Utente, con anteprima prima di salvare.',
+    phase: 0,
+    requirements: 'P1–P6'
+  },
   widgets: {
     kind: 'widgets',
     title: 'Widget',
@@ -77,4 +84,6 @@ export interface PanelParams {
   sessionId?: string
   /** Solo terminali: dati dell'ultima sessione mostrata, per «Riprendi». */
   hint?: SessionHint
+  /** Solo permessi: cartella del progetto. */
+  cwd?: string
 }

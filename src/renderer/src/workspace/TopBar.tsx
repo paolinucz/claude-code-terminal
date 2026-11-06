@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SerializedDockview } from 'dockview-react'
-import { ChevronDown, LayoutGrid, Plus, Search, SquareTerminal } from 'lucide-react'
+import { ChevronDown, LayoutGrid, Plus, Search, ShieldCheck, SquareTerminal } from 'lucide-react'
+import type { PanelParams } from '@/panels/kinds'
+import { useSessions } from '@/state/sessions'
 import type { NamedLayout } from '@shared/types'
 import { api } from '@/lib/api'
 import { PANEL_KIND_LIST } from '@/panels/kinds'
@@ -61,6 +63,26 @@ export function TopBar() {
   }, [])
 
   const dock = () => (activeSheet ? dockRegistry.get(activeSheet.id) : undefined)
+
+  /**
+   * L6: i permessi sono un pannello. Se nel foglio ce n'è già uno lo attiva; altrimenti lo apre sul
+   * progetto del terminale attivo (o di un terminale qualsiasi del foglio).
+   */
+  const openPermissions = () => {
+    const d = dock()
+    if (!d) return
+    const existing = d.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'permissions')
+    if (existing) {
+      existing.api.setActive()
+      return
+    }
+    const sessions = useSessions.getState().sessions
+    const terminals = d.panels.filter((p) => (p.params as PanelParams | undefined)?.kind === 'terminal')
+    const active = terminals.find((p) => p.api.isActive) ?? terminals.find((p) => p.api.isVisible) ?? terminals[0]
+    const sessionId = (active?.params as PanelParams | undefined)?.sessionId
+    const cwd = (sessionId && sessions[sessionId]?.cwd) || (active?.params as PanelParams | undefined)?.hint?.cwd
+    addPanel(d, 'permissions', { params: cwd ? { cwd } : {} })
+  }
 
   const applyLayout = (layout: NamedLayout) => {
     const d = dock()
@@ -175,8 +197,8 @@ export function TopBar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <button type="button" className={buttonClass} disabled title="In arrivo nella fase 5">
-          Permessi
+        <button type="button" className={buttonClass} onClick={openPermissions} title="Permessi di Claude Code per il progetto del terminale attivo">
+          <ShieldCheck size={14} /> Permessi
         </button>
         <button type="button" className={buttonClass} disabled title="In arrivo nella fase 7">
           <Plus size={14} /> Widget

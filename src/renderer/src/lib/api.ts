@@ -1,6 +1,15 @@
 import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
 import type { SessionAttention, SessionInfo } from '@shared/sessions'
 import { isOpen, type FileChange, type RevisionRequest } from '@shared/changes'
+import type {
+  Decision,
+  ExternalChange,
+  PermissionRule,
+  PermissionScope,
+  PermissionsState,
+  RuleOrigin,
+  ScopeData
+} from '@shared/permissions'
 
 /**
  * In Electron usa `window.api` (SQLite nel processo principale).
@@ -52,6 +61,7 @@ function createLocalStorageApi(): AppApi {
       }
     },
     changes: createDemoChanges(),
+    permissions: createDemoPermissions(),
     settings: {
       async get(key) {
         return read<unknown>(`cct.setting.${key}`, undefined)
@@ -61,6 +71,72 @@ function createLocalStorageApi(): AppApi {
       }
     },
     ...createDemoSessions()
+  }
+}
+
+/**
+ * Permessi finti per il browser (regole del mockup). `window.__demoRemember()` simula un
+ * «Sì, e ricorda» dal terminale, per provare l'aggiornamento automatico (P3, P6).
+ */
+function createDemoPermissions(): AppApi['permissions'] {
+  const day = (d: number) => new Date(Date.now() - d * 86400000).toISOString()
+  const files: Record<PermissionScope, { data: ScopeData; meta: Record<string, { origin: RuleOrigin; addedAt?: string }>; other: Record<string, unknown> }> = {
+    local: {
+      data: { allow: ['Read(..\\shared-lib\\**)', 'Bash(npm run test:*)', 'WebFetch(domain:docs.github.com)'], ask: ['Edit(D:\\docs\\specifiche\\**)'], deny: [], additionalDirectories: ['..\\shared-lib', 'D:\\docs\\specifiche'] },
+      meta: {
+        'allow:Read(..\\shared-lib\\**)': { origin: 'terminal', addedAt: new Date().toISOString() },
+        'allow:Bash(npm run test:*)': { origin: 'terminal', addedAt: day(4) },
+        'allow:WebFetch(domain:docs.github.com)': { origin: 'terminal', addedAt: day(5) },
+        'ask:Edit(D:\\docs\\specifiche\\**)': { origin: 'manual', addedAt: day(6) }
+      },
+      other: {}
+    },
+    project: { data: { allow: ['Bash(npm run lint)'], ask: [], deny: ['Bash(git push:*)', 'Read(.env*)'], additionalDirectories: [] }, meta: {}, other: { env: { NODE_ENV: 'development' } } },
+    user: { data: { allow: ['Bash(git status)'], ask: [], deny: ['Bash(rm -rf:*)'], additionalDirectories: [] }, meta: {}, other: { theme: 'dark' } }
+  }
+  const paths: Record<PermissionScope, string> = {
+    local: 'C:\\progetti\\api-server\\.claude\\settings.local.json',
+    project: 'C:\\progetti\\api-server\\.claude\\settings.json',
+    user: 'C:\\Users\\demo\\.claude\\settings.json'
+  }
+  const listeners = new Set<(c: ExternalChange) => void>()
+  let lastCwd = 'C:\\progetti\\api-server'
+  const raw = (scope: PermissionScope) => {
+    const f = files[scope]
+    const permissions: Record<string, string[]> = {}
+    for (const k of ['allow', 'ask', 'deny', 'additionalDirectories'] as const) if (f.data[k].length) permissions[k] = f.data[k]
+    return JSON.stringify({ ...f.other, ...(Object.keys(permissions).length ? { permissions } : {}) }, null, 2) + '\n'
+  }
+  const state = (cwd: string): PermissionsState => ({
+    cwd,
+    scopes: (['local', 'project', 'user'] as PermissionScope[]).map((scope) => {
+      const f = files[scope]
+      const rules: PermissionRule[] = (['allow', 'ask', 'deny'] as Decision[]).flatMap((decision) =>
+        f.data[decision].map((rule) => ({ rule, decision, origin: f.meta[`${decision}:${rule}`]?.origin ?? 'existing', addedAt: f.meta[`${decision}:${rule}`]?.addedAt }))
+      )
+      return { scope, path: paths[scope], exists: true, rules, additionalDirectories: f.data.additionalDirectories, raw: raw(scope) }
+    })
+  })
+  ;(window as unknown as { __demoRemember: () => void }).__demoRemember = () => {
+    const rule = 'Bash(mvn test:*)'
+    files.local.data.allow = [...files.local.data.allow, rule]
+    files.local.meta[`allow:${rule}`] = { origin: 'terminal', addedAt: new Date().toISOString() }
+    const change: ExternalChange = { cwd: lastCwd, scope: 'local', path: paths.local, added: [{ rule, decision: 'allow' }], removed: [], directoriesAdded: [], directoriesRemoved: [], fromTerminal: true }
+    listeners.forEach((cb) => cb(change))
+  }
+  return {
+    async read(cwd) {
+      lastCwd = cwd
+      return state(cwd)
+    },
+    async save(_cwd, scope, data) {
+      const f = files[scope]
+      const now = new Date().toISOString()
+      for (const d of ['allow', 'ask', 'deny'] as Decision[]) for (const r of data[d]) if (!f.data[d].includes(r)) f.meta[`${d}:${r}`] = { origin: 'manual', addedAt: now }
+      f.data = data
+      return { ok: true }
+    },
+    onExternalChange: (cb) => (listeners.add(cb), () => listeners.delete(cb))
   }
 }
 
