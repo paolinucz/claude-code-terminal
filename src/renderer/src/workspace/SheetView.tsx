@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef } from 'react'
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type SerializedDockview } from 'dockview-react'
 import type { Sheet } from '@shared/types'
 import { api } from '@/lib/api'
-import { PlaceholderPanel } from '@/panels/PlaceholderPanel'
+import { PanelHost } from '@/panels/PanelHost'
+import { PanelTab } from '@/panels/PanelTab'
 import { useWorkspace } from '@/state/workspace'
 import { GroupActions } from './GroupActions'
 import { EmptySheet } from './EmptySheet'
@@ -10,7 +11,7 @@ import { buildDefaultLayout } from './panels'
 import { dockRegistry } from './registry'
 import { cctDockTheme } from './theme'
 
-const components = { placeholder: PlaceholderPanel }
+const components = { placeholder: PanelHost }
 
 const SAVE_DELAY_MS = 400
 
@@ -51,7 +52,11 @@ export function SheetView({ sheet, active }: { sheet: Sheet; active: boolean }) 
         window.clearTimeout(saveTimer.current)
         saveTimer.current = window.setTimeout(() => {
           void api.workspace.saveSheetLayout(sheet.id, dock.toJSON() as unknown as Record<string, unknown>)
-          setStatus(`Layout «${sheetRef.current.name}» · salvato automaticamente`)
+          // Il salvataggio automatico non copre messaggi più importanti (es. «inviata a Debug»).
+          const current = useWorkspace.getState().status
+          if (!current || current.endsWith('salvato automaticamente')) {
+            setStatus(`Layout «${sheetRef.current.name}» · salvato automaticamente`)
+          }
         }, SAVE_DELAY_MS)
       })
     },
@@ -77,6 +82,7 @@ export function SheetView({ sheet, active }: { sheet: Sheet; active: boolean }) 
         className="h-full"
         theme={cctDockTheme}
         components={components}
+        defaultTabComponent={PanelTab}
         onReady={onReady}
         rightHeaderActionsComponent={GroupActions}
         watermarkComponent={EmptySheet}

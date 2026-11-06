@@ -10,6 +10,24 @@ import {
   ContextMenuTrigger
 } from '@/components/ui-kit'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { getPanelData } from 'dockview-react'
+import type { PanelParams } from '@/panels/kinds'
+import { moveTerminalToSheet } from './panels'
+import { dockRegistry } from './registry'
+
+/** Il pannello che Dockview sta trascinando, se è un terminale con una sessione. */
+function draggedTerminal(): { sheetId: string; panelId: string; title: string } | undefined {
+  const data = getPanelData()
+  if (!data?.panelId) return undefined
+  for (const sheet of useWorkspace.getState().sheets) {
+    const panel = dockRegistry.get(sheet.id)?.getPanel(data.panelId)
+    const params = panel?.params as PanelParams | undefined
+    if (panel && params?.kind === 'terminal' && params.sessionId) {
+      return { sheetId: sheet.id, panelId: panel.id, title: panel.title ?? 'Terminale' }
+    }
+  }
+  return undefined
+}
 
 /** Schede dei fogli in basso, come in Excel (L1): crea, rinomina, riordina, chiudi. */
 export function SheetTabs() {
@@ -18,6 +36,8 @@ export function SheetTabs() {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [closing, setClosing] = useState<Sheet | null>(null)
+  const [panelDropSheet, setPanelDropSheet] = useState<string | null>(null)
+  const setStatus = useWorkspace((s) => s.setStatus)
 
   const panelCounts = useWorkspace((s) => s.panelCounts)
   const requestClose = (sheet: Sheet) => {
@@ -53,13 +73,31 @@ export function SheetTabs() {
                     e.dataTransfer.setData('text/x-cct-sheet', sheet.id)
                   }}
                   onDragOver={(e) => {
-                    if (!dragId) return
+                    if (!dragId) {
+                      // S5: un terminale trascinato da un pannello si può lasciare su un altro foglio.
+                      const dragged = draggedTerminal()
+                      if (dragged && dragged.sheetId !== sheet.id) {
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        setPanelDropSheet(sheet.id)
+                      }
+                      return
+                    }
                     e.preventDefault()
                     const rect = e.currentTarget.getBoundingClientRect()
                     setDropIndex(e.clientX < rect.left + rect.width / 2 ? index : index + 1)
                   }}
+                  onDragLeave={() => setPanelDropSheet((s) => (s === sheet.id ? null : s))}
                   onDrop={(e) => {
                     e.preventDefault()
+                    const dragged = !dragId ? draggedTerminal() : undefined
+                    setPanelDropSheet(null)
+                    if (dragged && dragged.sheetId !== sheet.id) {
+                      if (moveTerminalToSheet(dragged.sheetId, dragged.panelId, sheet.id)) {
+                        setStatus(`«${dragged.title}» spostata in ${sheet.name} — la sessione continua`)
+                      }
+                      return
+                    }
                     if (dragId && dropIndex !== null) {
                       const from = sheets.findIndex((s) => s.id === dragId)
                       moveSheet(dragId, dropIndex > from ? dropIndex - 1 : dropIndex)
@@ -77,6 +115,7 @@ export function SheetTabs() {
                       ? 'bg-background font-semibold text-foreground shadow-[inset_0_-2px_0_var(--cct-accent)]'
                       : 'font-medium text-text-muted hover:bg-surface-2 hover:text-foreground',
                     dragId === sheet.id ? 'opacity-50' : '',
+                    panelDropSheet === sheet.id ? 'bg-brand/15 text-foreground outline outline-1 outline-brand' : '',
                     dropIndex === index ? 'shadow-[inset_2px_0_0_var(--cct-accent)]' : '',
                     dropIndex === index + 1 && index === sheets.length - 1 ? 'shadow-[inset_-2px_0_0_var(--cct-accent)]' : ''
                   ].join(' ')}

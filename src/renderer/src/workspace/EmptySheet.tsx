@@ -1,6 +1,6 @@
 import type { IWatermarkPanelProps } from 'dockview-react'
 import { PANEL_KIND_LIST } from '@/panels/kinds'
-import { addPanel, nextTerminalTitle } from './panels'
+import { addPanel } from './panels'
 
 /** Filigrana di un foglio senza pannelli: propone i pannelli da aggiungere (L2). */
 export function EmptySheet({ containerApi }: IWatermarkPanelProps) {
@@ -14,9 +14,7 @@ export function EmptySheet({ containerApi }: IWatermarkPanelProps) {
             <button
               key={k.kind}
               type="button"
-              onClick={() =>
-                addPanel(containerApi, k.kind, k.kind === 'terminal' ? { title: nextTerminalTitle(containerApi) } : {})
-              }
+              onClick={() => addPanel(containerApi, k.kind)}
               className="min-h-8 rounded-lg border border-border px-3 text-text-muted transition-colors hover:border-brand hover:text-foreground"
             >
               + {k.title}

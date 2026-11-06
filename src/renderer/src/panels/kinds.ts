@@ -1,3 +1,5 @@
+import type { ClaudeEffort, ClaudeModel, SessionKind, ShellId } from '@shared/sessions'
+
 /** Tipi di pannello (L2). Nella fase 1 sono segnaposto: i contenuti veri arrivano nelle fasi indicate. */
 export type PanelKind = 'terminal' | 'explorer' | 'editor' | 'changes' | 'problems' | 'widgets'
 
@@ -15,7 +17,7 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     kind: 'terminal',
     title: 'Terminale',
     description: 'Sessione Claude Code o shell (Git Bash, PowerShell, WSL). La sessione vive nel processo principale: il pannello è solo una vista.',
-    phase: 2,
+    phase: 0,
     requirements: 'S1–S9, W1–W5'
   },
   explorer: {
@@ -57,6 +59,22 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
 
 export const PANEL_KIND_LIST: PanelKindInfo[] = Object.values(PANEL_KINDS)
 
+/** Quanto serve per riaprire una sessione quando il processo non c'è più (per esempio dopo un riavvio). */
+export interface SessionHint {
+  kind: SessionKind
+  title: string
+  cwd: string
+  claudeSessionId?: string
+  shell?: ShellId
+  model?: ClaudeModel
+  effort?: ClaudeEffort
+  addDirs?: string[]
+}
+
 export interface PanelParams {
   kind: PanelKind
+  /** Solo terminali: la sessione mostrata dal pannello. */
+  sessionId?: string
+  /** Solo terminali: dati dell'ultima sessione mostrata, per «Riprendi». */
+  hint?: SessionHint
 }

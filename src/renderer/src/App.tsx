@@ -1,4 +1,6 @@
 import { useEffect } from 'react'
+import { useSessions } from '@/state/sessions'
+import { useTerminalSettings } from '@/state/terminalSettings'
 import { useWorkspace } from '@/state/workspace'
 import { SheetTabs } from '@/workspace/SheetTabs'
 import { SheetView } from '@/workspace/SheetView'
@@ -9,6 +11,8 @@ export function App() {
 
   useEffect(() => {
     void load()
+    void useSessions.getState().init()
+    void useTerminalSettings.getState().load()
   }, [load])
 
   if (!loaded) {

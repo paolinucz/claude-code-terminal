@@ -1,22 +1,46 @@
 import { useEffect, useState } from 'react'
 import type { IDockviewHeaderActionsProps } from 'dockview-react'
-import { AppWindow, PanelTopOpen, PictureInPicture2, X } from 'lucide-react'
+import { AppWindow, ChevronDown, PanelTopOpen, PictureInPicture2, X } from 'lucide-react'
 import { IconButton } from '@/components/IconButton'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+  PortalScope
+} from '@/components/ui-kit'
+import type { PanelParams } from '@/panels/kinds'
+import { useWorkspace } from '@/state/workspace'
+import { moveTerminalToSheet, sheetOfPanel } from './panels'
 
 /** 'edge' sono i gruppi agganciati ai bordi (Dockview 8): li trattiamo come la griglia. */
 type Location = 'grid' | 'edge' | 'floating' | 'popout'
 
 /**
- * Pulsanti in alto a destra di ogni gruppo di pannelli (L4):
- * agganciato → fluttuante / finestra separata; fluttuante o staccato → riaggancia.
+ * Pulsanti in alto a destra di ogni gruppo di pannelli:
+ * «Invia a…» per i terminali (S4), fluttuante / finestra separata / riaggancia (L4), chiudi.
  */
 export function GroupActions({ api, containerApi, group }: IDockviewHeaderActionsProps) {
   const [location, setLocation] = useState<Location>(api.location.type)
+  const sheets = useWorkspace((s) => s.sheets)
+  const setStatus = useWorkspace((s) => s.setStatus)
+  // Le intestazioni non vengono ridisegnate quando cambiano i parametri del pannello attivo: lo facciamo noi.
+  const [, refresh] = useState(0)
+  const activePanel = group.activePanel
 
   useEffect(() => {
-    const sub = api.onDidLocationChange((e) => setLocation(e.location.type))
-    return () => sub.dispose()
+    const subs = [
+      api.onDidLocationChange((e) => setLocation(e.location.type)),
+      api.onDidActivePanelChange(() => refresh((n) => n + 1))
+    ]
+    return () => subs.forEach((s) => s.dispose())
   }, [api])
+
+  useEffect(() => {
+    const sub = activePanel?.api.onDidParametersChange(() => refresh((n) => n + 1))
+    return () => sub?.dispose()
+  }, [activePanel])
 
   const float = () => {
     const box = group.element.getBoundingClientRect()
@@ -41,36 +65,71 @@ export function GroupActions({ api, containerApi, group }: IDockviewHeaderAction
     for (const panel of [...group.panels]) panel.api.close()
   }
 
+  const params = activePanel?.params as PanelParams | undefined
+  const canSend = params?.kind === 'terminal' && Boolean(params.sessionId)
+  const currentSheet = canSend ? sheetOfPanel(containerApi) : undefined
+  const targets = sheets.filter((s) => s.id !== currentSheet)
+
   return (
-    <div className="flex h-full items-center gap-0.5 px-1">
-      {(location === 'grid' || location === 'edge') && (
-        <>
-          <IconButton label="Rendi fluttuante" onClick={float}>
-            <PictureInPicture2 size={14} />
-          </IconButton>
-          <IconButton label="Stacca in una nuova finestra" onClick={popout}>
-            <AppWindow size={14} />
-          </IconButton>
-        </>
-      )}
-      {location === 'floating' && (
-        <>
-          <IconButton label="Riaggancia nel layout" onClick={dock}>
+    <PortalScope>
+      <div className="flex h-full items-center gap-0.5 px-1">
+        {canSend && currentSheet && targets.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="mr-1 inline-flex h-6 items-center gap-1 rounded-md border border-border px-2 text-[12px] text-text-muted transition-colors hover:bg-border hover:text-foreground data-[state=open]:bg-border"
+              >
+                Invia a… <ChevronDown size={12} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel>Sposta «{activePanel?.title}» nel foglio</DropdownMenuLabel>
+              {targets.map((t) => (
+                <DropdownMenuItem
+                  key={t.id}
+                  onSelect={() => {
+                    if (activePanel && moveTerminalToSheet(currentSheet, activePanel.id, t.id)) {
+                      setStatus(`«${activePanel.title}» inviata a ${t.name} — la sessione continua`)
+                    }
+                  }}
+                >
+                  {t.name}
+                </DropdownMenuItem>
+              ))}
+              <p className="px-2 pt-1 pb-1.5 text-[11px] text-text-faint">Il processo continua: cambia solo dove lo vedi.</p>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {(location === 'grid' || location === 'edge') && (
+          <>
+            <IconButton label="Rendi fluttuante" onClick={float}>
+              <PictureInPicture2 size={14} />
+            </IconButton>
+            <IconButton label="Stacca in una nuova finestra" onClick={popout}>
+              <AppWindow size={14} />
+            </IconButton>
+          </>
+        )}
+        {location === 'floating' && (
+          <>
+            <IconButton label="Riaggancia nel layout" onClick={dock}>
+              <PanelTopOpen size={14} />
+            </IconButton>
+            <IconButton label="Stacca in una nuova finestra" onClick={popout}>
+              <AppWindow size={14} />
+            </IconButton>
+          </>
+        )}
+        {location === 'popout' && (
+          <IconButton label="Riaggancia nella finestra principale" onClick={dock}>
             <PanelTopOpen size={14} />
           </IconButton>
-          <IconButton label="Stacca in una nuova finestra" onClick={popout}>
-            <AppWindow size={14} />
-          </IconButton>
-        </>
-      )}
-      {location === 'popout' && (
-        <IconButton label="Riaggancia nella finestra principale" onClick={dock}>
-          <PanelTopOpen size={14} />
+        )}
+        <IconButton label="Chiudi il gruppo" onClick={closeGroup}>
+          <X size={14} />
         </IconButton>
-      )}
-      <IconButton label="Chiudi il gruppo" onClick={closeGroup}>
-        <X size={14} />
-      </IconButton>
-    </div>
+      </div>
+    </PortalScope>
   )
 }

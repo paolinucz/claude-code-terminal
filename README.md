@@ -7,7 +7,18 @@ App desktop per Windows che riunisce in una finestra i terminali di Claude Code,
 
 ## Stato
 
-**Fase 1 completata**: scheletro Electron + React + Dockview, fogli (L1), pannelli agganciabili, fluttuanti e in finestre separate (L2–L4), salvataggio automatico e layout con nome (L5). I pannelli sono ancora segnaposto: i contenuti arrivano nelle fasi successive.
+**Fase 1 completata**: scheletro Electron + React + Dockview, fogli (L1), pannelli agganciabili, fluttuanti e in finestre separate (L2–L4), salvataggio automatico e layout con nome (L5).
+
+**Fase 2 completata**: terminali veri (S1–S9, W1–W5).
+- Claude Code (nuova, riprendi, collega) e shell semplici: Git Bash, PowerShell, Prompt dei comandi, WSL.
+- La sessione vive nel processo principale; i pannelli sono viste. Più viste sulla stessa sessione possono scrivere tutte; comanda la dimensione la vista con il focus.
+- «Invia a…» e trascinamento di una scheda terminale su un foglio in basso per spostarla senza interrompere la sessione.
+- Stato sulla scheda (al lavoro / inattiva / terminata), barra di stato con modello, effort e branch git; modello ed effort si cambiano a sessione aperta.
+- Ogni progetto ricorda modello, effort e cartelle aggiuntive.
+
+Arrivano nella fase 3 (hook di Claude Code): stato «in attesa di input», notifiche (S7) e percentuale di contesto (W5).
+
+Claude Code viene cercato nel PATH, poi in `%USERPROFILE%\.local\bin` (installer ufficiale), poi nella copia dell'app desktop di Claude.
 
 ## Comandi
 
@@ -46,4 +57,10 @@ src/
 
 I dati dell'app stanno in `%APPDATA%\Claude Code Terminal\claude-code-terminal.db`.
 
-Scorciatoie: **F12** apre gli strumenti di sviluppo, **Ctrl+K** porta alla palette comandi (la ricerca arriva nella fase 8), **doppio clic** o **F2** su un foglio per rinominarlo.
+Scorciatoie:
+- **Ctrl+Maiusc+T**: nuovo terminale.
+- **Ctrl+K**: palette comandi (la ricerca arriva nella fase 8). Dentro un terminale Ctrl+K resta al terminale.
+- **Doppio clic** o **F2** su un foglio per rinominarlo; **clic centrale** su una scheda per chiuderla.
+- **F12**: strumenti di sviluppo.
+
+Su Windows PowerShell, se `npm` non parte per i criteri di esecuzione degli script, usa `npm.cmd` (per esempio `npm.cmd start`).

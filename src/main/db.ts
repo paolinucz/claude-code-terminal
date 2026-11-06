@@ -1,6 +1,23 @@
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 import type { NamedLayout, SerializedLayout, Sheet, WorkspaceState } from '@shared/types'
+import type { ClaudeEffort, ClaudeModel, ProjectPrefs } from '@shared/sessions'
+
+function toPrefs(row: { cwd: string; model: string; effort: string; add_dirs_json: string; updated_at: string }): ProjectPrefs {
+  let addDirs: string[] = []
+  try {
+    addDirs = JSON.parse(row.add_dirs_json) as string[]
+  } catch {
+    // valore corrotto: si riparte senza cartelle aggiuntive
+  }
+  return {
+    cwd: row.cwd,
+    model: row.model as ClaudeModel,
+    effort: row.effort as ClaudeEffort,
+    addDirs,
+    updatedAt: row.updated_at
+  }
+}
 
 /**
  * Database SQLite dell'app, con il modulo `node:sqlite` integrato in Electron
@@ -42,6 +59,46 @@ export class AppDb {
         `)
       })
     }
+    if (version < 2) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE project_prefs (
+            cwd            TEXT PRIMARY KEY COLLATE NOCASE,
+            model          TEXT NOT NULL,
+            effort         TEXT NOT NULL,
+            add_dirs_json  TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+          );
+          PRAGMA user_version = 2;
+        `)
+      })
+    }
+  }
+
+  /** Ultimi valori usati per un progetto (W4), o null se il progetto è nuovo. */
+  getProjectPrefs(cwd: string): ProjectPrefs | null {
+    const row = this.db.prepare('SELECT cwd, model, effort, add_dirs_json, updated_at FROM project_prefs WHERE cwd = ?').get(cwd) as
+      | { cwd: string; model: string; effort: string; add_dirs_json: string; updated_at: string }
+      | undefined
+    return row ? toPrefs(row) : null
+  }
+
+  /** Progetti usati di recente, per la scelta rapida della cartella. */
+  recentProjects(limit = 12): ProjectPrefs[] {
+    const rows = this.db
+      .prepare('SELECT cwd, model, effort, add_dirs_json, updated_at FROM project_prefs ORDER BY updated_at DESC LIMIT ?')
+      .all(limit) as { cwd: string; model: string; effort: string; add_dirs_json: string; updated_at: string }[]
+    return rows.map(toPrefs)
+  }
+
+  saveProjectPrefs(p: Omit<ProjectPrefs, 'updatedAt'>): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_prefs (cwd, model, effort, add_dirs_json, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(cwd) DO UPDATE SET model = excluded.model, effort = excluded.effort,
+           add_dirs_json = excluded.add_dirs_json, updated_at = excluded.updated_at`
+      )
+      .run(p.cwd, p.model, p.effort, JSON.stringify(p.addDirs), new Date().toISOString())
   }
 
   private transaction(fn: () => void): void {
@@ -133,6 +190,23 @@ export class AppDb {
       )
       .run(item.id, item.name, JSON.stringify(layout), item.createdAt)
     return item
+  }
+
+  /** Impostazioni dell'app (valori JSON nella tabella app_state). */
+  getSetting(key: string): unknown {
+    const row = this.db.prepare('SELECT value FROM app_state WHERE key = ?').get(`setting:${key}`) as { value: string } | undefined
+    if (!row) return undefined
+    try {
+      return JSON.parse(row.value)
+    } catch {
+      return undefined
+    }
+  }
+
+  setSetting(key: string, value: unknown): void {
+    this.db
+      .prepare('INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(`setting:${key}`, JSON.stringify(value))
   }
 
   removeLayout(id: string): void {

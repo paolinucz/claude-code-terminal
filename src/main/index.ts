@@ -1,11 +1,19 @@
-import { app, BrowserWindow, ipcMain, Menu, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell, type WebContents } from 'electron'
+import { homedir } from 'node:os'
 import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SerializedLayout, Sheet } from '@shared/types'
+import type { ClaudeEffort, ClaudeModel, CreateSessionRequest, ProjectPrefs } from '@shared/sessions'
 import { AppDb } from './db'
+import { SessionManager } from './sessions/SessionManager'
+import { detectShells, findClaudeCli } from './sessions/environment'
+import { listResumable } from './sessions/history'
 
 const isDev = !app.isPackaged
 let db: AppDb | null = null
+const sessions = new SessionManager()
+/** Finestre che ricevono gli aggiornamenti sull'elenco delle sessioni. */
+const sessionWatchers = new Set<WebContents>()
 
 /**
  * Fuori dallo sviluppo l'interfaccia è servita da `app://renderer/…` e non da `file://`:
@@ -116,9 +124,83 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('layouts:list', () => store.listLayouts())
   ipcMain.handle('layouts:save', (_e, name: string, layout: SerializedLayout) => store.saveLayout(name, layout))
   ipcMain.handle('layouts:remove', (_e, id: string) => store.removeLayout(id))
+
+  ipcMain.handle('settings:get', (_e, key: string) => store.getSetting(key))
+  ipcMain.handle('settings:set', (_e, key: string, value: unknown) => store.setSetting(key, value))
+
+  // ---- Sessioni (requisiti §3) ----
+  ipcMain.handle('sessions:list', (e) => {
+    watch(e.sender)
+    return sessions.list()
+  })
+  ipcMain.handle('sessions:create', (e, req: CreateSessionRequest) => {
+    watch(e.sender)
+    return sessions.create(req)
+  })
+  ipcMain.handle('sessions:attach', (e, id: string, viewId: string) => sessions.attach(id, viewId, e.sender))
+  ipcMain.on('sessions:detach', (_e, id: string, viewId: string) => sessions.detach(id, viewId))
+  ipcMain.on('sessions:input', (_e, id: string, viewId: string, data: string) => sessions.input(id, viewId, data))
+  ipcMain.on('sessions:resize', (_e, id: string, viewId: string, cols: number, rows: number, claim: boolean) =>
+    sessions.resize(id, viewId, cols, rows, claim)
+  )
+  ipcMain.handle('sessions:setModel', (_e, id: string, model: ClaudeModel, effort: ClaudeEffort) =>
+    sessions.setModel(id, model, effort)
+  )
+  ipcMain.handle('sessions:kill', (_e, id: string) => sessions.kill(id))
+
+  // ---- Ambiente: Claude Code, shell, cronologia, preferenze di progetto (W1–W4) ----
+  ipcMain.handle('env:claudeCli', (_e, refresh?: boolean) => findClaudeCli(refresh))
+  ipcMain.handle('env:shells', async () => (await detectShells()).map((s) => s.info))
+  ipcMain.handle('env:resumable', (_e, cwd: string) => listResumable(cwd))
+  ipcMain.handle('env:projectPrefs', (_e, cwd: string) => store.getProjectPrefs(cwd))
+  ipcMain.handle('env:recentProjects', () => store.recentProjects())
+  ipcMain.handle('env:saveProjectPrefs', (_e, p: Omit<ProjectPrefs, 'updatedAt'>) => store.saveProjectPrefs(p))
+  ipcMain.handle('env:homeDir', () => homedir())
+  ipcMain.handle('env:pickFolder', async (e, defaultPath?: string) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const opts: Electron.OpenDialogOptions = { title: 'Scegli la cartella', defaultPath, properties: ['openDirectory'] }
+    const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    return res.canceled ? null : (res.filePaths[0] ?? null)
+  })
+}
+
+function watch(wc: WebContents): void {
+  if (sessionWatchers.has(wc)) return
+  sessionWatchers.add(wc)
+  const forget = () => {
+    sessionWatchers.delete(wc)
+    sessions.dropViewsOf(wc)
+  }
+  wc.once('destroyed', forget)
+  // Un ricaricamento della pagina cancella tutte le viste di quella finestra.
+  wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) sessions.dropViewsOf(wc)
+  })
+}
+
+sessions.onChange((list) => {
+  for (const wc of sessionWatchers) if (!wc.isDestroyed()) wc.send('sessions:changed', list)
+})
+
+// Una sola istanza: due copie dell'app scriverebbero sullo stesso database e avrebbero sessioni separate.
+// Per le prove: una cartella dati separata (database e blocco d'istanza propri), senza toccare l'app in uso.
+if (process.env.CCT_USER_DATA) app.setPath('userData', process.env.CCT_USER_DATA)
+
+const primaryInstance = app.requestSingleInstanceLock()
+if (!primaryInstance) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().includes('popout.html'))
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
 }
 
 app.whenReady().then(() => {
+  if (!primaryInstance) return
   Menu.setApplicationMenu(null)
   serveRenderer()
   db = new AppDb(join(app.getPath('userData'), 'claude-code-terminal.db'))
@@ -130,7 +212,10 @@ app.whenReady().then(() => {
   })
 })
 
+app.on('before-quit', () => sessions.killAll())
+
 app.on('window-all-closed', () => {
+  sessions.killAll()
   db?.close()
   db = null
   if (process.platform !== 'darwin') app.quit()

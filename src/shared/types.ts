@@ -1,4 +1,15 @@
 // Tipi condivisi tra processo principale, preload e interfaccia.
+import type {
+  ClaudeCliInfo,
+  ClaudeEffort,
+  ClaudeModel,
+  CreateSessionRequest,
+  ProjectPrefs,
+  ResumableSession,
+  SessionInfo,
+  SessionSnapshot,
+  ShellInfo
+} from './sessions'
 
 /** Layout serializzato di Dockview (risultato di `api.toJSON()`). Lo trattiamo come dato opaco. */
 export type SerializedLayout = Record<string, unknown>
@@ -39,5 +50,36 @@ export interface AppApi {
     list(): Promise<NamedLayout[]>
     save(name: string, layout: SerializedLayout): Promise<NamedLayout>
     remove(id: string): Promise<void>
+  }
+  /** Impostazioni dell'app, salvate come JSON. */
+  settings: {
+    get(key: string): Promise<unknown>
+    set(key: string, value: unknown): Promise<void>
+  }
+  /** Sessioni di terminale (requisiti §3). I processi vivono nel processo principale. */
+  sessions: {
+    list(): Promise<SessionInfo[]>
+    create(req: CreateSessionRequest): Promise<SessionInfo>
+    /** Collega una vista: restituisce l'istantanea dello schermo, oppure null se la sessione non esiste più. */
+    attach(sessionId: string, viewId: string): Promise<SessionSnapshot | null>
+    detach(sessionId: string, viewId: string): void
+    input(sessionId: string, viewId: string, data: string): void
+    resize(sessionId: string, viewId: string, cols: number, rows: number, claim: boolean): void
+    setModel(sessionId: string, model: ClaudeModel, effort: ClaudeEffort): Promise<void>
+    kill(sessionId: string): Promise<void>
+    onChanged(cb: (sessions: SessionInfo[]) => void): () => void
+    onData(cb: (sessionId: string, seq: number, data: string) => void): () => void
+    onResize(cb: (sessionId: string, cols: number, rows: number) => void): () => void
+    onExit(cb: (sessionId: string, exitCode: number) => void): () => void
+  }
+  env: {
+    claudeCli(refresh?: boolean): Promise<ClaudeCliInfo>
+    shells(): Promise<ShellInfo[]>
+    resumable(cwd: string): Promise<ResumableSession[]>
+    projectPrefs(cwd: string): Promise<ProjectPrefs | null>
+    recentProjects(): Promise<ProjectPrefs[]>
+    saveProjectPrefs(p: Omit<ProjectPrefs, 'updatedAt'>): Promise<void>
+    pickFolder(defaultPath?: string): Promise<string | null>
+    homeDir(): Promise<string>
   }
 }

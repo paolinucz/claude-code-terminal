@@ -3,15 +3,43 @@
  * (`@animate-ui/react/primitives/radix-ui`) con lo stile del tema dell'app.
  * Il resto dell'app importa solo da qui, così lo stile resta in un posto solo.
  */
-import type { ComponentProps } from 'react'
+import { createContext, useContext, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 import {
   AlertDialog as AD,
   ContextMenu as CM,
   Dialog as D,
-  DropdownMenu as DM
+  DropdownMenu as DM,
+  ToggleGroup as TG
 } from '@animate-ui/react/primitives/radix-ui'
 import { cn } from '@/lib/cn'
+
+/* ---------------- Portali nelle finestre staccate ---------------- */
+
+/**
+ * Menu e dialoghi si aprono in un «portale». Dentro una finestra staccata (L4) il portale
+ * deve stare nel documento di quella finestra, non in quello della finestra principale.
+ */
+const PortalContainer = createContext<HTMLElement | null>(null)
+
+export function PortalScope({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [container, setContainer] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const body = ref.current?.ownerDocument.body ?? null
+    if (body !== container) setContainer(body)
+  })
+  return (
+    <PortalContainer.Provider value={container}>
+      <span ref={ref} hidden />
+      {children}
+    </PortalContainer.Provider>
+  )
+}
+
+function usePortal(): HTMLElement | undefined {
+  return useContext(PortalContainer) ?? undefined
+}
 
 /* ---------------- Dialog ---------------- */
 
@@ -25,7 +53,7 @@ export const DialogClose = D.DialogClose
 
 export function DialogContent({ className, children, ...props }: ComponentProps<typeof D.DialogContent>) {
   return (
-    <D.DialogPortal>
+    <D.DialogPortal container={usePortal()}>
       <D.DialogOverlay className={overlayClass} />
       <D.DialogContent className={cn(modalClass, className)} {...props}>
         {children}
@@ -56,7 +84,7 @@ export const AlertDialog = AD.AlertDialog
 
 export function AlertDialogContent({ className, children, ...props }: ComponentProps<typeof AD.AlertDialogContent>) {
   return (
-    <AD.AlertDialogPortal>
+    <AD.AlertDialogPortal container={usePortal()}>
       <AD.AlertDialogOverlay className={overlayClass} />
       <AD.AlertDialogContent className={cn(modalClass, 'gap-5 sm:max-w-md', className)} {...props}>
         {children}
@@ -97,6 +125,48 @@ export function AlertDialogCancel({ className, ...props }: ComponentProps<typeof
   )
 }
 
+/* ---------------- Toggle Group (scelte a segmenti: modello, effort, posizione) ---------------- */
+
+/** Gruppo di scelta singola. `value` vuoto non è ammesso: un clic sulla voce attiva non la deseleziona. */
+export function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  label,
+  className,
+  size = 'md'
+}: {
+  value: T
+  onChange: (v: NoInfer<T>) => void
+  options: readonly { readonly id: NoInfer<T>; readonly label: string }[]
+  label: string
+  className?: string
+  size?: 'sm' | 'md'
+}) {
+  return (
+    <TG.ToggleGroup
+      type="single"
+      value={value}
+      onValueChange={(v: string) => v && onChange(v as T)}
+      aria-label={label}
+      className={cn('flex gap-1 rounded-lg border border-border bg-background p-1', className)}
+    >
+      {options.map((o) => (
+        <TG.ToggleGroupItem
+          key={o.id}
+          value={o.id}
+          className={cn(
+            'flex-1 rounded-md px-2.5 font-medium text-text-muted transition-colors hover:text-foreground data-[state=on]:bg-brand data-[state=on]:font-semibold data-[state=on]:text-on-brand',
+            size === 'sm' ? 'h-7 text-[12px]' : 'h-8 text-[13px]'
+          )}
+        >
+          {o.label}
+        </TG.ToggleGroupItem>
+      ))}
+    </TG.ToggleGroup>
+  )
+}
+
 /* ---------------- Menu (Dropdown e Context) ---------------- */
 
 const menuContentClass =
@@ -112,7 +182,7 @@ export const DropdownMenuSub = DM.DropdownMenuSub
 
 export function DropdownMenuContent({ className, sideOffset = 6, ...props }: ComponentProps<typeof DM.DropdownMenuContent>) {
   return (
-    <DM.DropdownMenuPortal>
+    <DM.DropdownMenuPortal container={usePortal()}>
       <DM.DropdownMenuContent sideOffset={sideOffset} className={cn(menuContentClass, className)} {...props} />
     </DM.DropdownMenuPortal>
   )
@@ -141,7 +211,7 @@ export function DropdownMenuSubTrigger({ className, children, ...props }: Compon
 
 export function DropdownMenuSubContent({ className, ...props }: ComponentProps<typeof DM.DropdownMenuSubContent>) {
   return (
-    <DM.DropdownMenuPortal>
+    <DM.DropdownMenuPortal container={usePortal()}>
       <DM.DropdownMenuSubContent className={cn(menuContentClass, className)} {...props} />
     </DM.DropdownMenuPortal>
   )
@@ -152,7 +222,7 @@ export const ContextMenuTrigger = CM.ContextMenuTrigger
 
 export function ContextMenuContent({ className, ...props }: ComponentProps<typeof CM.ContextMenuContent>) {
   return (
-    <CM.ContextMenuPortal>
+    <CM.ContextMenuPortal container={usePortal()}>
       <CM.ContextMenuContent className={cn(menuContentClass, className)} {...props} />
     </CM.ContextMenuPortal>
   )

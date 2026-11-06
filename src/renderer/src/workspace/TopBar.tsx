@@ -17,7 +17,8 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui-kit'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
-import { addPanel, buildDefaultLayout, nextTerminalTitle } from './panels'
+import { NewTerminalDialog } from '@/terminal/NewTerminalDialog'
+import { addPanel, buildDefaultLayout, stripSessions } from './panels'
 import { dockRegistry } from './registry'
 import { SaveLayoutDialog } from './SaveLayoutDialog'
 
@@ -34,6 +35,7 @@ export function TopBar() {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<NamedLayout | null>(null)
   const [resetting, setResetting] = useState(false)
+  const [newTerminal, setNewTerminal] = useState(false)
   const paletteRef = useRef<HTMLInputElement>(null)
 
   const refreshLayouts = () => void api.layouts.list().then(setLayouts)
@@ -42,13 +44,20 @@ export function TopBar() {
   // Ctrl+K porta alla palette comandi (L7). La ricerca vera arriva nella fase 8.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key.toLowerCase() === 'k') {
+      // Dentro un terminale Ctrl+K resta al terminale (in bash e in Claude Code cancella la riga).
+      const inTerminal = (e.target as Element | null)?.closest?.('.xterm')
+      if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !inTerminal) {
         e.preventDefault()
         paletteRef.current?.focus()
       }
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        setNewTerminal(true)
+      }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Fase di cattura: le scorciatoie funzionano anche con il focus dentro un terminale.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
   const dock = () => (activeSheet ? dockRegistry.get(activeSheet.id) : undefined)
@@ -102,10 +111,8 @@ export function TopBar() {
         <button
           type="button"
           className={buttonClass}
-          onClick={() => {
-            const d = dock()
-            if (d) addPanel(d, 'terminal', { title: nextTerminalTitle(d) })
-          }}
+          onClick={() => setNewTerminal(true)}
+          title="Nuovo terminale (Ctrl+Maiusc+T)"
         >
           <SquareTerminal size={14} /> Terminale
         </button>
@@ -123,11 +130,11 @@ export function TopBar() {
                 key={k.kind}
                 onSelect={() => {
                   const d = dock()
-                  if (d) addPanel(d, k.kind, k.kind === 'terminal' ? { title: nextTerminalTitle(d) } : {})
+                  if (d) addPanel(d, k.kind)
                 }}
               >
                 <span className="flex-1">{k.title}</span>
-                <span className="font-mono text-[11px] text-text-faint">fase {k.phase}</span>
+                {k.phase > 0 && <span className="font-mono text-[11px] text-text-faint">fase {k.phase}</span>}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -176,6 +183,8 @@ export function TopBar() {
         </button>
       </div>
 
+      <NewTerminalDialog open={newTerminal} onClose={() => setNewTerminal(false)} />
+
       <SaveLayoutDialog
         open={saving}
         defaultName={activeSheet?.name ?? ''}
@@ -185,7 +194,7 @@ export function TopBar() {
           const d = dock()
           setSaving(false)
           if (!d) return
-          await api.layouts.save(name, d.toJSON() as unknown as Record<string, unknown>)
+          await api.layouts.save(name, stripSessions(d.toJSON() as unknown as Record<string, unknown>))
           refreshLayouts()
           setStatus(`Layout «${name}» salvato`)
         }}

@@ -131,14 +131,14 @@ Le fasi 1–3 danno già un'app usabile tutti i giorni come terminale per Claude
 | Rischio | Come verificarlo |
 | --- | --- |
 | ~~Popout di Dockview dentro Electron~~ | **Risolto nella fase 1.** Dockview 8 rifiuta le finestre staccate da `file://`: l'interfaccia è servita da un protocollo `app://` e le finestre si aprono con `setWindowOpenHandler`. Verificato anche il ripristino al riavvio. |
-| Moduli nativi da compilare (node-pty nella fase 2) | Su questo PC non ci sono gli strumenti di compilazione di Visual Studio. Per SQLite si usa `node:sqlite` integrato; per node-pty serviranno binari precompilati per Electron 45 oppure i Build Tools. |
+| ~~Moduli nativi da compilare (node-pty)~~ | **Risolto nella fase 2.** node-pty 1.1 include binari precompilati per Windows che funzionano in Electron 45 senza compilare. SQLite usa `node:sqlite` integrato. Nell'installer node-pty resta fuori dall'archivio asar (`asarUnpack`). |
 | Dimensione del PTY con più viste | Prototipo nella fase 2 |
 | Dati esposti dalla status line e dagli hook di Claude Code, che possono cambiare tra versioni | Fissare una versione minima di Claude Code e testarla a ogni aggiornamento |
 | Peso di jdtls (RAM, avvio, JDK) | Misurare su un progetto Maven reale |
 
 ## 7. Decisioni ancora da prendere
 
-- [ ] Dimensione del terminale con più viste: comanda la vista con il focus?
+- [x] Dimensione del terminale con più viste: comanda la vista con il focus o che ha scritto per ultima; le altre si adeguano (fase 2).
 - [ ] JDK per jdtls: incluso nell'installer o scaricato al primo uso?
 - [ ] Shell predefinita per i nuovi terminali.
 - [ ] Aggiornamenti automatici dell'app sin dalla v1?
