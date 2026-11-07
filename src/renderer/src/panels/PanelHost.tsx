@@ -8,6 +8,7 @@ import { PermissionsPanel } from '@/permissions/PermissionsPanel'
 import { PluginsPanel } from '@/plugins/PluginsPanel'
 import { TerminalPanel } from '@/terminal/TerminalPanel'
 import type { PanelParams } from './kinds'
+import { PanelErrorBoundary } from './PanelErrorBoundary'
 import { PlaceholderPanel } from './PlaceholderPanel'
 
 /** Unico componente registrato in Dockview: sceglie il contenuto in base al tipo di pannello. */
@@ -32,5 +33,9 @@ export function PanelHost(props: IDockviewPanelProps<PanelParams>) {
         return <PlaceholderPanel {...props} />
     }
   })()
-  return <PortalScope>{content}</PortalScope>
+  return (
+    <PortalScope>
+      <PanelErrorBoundary title={props.api.title ?? props.params.kind}>{content}</PanelErrorBoundary>
+    </PortalScope>
+  )
 }

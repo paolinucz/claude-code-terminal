@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Puzzle, RefreshCw } from 'lucide-react'
 import { normPath } from '@shared/files'
 import { api } from '@/lib/api'
@@ -42,8 +42,12 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
   const setStatus = useWorkspace((s) => s.setStatus)
   const languages = useEditor((s) => s.languages)
   const lang = pluginLanguageOf(filePath, languages)
-  const servers = useEditor((s) =>
-    lang ? Object.values(s.servers).filter((x) => x.languages.includes(lang.id) && normPath(filePath).startsWith(normPath(x.root))) : []
+  // Il selettore deve restituire un valore stabile (lo stato così com'è): un array nuovo a ogni
+  // lettura manda React 19 in un ciclo di aggiornamenti infinito (errore #185, finestra vuota).
+  const allServers = useEditor((s) => s.servers)
+  const servers = useMemo(
+    () => (lang ? Object.values(allServers).filter((x) => x.languages.includes(lang.id) && normPath(filePath).startsWith(normPath(x.root))) : []),
+    [allServers, lang?.id, filePath]
   )
   const diagnostics = useEditor((s) => s.diagnostics[normPath(filePath)])
   const onDirtyRef = useRef(onDirty)
