@@ -9,6 +9,8 @@ import type { PanelParams } from '@/panels/kinds'
 import { useChanges } from '@/state/changes'
 import { openFile, useEditor } from '@/state/editor'
 import { useSessions } from '@/state/sessions'
+import { workdirForSheet } from '@/state/project'
+import { sheetOfPanel } from '@/workspace/panels'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui-kit'
 
 const MARK_COLORS: Record<GitMark, string> = {
@@ -43,6 +45,12 @@ export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
   // Cartella: quella del pannello, altrimenti un terminale aperto, altrimenti l'ultimo progetto.
   useEffect(() => {
     if (cwd) return
+    // Con un progetto aperto: la cartella del contesto del foglio (J7).
+    const workdir = workdirForSheet(sheetOfPanel(props.containerApi))
+    if (workdir) {
+      setCwd(workdir)
+      return
+    }
     const live = Object.values(sessions).find((s) => s.status !== 'exited')
     if (live) setCwd(live.cwd)
     else void api.env.recentProjects().then(async (list) => setCwd(list[0]?.cwd ?? (await api.env.homeDir())))

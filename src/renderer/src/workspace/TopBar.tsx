@@ -27,6 +27,16 @@ import { addPanel, buildDefaultLayout, removeHiddenPanels, stripSessions } from 
 import { dockRegistry } from './registry'
 import { CommandPalette, type PaletteCommand } from './CommandPalette'
 import { SaveLayoutDialog } from './SaveLayoutDialog'
+import { ProjectMenu } from './ProjectMenu'
+import { ContextSwitcher } from './ContextSwitcher'
+import { useProject } from '@/state/project'
+import { useDocs } from '@/state/docs'
+import { useExplainSettings } from '@/state/explain'
+import { usePresets } from '@/state/presets'
+import { previewOf } from '@shared/prompts'
+import { PresetsDialog } from './PresetsDialog'
+import { sendPreset } from './presets'
+import { openDocsPanel } from '@/docs/DocsPanel'
 
 /** In Electron i pulsanti della finestra (riduci, ingrandisci, chiudi) stanno sopra la barra, a destra. */
 const WINDOW_CONTROLS_WIDTH = window.api ? 140 : 0
@@ -46,7 +56,16 @@ export function TopBar() {
   const [installing, setInstalling] = useState(false)
   const update = useUpdates((s) => s.status)
   const appInfo = useUpdates((s) => s.info)
+  const project = useProject((s) => s.active)
+  const explainOn = useExplainSettings((s) => s.enabled)
+  const presets = usePresets((s) => s.presets)
+  useEffect(() => void usePresets.getState().load(), [])
+  useEffect(() => void useExplainSettings.getState().load(), [])
   useEffect(() => useUpdates.getState().init(), [])
+  useEffect(() => {
+    useProject.getState().init()
+    useDocs.getState().init()
+  }, [])
 
   const refreshLayouts = () => void api.layouts.list().then(setLayouts)
   useEffect(refreshLayouts, [])
@@ -121,6 +140,28 @@ export function TopBar() {
           if (dd) addPanel(dd, k.kind)
         }
       })),
+      ...(project?.data.contexts ?? []).map((c) => ({
+        id: `context-${c.id}`,
+        title: `Vai al contesto «${c.name}»`,
+        keywords: 'contesto progetto',
+        run: () => useProject.getState().setContext(c.id)
+      })),
+      // Prompt predefiniti: un clic li manda alla sessione Claude del foglio attivo. Il testo è tra le parole cercabili.
+      ...presets.map((p) => ({
+        id: `preset-${p.id}`,
+        title: `Prompt: ${p.name}`,
+        hint: previewOf(p.text, 50),
+        keywords: `prompt predefinito invia messaggio ${p.text.slice(0, 300)}`,
+        run: () => void sendPreset(p)
+      })),
+      { id: 'presets-manage', title: 'Gestisci prompt predefiniti…', keywords: 'prompt messaggi salvati aggiungi modifica', run: () => usePresets.getState().openDialog() },
+      {
+        id: 'explain-toggle',
+        title: explainOn ? 'Output smart: nascondi la vista Spiegazione' : 'Output smart: mostra la vista Spiegazione',
+        keywords: 'spiega modifiche haiku html',
+        run: () => useExplainSettings.getState().setEnabled(!explainOn)
+      },
+      { id: 'docs', title: 'Apri Documentazione', keywords: 'claude.md markdown progetto riferimenti', run: openDocsPanel },
       { id: 'permissions', title: 'Apri Permessi', keywords: 'regole claude settings', run: openPermissions },
       { id: 'plugins', title: 'Apri Plugin', keywords: 'language server linguaggi', run: openPluginsPanel },
       { id: 'save-layout', title: 'Salva layout con nome…', run: () => setSaving(true) },
@@ -143,7 +184,7 @@ export function TopBar() {
     ]
     // openPermissions e applyLayout dipendono solo dal foglio attivo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSheet, layouts, update, appInfo])
+  }, [activeSheet, layouts, update, appInfo, project, explainOn, presets])
 
   return (
     <header
@@ -159,6 +200,9 @@ export function TopBar() {
         </div>
         <span className="whitespace-nowrap text-[13px] font-semibold max-lg:hidden">Claude Code Terminal</span>
       </div>
+
+      <ProjectMenu />
+      <ContextSwitcher />
 
       <button
         type="button"
@@ -268,6 +312,7 @@ export function TopBar() {
       </div>
 
       <NewTerminalDialog open={newTerminal} onClose={() => setNewTerminal(false)} />
+      <PresetsDialog />
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} />
 

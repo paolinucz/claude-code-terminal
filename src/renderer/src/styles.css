@@ -202,3 +202,24 @@
 .dockview-theme-cct .dv-resize-container {
   border-radius: 10px;
 }
+
+/* Documentazione del progetto (J8): Markdown reso con i colori del tema. */
+.cct-md { line-height: 1.6; color: var(--cct-text-muted); overflow-wrap: anywhere; }
+.cct-md h1, .cct-md h2, .cct-md h3, .cct-md h4 { color: var(--cct-text); font-weight: 600; margin: 1.4em 0 0.5em; line-height: 1.25; }
+.cct-md h1 { font-size: 1.5rem; margin-top: 0; padding-bottom: 0.3em; border-bottom: 1px solid var(--cct-border); }
+.cct-md h2 { font-size: 1.2rem; padding-bottom: 0.25em; border-bottom: 1px solid var(--cct-border); }
+.cct-md h3 { font-size: 1.05rem; }
+.cct-md p, .cct-md ul, .cct-md ol, .cct-md pre, .cct-md blockquote, .cct-md table { margin: 0.7em 0; }
+.cct-md ul { list-style: disc; padding-left: 1.4em; }
+.cct-md ol { list-style: decimal; padding-left: 1.4em; }
+.cct-md li { margin: 0.2em 0; }
+.cct-md a[data-file], .cct-md a[data-anchor], .cct-md a[data-external] { color: var(--cct-info); text-decoration: underline; cursor: pointer; }
+.cct-md code { font-family: var(--font-mono, monospace); font-size: 0.9em; background: var(--cct-surface-2); border: 1px solid var(--cct-border); border-radius: 4px; padding: 0.1em 0.35em; }
+.cct-md pre { background: var(--cct-surface); border: 1px solid var(--cct-border); border-radius: 8px; padding: 0.8em 1em; overflow-x: auto; }
+.cct-md pre code { background: none; border: 0; padding: 0; }
+.cct-md blockquote { border-left: 3px solid var(--cct-accent); padding-left: 1em; color: var(--cct-text-subtle); }
+.cct-md table { border-collapse: collapse; width: 100%; }
+.cct-md th, .cct-md td { border: 1px solid var(--cct-border); padding: 0.4em 0.7em; text-align: left; }
+.cct-md th { background: var(--cct-surface-2); color: var(--cct-text); }
+.cct-md hr { border: 0; border-top: 1px solid var(--cct-border); margin: 1.2em 0; }
+.cct-md mark { background: color-mix(in srgb, var(--cct-warn) 40%, transparent); color: var(--cct-text); border-radius: 2px; }

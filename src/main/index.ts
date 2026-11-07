@@ -20,6 +20,10 @@ import type { PermissionScope, ScopeData } from '@shared/permissions'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
 import { Updater } from './updater'
+import { ProjectService } from './projects/ProjectService'
+import { EXPLAIN_CSP, ExplainService } from './changes/ExplainService'
+import { EXPLAIN_HOST, type ExplainResult } from '@shared/explain'
+import type { ProjectFile } from '@shared/project'
 
 const isDev = !app.isPackaged
 let db: AppDb | null = null
@@ -99,10 +103,26 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
 ])
 
+/** Fase 14: spiegazioni smart delle modifiche (creato quando il database è pronto). */
+let explain: ExplainService | null = null
+
 function serveRenderer(): void {
   const root = normalize(join(__dirname, '../renderer'))
   protocol.handle(APP_SCHEME, (request) => {
     const { host, pathname } = new URL(request.url)
+    // Pagine HTML generate dal modello (O4): senza rete, né frame, né accesso all'app. Le legge solo l'iframe isolato.
+    if (host === EXPLAIN_HOST) {
+      const html = explain?.page(decodeURIComponent(pathname.replace(/^\//, '')))
+      if (html === undefined) return new Response('Non trovato', { status: 404 })
+      return new Response(html, {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Security-Policy': EXPLAIN_CSP,
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'no-store'
+        }
+      })
+    }
     const file = normalize(join(root, decodeURIComponent(pathname)))
     if (host !== 'renderer' || !(file === root || file.startsWith(root + sep))) {
       return new Response('Non trovato', { status: 404 })
@@ -197,7 +217,7 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('workspace:load', () => store.loadWorkspace())
   ipcMain.handle(
     'workspace:saveSheets',
-    (_e, sheets: Pick<Sheet, 'id' | 'name'>[], activeSheetId: string | null) =>
+    (_e, sheets: Pick<Sheet, 'id' | 'name' | 'contextId'>[], activeSheetId: string | null) =>
       store.saveSheets(sheets, activeSheetId)
   )
   ipcMain.handle('workspace:saveSheetLayout', (_e, sheetId: string, layout: SerializedLayout | null) =>
@@ -212,7 +232,12 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('changes:contents', (_e, id: string) => changes?.contents(id) ?? null)
   ipcMain.handle('changes:approve', (_e, id: string) => changes?.approve(id))
   ipcMain.handle('changes:approveAll', (_e, sessionId?: string) => changes?.approveAll(sessionId) ?? 0)
-  ipcMain.handle('changes:reject', (_e, id: string, force?: boolean) => changes?.reject(id, force) ?? { ok: false })
+  ipcMain.handle('changes:approveMany', (_e, ids: string[]) => changes?.approveMany(ids) ?? 0)
+  ipcMain.handle(
+    'changes:rejectMany',
+    (_e, ids: string[], force?: boolean) => changes?.rejectMany(ids, Boolean(force)) ?? { rejected: 0, needsForce: [], failed: [] }
+  )
+  ipcMain.handle('changes:reject',(_e, id: string, force?: boolean) => changes?.reject(id, force) ?? { ok: false })
   // F8: richiedi modifiche: le indicazioni vanno a Claude come messaggio nella sua sessione.
   ipcMain.handle('changes:requestRevision', (_e, id: string, notes: ReviewNote[]): RevisionResult => {
     const contents = changes?.contents(id)
@@ -224,6 +249,15 @@ function registerIpc(store: AppDb): void {
     sessions.sendPrompt(res.sessionId, res.message)
     return { ok: true }
   })
+
+  // ---- Output smart (O1–O8): solo a richiesta dell'utente ----
+  ipcMain.handle('explain:peek', (_e, changeId: string): ExplainResult | null => explain?.peek(changes?.contents(changeId) ?? null) ?? null)
+  ipcMain.handle(
+    'explain:run',
+    (_e, requestId: string, changeId: string, force?: boolean): Promise<ExplainResult> | ExplainResult =>
+      explain ? explain.run(requestId, changes?.contents(changeId) ?? null, Boolean(force)) : { ok: false, error: 'Servizio non pronto' }
+  )
+  ipcMain.handle('explain:cancel', (_e, requestId: string) => explain?.cancel(requestId))
 
   // ---- File (F1, F2) ----
   ipcMain.handle('files:list', (_e, dir: string) => files.list(dir))
@@ -304,6 +338,45 @@ function registerIpc(store: AppDb): void {
     permissions?.save(cwd, scope, data) ?? { ok: false, error: 'Servizio non pronto' }
   )
 
+  // ---- Progetti .cctproj (J1, J2, J9, J10) ----
+  const projects = new ProjectService(store)
+  ipcMain.handle('project:open', (_e, path: string) => projects.open(path))
+  ipcMain.handle('project:create', (_e, root: string, name?: string) => projects.create(root, name))
+  ipcMain.handle('project:save', (_e, root: string, data: ProjectFile) => projects.save(root, data))
+  ipcMain.handle('project:recents', () => projects.recents())
+  ipcMain.handle('project:forget', (_e, root: string) => projects.forget(root))
+  ipcMain.handle('project:pickFile', async (e, defaultPath?: string) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Apri progetto',
+      defaultPath: defaultPath && existsSync(defaultPath) ? defaultPath : undefined,
+      filters: [{ name: 'Progetto Claude Code Terminal', extensions: ['cctproj'] }],
+      properties: ['openFile']
+    }
+    const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    return res.canceled ? null : (res.filePaths[0] ?? null)
+  })
+
+  /** Sceglie documenti Markdown o una cartella e li restituisce come percorsi relativi alla radice (J4, J6, J10). */
+  ipcMain.handle('project:pickRelative', async (e, root: string, mode: 'docs' | 'dir') => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const opts: Electron.OpenDialogOptions =
+      mode === 'docs'
+        ? {
+            title: 'Scegli documenti Markdown',
+            defaultPath: existsSync(root) ? root : undefined,
+            filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }],
+            properties: ['openFile', 'multiSelections']
+          }
+        : { title: 'Scegli la cartella d’ambito', defaultPath: existsSync(root) ? root : undefined, properties: ['openDirectory'] }
+    const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (res.canceled) return { paths: [], skipped: 0 }
+    const rel = res.filePaths.map((p) => projects.toRelative(root, p))
+    // Su un altro disco non esiste un percorso relativo: si scarta (il file di progetto non ha percorsi assoluti).
+    const paths = rel.filter((p) => !/^[a-zA-Z]:/.test(p))
+    return { paths, skipped: rel.length - paths.length }
+  })
+
   ipcMain.handle('settings:get', (_e, key: string) => store.getSetting(key))
   ipcMain.handle('settings:set', (_e, key: string, value: unknown) => store.setSetting(key, value))
 
@@ -326,6 +399,16 @@ function registerIpc(store: AppDb): void {
     sessions.setModel(id, model, effort)
   )
   ipcMain.handle('sessions:kill', (_e, id: string) => sessions.kill(id))
+  // Casella di input dell'app (B1–B3): il messaggio va a Claude come se lo digitasse l'utente.
+  ipcMain.handle('sessions:sendPrompt', (_e, id: string, text: string): RevisionResult => {
+    const clean = typeof text === 'string' ? text.trim() : ''
+    if (!clean) return { ok: false, error: 'Il messaggio è vuoto.' }
+    if (clean.length > 100_000) return { ok: false, error: 'Il messaggio è troppo lungo.' }
+    const can = sessions.canReceivePrompt(id)
+    if (!can.ok) return can
+    sessions.sendPrompt(id, clean)
+    return { ok: true }
+  })
 
   // ---- Ambiente: Claude Code, shell, cronologia, preferenze di progetto (W1–W4) ----
   ipcMain.handle('env:claudeCli', (_e, refresh?: boolean) => findClaudeCli(refresh))
@@ -417,6 +500,7 @@ app.whenReady().then(async () => {
     if (win && !win.isDestroyed() && changes) win.webContents.send('changes:changed', changes.list())
   })
   changes.cleanup()
+  explain = new ExplainService(db, join(app.getPath('userData'), 'explain-work'))
   plugins = new PluginManager(db, join(app.getPath('userData'), 'plugins'), join(app.getPath('userData'), 'plugin-data'), () => {
     sendToMain('plugins:changed', plugins?.list() ?? [], plugins?.languages() ?? [])
   })

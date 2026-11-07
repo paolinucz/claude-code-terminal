@@ -1,7 +1,16 @@
 import type { ClaudeEffort, ClaudeModel, SessionKind, ShellId } from '@shared/sessions'
 
 /** Tipi di pannello (L2). Nella fase 1 sono segnaposto: i contenuti veri arrivano nelle fasi indicate. */
-export type PanelKind = 'terminal' | 'explorer' | 'editor' | 'changes' | 'problems' | 'widgets' | 'permissions' | 'plugins'
+export type PanelKind =
+  | 'terminal'
+  | 'explorer'
+  | 'editor'
+  | 'changes'
+  | 'problems'
+  | 'widgets'
+  | 'permissions'
+  | 'plugins'
+  | 'docs'
 
 export interface PanelKindInfo {
   kind: PanelKind
@@ -63,6 +72,13 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     description: 'Plugin di linguaggio: importa, attiva, aggiorna e disinstalla i language server.',
     phase: 0,
     requirements: 'X1–X9'
+  },
+  docs: {
+    kind: 'docs',
+    title: 'Documentazione',
+    description: 'CLAUDE.md del progetto, riferimenti globali e documentazione del contesto, con indice e ricerca.',
+    phase: 0,
+    requirements: 'J3, J4, J6, J8'
   },
   widgets: {
     kind: 'widgets',

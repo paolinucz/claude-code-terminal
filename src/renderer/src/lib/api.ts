@@ -1,5 +1,6 @@
 import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
 import type { SessionAttention, SessionInfo } from '@shared/sessions'
+import { emptyProjectFile } from '@shared/project'
 import { isOpen, type FileChange, type RevisionRequest } from '@shared/changes'
 import type { FileDiagnostics, LspStatus } from '@shared/files'
 import type { InstalledPlugin, PluginLanguageInfo, PluginManifest } from '@shared/plugins'
@@ -39,12 +40,46 @@ function createLocalStorageApi(): AppApi {
       async saveSheets(sheets, activeSheetId) {
         const current = read<WorkspaceState>(KEY, { sheets: [], activeSheetId: null })
         const byId = new Map(current.sheets.map((s) => [s.id, s]))
-        const next: Sheet[] = sheets.map((s) => ({ id: s.id, name: s.name, layout: byId.get(s.id)?.layout ?? null }))
+        const next: Sheet[] = sheets.map((s) => ({ id: s.id, name: s.name, contextId: s.contextId ?? null, layout: byId.get(s.id)?.layout ?? null }))
         write(KEY, { sheets: next, activeSheetId })
       },
       async saveSheetLayout(sheetId, layout) {
         const current = read<WorkspaceState>(KEY, { sheets: [], activeSheetId: null })
         write(KEY, { ...current, sheets: current.sheets.map((s) => (s.id === sheetId ? { ...s, layout } : s)) })
+      }
+    },
+    explain: {
+      async peek() {
+        return null
+      },
+      async run() {
+        // Nel browser non c'è Claude Code: si mostra il riepilogo in testo.
+        return { ok: true, kind: 'text', text: 'Anteprima nel browser: la spiegazione smart è disponibile solo nell’app.', warning: 'Claude Code non disponibile nel browser' }
+      },
+      async cancel() {}
+    },
+    project: {
+      async open(path) {
+        const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path
+        return { ok: true, value: { root: path, file: null, data: emptyProjectFile(name) } }
+      },
+      async create(root, name) {
+        const n = name?.trim() || root.split(/[\\/]/).filter(Boolean).pop() || root
+        return { ok: true, value: { root, file: `${root}\\${n}.cctproj`, data: emptyProjectFile(n) } }
+      },
+      async save(root, data) {
+        return { ok: true, value: { root, file: `${root}\\${data.name}.cctproj`, data } }
+      },
+      async recents() {
+        return []
+      },
+      async forget() {},
+      async pickFile() {
+        return window.prompt('File di progetto (demo nel browser)', 'C:\\progetti\\api-server\\api-server.cctproj')
+      },
+      async pickRelative(_root, mode) {
+        const v = window.prompt(mode === 'docs' ? 'Documento (percorso relativo, demo nel browser)' : 'Cartella (percorso relativo, demo nel browser)', mode === 'docs' ? 'docs/architettura.md' : 'src')
+        return { paths: v ? [v] : [], skipped: 0 }
       }
     },
     layouts: {
@@ -380,6 +415,20 @@ public class OrderService {
       emit()
       return n
     },
+    async approveMany(ids) {
+      const wanted = new Set(ids)
+      const n = list.filter((c) => c.status === 'pending' && wanted.has(c.id)).length
+      list = list.map((c) => (c.status === 'pending' && wanted.has(c.id) ? { ...c, status: 'approved' } : c))
+      emit()
+      return n
+    },
+    async rejectMany(ids) {
+      const wanted = new Set(ids)
+      const n = list.filter((c) => c.status === 'pending' && wanted.has(c.id)).length
+      list = list.map((c) => (c.status === 'pending' && wanted.has(c.id) ? { ...c, status: 'rejected' } : c))
+      emit()
+      return { rejected: n, needsForce: [], failed: [] }
+    },
     async reject(id) {
       decide(id, 'rejected')
       return { ok: true }
@@ -492,6 +541,9 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
         s.info.effort = effort
         emit(id, `/model ${model}\r\n/effort ${effort}` + prompt(s.info))
         notify()
+      },
+      async sendPrompt() {
+        return { ok: true }
       },
       async kill(id) {
         const s = sessions.get(id)

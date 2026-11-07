@@ -178,6 +178,90 @@ export class AppDb {
         `)
       })
     }
+    if (version < 7) {
+      // Release 2, fase 9: progetti aperti. I progetti della 1.0 (project_prefs) restano e compaiono come «senza file» (J9).
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE projects (
+            root       TEXT PRIMARY KEY COLLATE NOCASE,
+            name       TEXT NOT NULL,
+            file       TEXT,
+            opened_at  TEXT NOT NULL
+          );
+          PRAGMA user_version = 7;
+        `)
+      })
+    }
+    if (version < 8) {
+      // Release 2, fase 11: ogni foglio appartiene a un contesto. I fogli della 1.0 restano senza contesto.
+      this.transaction(() => {
+        this.db.exec(`
+          ALTER TABLE sheets ADD COLUMN context_id TEXT;
+          PRAGMA user_version = 8;
+        `)
+      })
+    }
+    if (version < 9) {
+      // Release 2, fase 14: spiegazioni smart già generate, legate all'hash del diff (O5).
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE explanations (
+            hash        TEXT PRIMARY KEY,
+            html        TEXT NOT NULL,
+            cost_usd    REAL,
+            created_at  TEXT NOT NULL
+          );
+          PRAGMA user_version = 9;
+        `)
+      })
+    }
+  }
+
+  // ---- Spiegazioni smart (O5) ----
+
+  getExplanation(hash: string): { html: string; costUsd: number | null } | null {
+    const row = this.db.prepare('SELECT html, cost_usd FROM explanations WHERE hash = ?').get(hash) as
+      | { html: string; cost_usd: number | null }
+      | undefined
+    return row ? { html: row.html, costUsd: row.cost_usd } : null
+  }
+
+  putExplanation(hash: string, html: string, costUsd: number | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO explanations (hash, html, cost_usd, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(hash) DO UPDATE SET html = excluded.html, cost_usd = excluded.cost_usd, created_at = excluded.created_at`
+      )
+      .run(hash, html, costUsd, new Date().toISOString())
+    // Si tengono le più recenti: il database non deve crescere senza limite.
+    this.db
+      .prepare('DELETE FROM explanations WHERE hash NOT IN (SELECT hash FROM explanations ORDER BY created_at DESC LIMIT 300)')
+      .run()
+  }
+
+  // ---- Progetti (J1, J9) ----
+
+  /** Ricorda un progetto aperto o creato. `file` è `null` finché il `.cctproj` non esiste. */
+  rememberProject(root: string, name: string, file: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO projects (root, name, file, opened_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(root) DO UPDATE SET name = excluded.name, file = excluded.file, opened_at = excluded.opened_at`
+      )
+      .run(root, name, file, new Date().toISOString())
+  }
+
+  forgetProject(root: string): void {
+    this.db.prepare('DELETE FROM projects WHERE root = ?').run(root)
+  }
+
+  listProjects(limit = 30): { root: string; name: string; file: string | null; opened_at: string }[] {
+    return this.db.prepare('SELECT root, name, file, opened_at FROM projects ORDER BY opened_at DESC LIMIT ?').all(limit) as {
+      root: string
+      name: string
+      file: string | null
+      opened_at: string
+    }[]
   }
 
   // ---- Plugin di linguaggio (X1–X9) ----
@@ -355,14 +439,16 @@ export class AppDb {
   }
 
   loadWorkspace(): WorkspaceState {
-    const rows = this.db.prepare('SELECT id, name, layout_json FROM sheets ORDER BY position').all() as {
+    const rows = this.db.prepare('SELECT id, name, layout_json, context_id FROM sheets ORDER BY position').all() as {
       id: string
       name: string
       layout_json: string | null
+      context_id: string | null
     }[]
     const sheets: Sheet[] = rows.map((r) => ({
       id: r.id,
       name: r.name,
+      contextId: r.context_id,
       layout: r.layout_json ? (JSON.parse(r.layout_json) as SerializedLayout) : null
     }))
     const active = this.db.prepare("SELECT value FROM app_state WHERE key = 'activeSheetId'").get() as
@@ -371,7 +457,7 @@ export class AppDb {
     return { sheets, activeSheetId: active?.value ?? null }
   }
 
-  saveSheets(sheets: Pick<Sheet, 'id' | 'name'>[], activeSheetId: string | null): void {
+  saveSheets(sheets: Pick<Sheet, 'id' | 'name' | 'contextId'>[], activeSheetId: string | null): void {
     const now = new Date().toISOString()
     this.transaction(() => {
       const ids = sheets.map((s) => s.id)
@@ -381,11 +467,12 @@ export class AppDb {
         this.db.prepare(`DELETE FROM sheets WHERE id NOT IN (${ids.map(() => '?').join(',')})`).run(...ids)
       }
       const upsert = this.db.prepare(`
-        INSERT INTO sheets (id, name, position, layout_json, updated_at)
-        VALUES (?, ?, ?, NULL, ?)
-        ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position, updated_at = excluded.updated_at
+        INSERT INTO sheets (id, name, position, layout_json, updated_at, context_id)
+        VALUES (?, ?, ?, NULL, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position, updated_at = excluded.updated_at,
+          context_id = excluded.context_id
       `)
-      sheets.forEach((s, position) => upsert.run(s.id, s.name, position, now))
+      sheets.forEach((s, position) => upsert.run(s.id, s.name, position, now, s.contextId ?? null))
       if (activeSheetId) {
         this.db
           .prepare(

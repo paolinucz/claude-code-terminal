@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { diffLines } from 'diff'
-import { isOpen, type ChangeContents, type FileChange, type RejectResult, type ReviewNote } from '@shared/changes'
+import { isOpen, type ChangeContents, type FileChange, type RejectManyResult, type RejectResult, type ReviewNote } from '@shared/changes'
 import type { AppDb, ChangeRow } from '../db'
 import type { HookEvent } from '../sessions/HookServer'
 
@@ -234,6 +234,33 @@ export class ChangeTracker {
     for (const r of rows) this.db.updateChange({ ...r, status: 'approved', decided_at: now, updated_at: now })
     if (rows.length) this.changed()
     return rows.length
+  }
+
+  /** Approva le modifiche in attesa tra quelle indicate (per «Approva tutte» sulle sole modifiche visibili). */
+  approveMany(ids: string[]): number {
+    const wanted = new Set(ids)
+    const rows = this.db.listChanges(0).filter((r) => r.status === 'pending' && wanted.has(r.id))
+    const now = new Date().toISOString()
+    for (const r of rows) this.db.updateChange({ ...r, status: 'approved', decided_at: now, updated_at: now })
+    if (rows.length) this.changed()
+    return rows.length
+  }
+
+  /**
+   * «Respingi tutte»: ripristina le modifiche in attesa tra quelle indicate. I file cambiati dopo Claude non si
+   * toccano senza `force`: si restituiscono per chiedere conferma. Un errore su un file non ferma gli altri.
+   */
+  rejectMany(ids: string[], force = false): RejectManyResult {
+    const wanted = new Set(ids)
+    const rows = this.db.listChanges(0).filter((r) => r.status === 'pending' && wanted.has(r.id))
+    const out: RejectManyResult = { rejected: 0, needsForce: [], failed: [] }
+    for (const r of rows) {
+      const res = this.reject(r.id, force)
+      if (res.ok) out.rejected++
+      else if (res.needsForce) out.needsForce.push(r.id)
+      else out.failed.push({ id: r.id, error: res.error ?? 'Errore sconosciuto' })
+    }
+    return out
   }
 
   /**

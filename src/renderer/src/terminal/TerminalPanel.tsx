@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview-react'
 import { AArrowDown, AArrowUp, ChevronDown, GitBranch, Layers, MoreHorizontal, Power, RotateCcw } from 'lucide-react'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, useTerminalSettings } from '@/state/terminalSettings'
@@ -18,12 +18,14 @@ import {
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { bindPanelToSession, hintOf, sheetOfPanel } from '@/workspace/panels'
 import { NewSessionForm } from './NewSessionForm'
+import { PromptBox } from './PromptBox'
 import { TerminalView } from './TerminalView'
 
 /** Pannello terminale: una vista su una sessione, oppure la scelta della sessione da aprire. */
 export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
   const { sessionId, hint } = props.params
   const session = useSessions((s) => (sessionId ? s.sessions[sessionId] : undefined))
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const [missing, setMissing] = useState(false)
   const [exitCode, setExitCode] = useState<number | null>(null)
   const [active, setActive] = useState(props.api.isActive)
@@ -89,7 +91,7 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
   const exited = session?.status === 'exited' || exitCode !== null
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div ref={wrapperRef} className="flex h-full flex-col bg-background">
       <TerminalView
         key={viewId}
         sessionId={sessionId}
@@ -98,6 +100,13 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
         onMissing={() => setMissing(true)}
         onExit={(code) => setExitCode(code)}
       />
+      {session?.kind === 'claude' && !exited && (
+        <PromptBox
+          session={session}
+          viewKey={props.api.id}
+          focusTerminal={() => wrapperRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()}
+        />
+      )}
       {exited && (
         <ExitedBar
           code={session?.exitCode ?? exitCode}

@@ -145,6 +145,20 @@ Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di 
 | 6a | Plugin di linguaggio: pacchetti, CCT Plugin API, adapter e SDK | X1–X9 |
 | 7 | Widget: runtime, API, installazione sicura · **rimandata a dopo la 1.0** | G, A, I |
 | 8 | Palette comandi, rifiniture, installer e aggiornamenti automatici · **versione 1.0** | L7 |
+| 9 | Release 2: progetto `.cctproj` (`ProjectService`, tabella `projects`, menu Progetto) · **fatta** | J1, J2, J9, J10 |
+| 10 | Release 2: documentazione del progetto, `CLAUDE.md` rilevato, pannello Documentazione (`marked` + `DOMPurify`) · **fatta** | J3, J3a, J4, J8 |
+| 11 | Release 2: contesti, `sheets.context_id`, selettore in barra · **fatta** | J5, J7 |
+| 12 | Release 2: documentazione contestuale, Esplora file e Modifiche legati al contesto · **fatta** | J6, J7 |
+| 13 | Release 2: casella di input (`PromptBox`, `sessions:sendPrompt`) · **fatta** | B1–B7 |
+| 14 | Release 2: output smart (`ExplainService`, `claude -p --model haiku`, iframe su `app://explain`) · **fatta** | O1–O8 |
+
+Dettagli, decisioni e prove della release 2 in [piano-release-2.md](piano-release-2.md).
+
+Note tecniche della release 2:
+- **Schema SQLite**: versione 7 (`projects`), 8 (`sheets.context_id`), 9 (`explanations`). Le migrazioni partono dai dati della 1.0.
+- **Fogli e contesti**: tutti i fogli restano montati (le sessioni non si interrompono); le schede in basso mostrano solo quelli del contesto attivo. Gli id dei fogli dei contesti sono del tipo `sviluppo:1a2b3c4d`: conta la parte prima dei due punti per il layout iniziale.
+- **Output smart**: la politica CSP dell'app (`script-src 'self'`) bloccherebbe gli script di un `srcdoc`, che la eredita. La pagina si serve quindi da `app://explain/<token>` con una politica sua negli header (`default-src 'none'`, script e stili solo incorporati) e l'iframe ha `sandbox="allow-scripts"` senza `allow-same-origin`. `index.html` consente `frame-src app:`.
+- **Termini di Claude Code**: `claude -p` con il login dell'utente è uso ordinario; l'app non legge né salva credenziali e non usa `--bare` (che richiede la chiave API). Da rileggere se l'app verrà distribuita come prodotto.
 
 Le fasi 1–3 danno già un'app usabile tutti i giorni come terminale per Claude Code.
 

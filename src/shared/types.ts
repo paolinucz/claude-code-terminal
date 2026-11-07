@@ -1,5 +1,5 @@
 // Tipi condivisi tra processo principale, preload e interfaccia.
-import type { ChangeContents, FileChange, RejectResult, ReviewNote, RevisionResult } from './changes'
+import type { ChangeContents, FileChange, RejectManyResult, RejectResult, ReviewNote, RevisionResult } from './changes'
 import type { ExternalChange, PermissionScope, PermissionsState, SaveResult, ScopeData } from './permissions'
 import type {
   DirEntry,
@@ -25,6 +25,8 @@ import type {
   ShellInfo
 } from './sessions'
 import type { AppInfo, UpdateStatus } from './updates'
+import type { ProjectFile, ProjectInfo, ProjectRef, ProjectResult } from './project'
+import type { ExplainResult } from './explain'
 
 /** Layout serializzato di Dockview (risultato di `api.toJSON()`). Lo trattiamo come dato opaco. */
 export type SerializedLayout = Record<string, unknown>
@@ -33,6 +35,8 @@ export type SerializedLayout = Record<string, unknown>
 export interface Sheet {
   id: string
   name: string
+  /** Contesto del progetto a cui appartiene (J5). `null` = nessun progetto o foglio della 1.0. */
+  contextId: string | null
   /** Disposizione salvata in automatico (L5). `null` = usa il layout predefinito del foglio. */
   layout: SerializedLayout | null
 }
@@ -57,7 +61,7 @@ export interface AppApi {
   workspace: {
     load(): Promise<WorkspaceState>
     /** Salva elenco, nomi e ordine dei fogli e il foglio attivo (non i layout). */
-    saveSheets(sheets: Pick<Sheet, 'id' | 'name'>[], activeSheetId: string | null): Promise<void>
+    saveSheets(sheets: Pick<Sheet, 'id' | 'name' | 'contextId'>[], activeSheetId: string | null): Promise<void>
     /** Salvataggio automatico della disposizione di un foglio. */
     saveSheetLayout(sheetId: string, layout: SerializedLayout | null): Promise<void>
   }
@@ -72,6 +76,10 @@ export interface AppApi {
     contents(id: string): Promise<ChangeContents | null>
     approve(id: string): Promise<void>
     approveAll(sessionId?: string): Promise<number>
+    /** Approva tutte le modifiche in attesa tra quelle indicate. Restituisce quante. */
+    approveMany(ids: string[]): Promise<number>
+    /** Respingi tutte: ripristina le modifiche in attesa tra quelle indicate; i file cambiati dopo Claude vanno confermati con `force`. */
+    rejectMany(ids: string[], force?: boolean): Promise<RejectManyResult>
     /** Rifiuta: ripristina il file e avvisa la sessione al prossimo prompt. */
     reject(id: string, force?: boolean): Promise<RejectResult>
     /** F8: invia accortezze e divieti a Claude; la modifica torna in revisione quando Claude riscrive il file. */
@@ -151,6 +159,8 @@ export interface AppApi {
     resize(sessionId: string, viewId: string, cols: number, rows: number, claim: boolean): void
     setModel(sessionId: string, model: ClaudeModel, effort: ClaudeEffort): Promise<void>
     kill(sessionId: string): Promise<void>
+    /** Casella di input dell'app (B1–B3): manda un messaggio a una sessione Claude Code (incolla + Invio). Rifiuta se Claude aspetta una risposta. */
+    sendPrompt(sessionId: string, text: string): Promise<{ ok: boolean; error?: string }>
     onChanged(cb: (sessions: SessionInfo[]) => void): () => void
     onData(cb: (sessionId: string, seq: number, data: string) => void): () => void
     onResize(cb: (sessionId: string, cols: number, rows: number) => void): () => void
@@ -159,6 +169,30 @@ export interface AppApi {
     onAttention(cb: (a: SessionAttention) => void): () => void
     /** Clic su una notifica di Windows: mostrare la sessione. */
     onReveal(cb: (sessionId: string) => void): () => void
+  }
+  /** Output smart (release 2, fase 14): spiegazione HTML di una modifica, scritta da Haiku, solo a richiesta. */
+  explain: {
+    /** La spiegazione già generata, senza chiamare il modello. */
+    peek(changeId: string): Promise<ExplainResult | null>
+    /** Genera la spiegazione (consuma token del login dell'utente). `force` la rigenera. `requestId` serve per annullare. */
+    run(requestId: string, changeId: string, force?: boolean): Promise<ExplainResult>
+    cancel(requestId: string): Promise<void>
+  }
+  /** Progetti `.cctproj` (release 2, fase 9). */
+  project: {
+    /** Apre un progetto da un `.cctproj` o da una cartella (anche una della 1.0, senza file). */
+    open(path: string): Promise<ProjectResult<ProjectInfo>>
+    /** Crea il `.cctproj` in una cartella e apre il progetto. */
+    create(root: string, name?: string): Promise<ProjectResult<ProjectInfo>>
+    /** Salva il progetto; se il file non c'era lo crea. */
+    save(root: string, data: ProjectFile): Promise<ProjectResult<ProjectInfo>>
+    recents(): Promise<ProjectRef[]>
+    /** Toglie dai recenti, senza cancellare nulla su disco. */
+    forget(root: string): Promise<void>
+    /** Finestra «Apri progetto» per scegliere un `.cctproj`. */
+    pickFile(defaultPath?: string): Promise<string | null>
+    /** Sceglie documenti Markdown (`docs`) o una cartella (`dir`) e li dà come percorsi relativi alla radice. */
+    pickRelative(root: string, mode: 'docs' | 'dir'): Promise<{ paths: string[]; skipped: number }>
   }
   env: {
     claudeCli(refresh?: boolean): Promise<ClaudeCliInfo>

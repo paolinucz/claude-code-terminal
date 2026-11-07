@@ -99,6 +99,32 @@ Il supporto ai linguaggi nell'editor (completamento, errori, vai alla definizion
 
 Plugin preparati nella fase 6a: TypeScript/JavaScript, Python, YAML, Java, Maven (con XML), Gradle, Angular.
 
+## 6b. Progetti, contesti, casella di input e output smart (release 2)
+
+Il progetto tiene insieme pannelli, documentazione e contesti. Il piano, le decisioni e cosa è stato provato sono in [piano-release-2.md](piano-release-2.md).
+
+| ID | Requisito | Fase |
+| --- | --- | --- |
+| J1 | Un progetto è un file `.cctproj` (JSON versionato) nella radice. Si crea da «Nuovo progetto», si apre da file o cartella e compare nei recenti. | 9 |
+| J2 | Il file contiene nome, cartelle di contesto, documentazione globale, contesti e impostazioni predefinite (modello ed effort proposti per le cartelle nuove). | 9 |
+| J3, J3a | `CLAUDE.md` si seleziona da solo se presente e segue le modifiche; se manca, un avviso (nel pannello Documentazione e nel menu Progetto) invita a crearlo. L'app non lo crea mai senza una scelta dell'utente. | 10 |
+| J4 | Gli altri riferimenti globali si scelgono solo a mano. | 10 |
+| J5 | Un progetto ha più contesti, tutti aperti insieme: si creano, modificano, duplicano, riordinano ed eliminano dal selettore in barra o dalla palette. Ogni contesto ha i suoi fogli. | 11 |
+| J6 | Ogni contesto ha la sua documentazione, in più di quella globale. | 12 |
+| J7 | Esplora file, nuovo terminale, Documentazione e Modifiche seguono il contesto del foglio (cartella d'ambito). Le modifiche si possono limitare alle cartelle del contesto o mostrare tutte. | 11, 12 |
+| J8 | Pannello Documentazione con indice delle sezioni, ricerca, link ai file e pulsante «Modifica». Il Markdown si sanifica: niente script, immagini né attributi di evento. | 10 |
+| J9 | Le cartelle usate nella 1.0 si aprono come progetti «senza file»: il file si crea solo su richiesta. I fogli della 1.0 restano e il primo contesto li prende. | 9, 11 |
+| J10 | Il `.cctproj` ha solo percorsi relativi e nessun dato personale, così si può versionare. | 9 |
+| B1–B3 | Sotto ogni terminale Claude c'è una casella di testo multiriga (Invio manda, Maiusc+Invio va a capo, invertibile). Il testo arriva come incolla seguita da Invio. Si disattiva quando Claude aspetta una risposta a un menu o a un permesso e rimanda al terminale, che resta interattivo. | 13 |
+| B4 | Cronologia dei messaggi per progetto (frecce) e bozza per vista. | 13 |
+| B5, B6 | `@` suggerisce i file della cartella, `/` i comandi di Claude Code; un pulsante inserisce il riferimento a un documento del progetto o al file dell'editor. | 13 |
+| O1–O3 | Nelle Modifiche, la vista «Spiegazione» genera, solo a richiesta, una pagina HTML con `claude -p --model haiku` (login dell'utente, nessuno strumento, un solo turno). | 14 |
+| O4 | La pagina gira in un iframe isolato (`sandbox="allow-scripts"`, politica CSP senza rete) servito da `app://explain`. | 14 |
+| O5, O6 | La spiegazione si salva legata all'hash del diff (riaprirla non consuma token), si può rigenerare e annullare; se fallisce si mostra un riepilogo in testo. | 14 |
+| F9 | «Approva tutte» e «Respingi tutte» (anche per sessione) agiscono sulle sole modifiche visibili. Respingere chiede conferma; i file cambiati dopo Claude hanno una seconda conferma. | 14 |
+| B8 | Prompt predefiniti (nome e testo), salvati nelle impostazioni dell'app e validi per tutti i progetti: si mandano con un clic dalla palette comandi alla sessione Claude del foglio attivo, e si gestiscono da una finestra. | 13 |
+| O8 | L'output smart si può nascondere e riattivare dalla palette. Modello fisso su Haiku. | 14 |
+
 ## 7. Widget
 
 > **Rimandato a dopo la 1.0** (decisione del 7 novembre 2026). Questa sezione verrà rivista insieme ai plugin di linguaggio (§6a) prima dello sviluppo. Nella 1.0 il pannello Widget non c'è.

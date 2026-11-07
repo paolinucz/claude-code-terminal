@@ -1,6 +1,7 @@
 import type { IDockviewPanelProps } from 'dockview-react'
 import { PortalScope } from '@/components/ui-kit'
 import { ChangesPanel } from '@/changes/ChangesPanel'
+import { DocsPanel } from '@/docs/DocsPanel'
 import { EditorPanel } from '@/files/EditorPanel'
 import { ExplorerPanel } from '@/files/ExplorerPanel'
 import { ProblemsPanel } from '@/files/ProblemsPanel'
@@ -18,7 +19,7 @@ export function PanelHost(props: IDockviewPanelProps<PanelParams>) {
       case 'terminal':
         return <TerminalPanel {...props} />
       case 'changes':
-        return <ChangesPanel />
+        return <ChangesPanel {...props} />
       case 'permissions':
         return <PermissionsPanel {...props} />
       case 'explorer':
@@ -29,6 +30,8 @@ export function PanelHost(props: IDockviewPanelProps<PanelParams>) {
         return <ProblemsPanel />
       case 'plugins':
         return <PluginsPanel />
+      case 'docs':
+        return <DocsPanel {...props} />
       default:
         return <PlaceholderPanel {...props} />
     }

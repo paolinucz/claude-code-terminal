@@ -71,6 +71,13 @@ export interface RejectResult {
   error?: string
 }
 
+/** Esito di «Respingi tutte»: quante ripristinate, quali serve confermare (file cambiati dopo Claude) e quali sono fallite. */
+export interface RejectManyResult {
+  rejected: number
+  needsForce: string[]
+  failed: { id: string; error: string }[]
+}
+
 export interface RevisionResult {
   ok: boolean
   error?: string

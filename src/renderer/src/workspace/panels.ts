@@ -139,7 +139,8 @@ export function buildDefaultLayout(api: DockviewApi, sheetId: string): void {
   api.clear()
   // Le dimensioni iniziali di Dockview non sempre vengono rispettate: si fissano dopo aver creato i gruppi.
   const size = (panelId: string, s: { width?: number; height?: number }) => api.getPanel(panelId)?.group.api.setSize(s)
-  switch (sheetId) {
+  // I fogli dei contesti hanno id come «sviluppo:1a2b3c4d»: conta la parte prima dei due punti.
+  switch (sheetId.split(':')[0]) {
     case 'sviluppo': {
       const term = addPanel(api, 'terminal')
       const explorer = addPanel(api, 'explorer', { position: { referencePanel: term, direction: 'left' } })

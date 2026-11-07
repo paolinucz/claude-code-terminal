@@ -7,8 +7,16 @@ import { Segmented } from '@/components/ui-kit'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { CHANGE_STATUS_COLORS, CHANGE_STATUS_LABELS, pendingCount, splitPath, useChanges } from '@/state/changes'
 import { useWorkspace } from '@/state/workspace'
+import { useProject } from '@/state/project'
+import { sheetOfPanel } from '@/workspace/panels'
+import type { PanelParams } from '@/panels/kinds'
+import type { IDockviewPanelProps } from 'dockview-react'
+import { contextRoots } from '@shared/project'
+import { normPath } from '@shared/files'
 import type { LineSelection } from './DiffView'
 import { RevisionComposer } from './RevisionComposer'
+import { SmartExplain } from './SmartExplain'
+import { useExplainSettings } from '@/state/explain'
 
 const DiffView = lazy(() => import('./DiffView'))
 
@@ -17,6 +25,12 @@ const FILTERS = [
   { id: 'open', label: 'Aperte' },
   { id: 'all', label: 'Tutte' }
 ] as const satisfies readonly { id: Filter; label: string }[]
+
+type View = 'diff' | 'explain'
+const VIEWS = [
+  { id: 'diff', label: 'Diff' },
+  { id: 'explain', label: 'Spiegazione' }
+] as const satisfies readonly { id: View; label: string }[]
 
 type Base = 'original' | 'lastRequest'
 const BASES = [
@@ -28,13 +42,37 @@ const BASES = [
  * Pannello Modifiche (F5–F8): i file toccati da Claude, sessione per sessione, con il diff
  * prima ↔ dopo e i pulsanti Approva / Richiedi modifiche / Rifiuta.
  */
-export function ChangesPanel() {
-  const changes = useChanges((s) => s.changes)
+export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
+  const allChanges = useChanges((s) => s.changes)
   const setStatus = useWorkspace((s) => s.setStatus)
+  const project = useProject((s) => s.active)
+  const sheets = useWorkspace((s) => s.sheets)
+  const [onlyContext, setOnlyContext] = useState(true)
+  const explainOn = useExplainSettings((s) => s.enabled)
+  const [view, setView] = useState<View>('diff')
+  useEffect(() => void useExplainSettings.getState().load(), [])
+
+  // J7: con un progetto aperto, le modifiche si limitano alle cartelle del contesto del foglio (con scelta di vederle tutte).
+  const sheetId = sheetOfPanel(props.containerApi)
+  const scopeRoots = useMemo(() => {
+    const ctxId = sheets.find((s) => s.id === sheetId)?.contextId
+    const ctx = project?.data.contexts.find((c) => c.id === ctxId)
+    return project && ctx ? contextRoots(project.root, ctx) : null
+  }, [project, sheets, sheetId])
+  const changes = useMemo(() => {
+    if (!scopeRoots || !onlyContext) return allChanges
+    const roots = scopeRoots.map(normPath)
+    return allChanges.filter((c) => {
+      const p = normPath(c.filePath)
+      return roots.some((r) => p === r || p.startsWith(r + '\\'))
+    })
+  }, [allChanges, scopeRoots, onlyContext])
   const [filter, setFilter] = useState<Filter>('open')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [contents, setContents] = useState<ChangeContents | null>(null)
   const [rejecting, setRejecting] = useState<{ change: FileChange; force: boolean } | null>(null)
+  /** «Respingi tutte»: conferma, poi (se serve) conferma separata per i file cambiati dopo Claude. */
+  const [bulk, setBulk] = useState<{ ids: string[]; label: string; created: number; stage: 'confirm' | 'force'; forceIds?: string[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [composing, setComposing] = useState(false)
   const [composeError, setComposeError] = useState('')
@@ -81,6 +119,33 @@ export function ChangesPanel() {
       stale = true
     }
   }, [selected?.id, selected?.updatedAt, selected?.status, selected?.requests])
+
+  /** Modifiche in attesa tra quelle visibili (scelta del contesto compresa): su queste agiscono «tutte». */
+  const pendingIds = useMemo(() => changes.filter((c) => c.status === 'pending').map((c) => c.id), [changes])
+
+  const approveIds = async (ids: string[], label: string) => {
+    const n = await api.changes.approveMany(ids)
+    setStatus(`${n} ${n === 1 ? 'modifica approvata' : 'modifiche approvate'} (${label})`)
+  }
+
+  const startRejectMany = (ids: string[], label: string) => {
+    const created = changes.filter((c) => ids.includes(c.id) && c.created).length
+    setBulk({ ids, label, created, stage: 'confirm' })
+  }
+
+  /** Ripristina tutte le modifiche scelte. Quelle cambiate dopo Claude si chiedono a parte (non si sovrascrive in silenzio). */
+  const runRejectMany = async (force: boolean) => {
+    if (!bulk) return
+    const ids = force ? bulk.forceIds ?? [] : bulk.ids
+    setBusy(true)
+    const res = await api.changes.rejectMany(ids, force)
+    setBusy(false)
+    const failed = res.failed.length
+    const base = `${res.rejected} ${res.rejected === 1 ? 'modifica respinta' : 'modifiche respinte'}: Claude lo saprà al prossimo messaggio`
+    setStatus(failed ? `${base} · ${failed} non ripristinate: ${res.failed[0].error}` : base)
+    if (!force && res.needsForce.length > 0) setBulk({ ...bulk, stage: 'force', forceIds: res.needsForce })
+    else setBulk(null)
+  }
 
   const nextOpenAfter = (id: string) => {
     const list = changes.filter((c) => c.status === 'pending')
@@ -144,6 +209,12 @@ export function ChangesPanel() {
             </div>
             <Segmented label="Filtro" size="sm" value={filter} onChange={setFilter} options={FILTERS} className="w-36" />
           </div>
+          {scopeRoots && (
+            <label className="flex cursor-pointer items-center gap-2 px-3 pb-2 text-[12px] text-text-subtle">
+              <input type="checkbox" checked={onlyContext} onChange={(e) => setOnlyContext(e.target.checked)} />
+              Solo le cartelle di questo contesto
+            </label>
+          )}
           <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-2" role="listbox" aria-label="File modificati">
             {groups.length === 0 && (
               <p className="px-2 py-6 text-center text-[12px] leading-relaxed text-text-faint">
@@ -157,16 +228,22 @@ export function ChangesPanel() {
                 <div className="flex items-center gap-2 px-2 pt-2 pb-1">
                   <span className="truncate text-[11px] font-medium tracking-wide text-text-faint uppercase">{g.title}</span>
                   {g.items.some((c) => c.status === 'pending') && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const n = await api.changes.approveAll(sessionId)
-                        setStatus(`${n} ${n === 1 ? 'modifica approvata' : 'modifiche approvate'} per «${g.title}»`)
-                      }}
-                      className="ml-auto shrink-0 text-[11px] text-text-subtle hover:text-foreground"
-                    >
-                      Approva sessione
-                    </button>
+                    <span className="ml-auto flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void approveIds(g.items.filter((c) => c.status === 'pending').map((c) => c.id), `della sessione «${g.title}»`)}
+                        className="text-[11px] text-text-subtle hover:text-foreground"
+                      >
+                        Approva sessione
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startRejectMany(g.items.filter((c) => c.status === 'pending').map((c) => c.id), `della sessione «${g.title}»`)}
+                        className="text-[11px] text-text-subtle hover:text-danger"
+                      >
+                        Respingi sessione
+                      </button>
+                    </span>
                   )}
                 </div>
                 {g.items.map((c) => {
@@ -210,16 +287,20 @@ export function ChangesPanel() {
             ))}
           </div>
           {toReview > 1 && (
-            <div className="border-t border-border p-2">
+            <div className="flex gap-2 border-t border-border p-2">
               <button
                 type="button"
-                onClick={async () => {
-                  const n = await api.changes.approveAll()
-                  setStatus(`${n} modifiche approvate`)
-                }}
-                className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-border text-text-muted transition-colors hover:bg-border hover:text-foreground"
+                onClick={() => void approveIds(pendingIds, 'tutte quelle visibili')}
+                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-ok/50 text-ok transition-colors hover:bg-ok/10"
               >
                 <CheckCheck size={14} /> Approva tutte ({toReview})
+              </button>
+              <button
+                type="button"
+                onClick={() => startRejectMany(pendingIds, '')}
+                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-danger/50 text-danger transition-colors hover:bg-danger/10"
+              >
+                <Undo2 size={14} /> Respingi tutte ({toReview})
               </button>
             </div>
           )}
@@ -234,6 +315,7 @@ export function ChangesPanel() {
                   {splitPath(selected).name}
                   <span className="text-text-faint"> · prima ↔ dopo</span>
                 </span>
+                {explainOn && <Segmented label="Vista" size="sm" value={view} onChange={setView} options={VIEWS} className="w-44" />}
                 {contents?.modifiedSince && (
                   <span className="shrink-0 rounded border border-warn/40 px-1.5 text-[11px] text-warn" title="Il file su disco è diverso dall'ultima versione scritta da Claude">
                     cambiato dopo
@@ -325,7 +407,9 @@ export function ChangesPanel() {
               )}
 
               <div className="relative min-h-0 flex-1 bg-background">
-                {contents === null ? (
+                {view === 'explain' && explainOn ? (
+                  <SmartExplain change={selected} />
+                ) : contents === null ? (
                   <p className="p-4 text-text-faint">Caricamento…</p>
                 ) : contents.binary ? (
                   <p className="p-4 text-text-subtle">File binario: il diff non è disponibile.</p>
@@ -381,6 +465,24 @@ export function ChangesPanel() {
         destructive
         onCancel={() => setRejecting(null)}
         onConfirm={() => rejecting && void reject(rejecting.change, rejecting.force)}
+      />
+
+      <ConfirmDialog
+        open={bulk !== null}
+        title={
+          bulk?.stage === 'force'
+            ? `${bulk.forceIds?.length ?? 0} ${bulk.forceIds?.length === 1 ? 'file è cambiato' : 'file sono cambiati'} dopo la modifica di Claude`
+            : `Respingere ${bulk?.ids.length ?? 0} ${bulk?.ids.length === 1 ? 'modifica' : 'modifiche'}${bulk?.label ? ` ${bulk.label}` : ''}?`
+        }
+        description={
+          bulk?.stage === 'force'
+            ? 'Questi file non sono più quelli scritti da Claude (li hai modificati tu, o sono cambiati dopo). Ripristinandoli perdi anche quei cambiamenti. Gli altri sono già stati ripristinati.'
+            : `I file tornano alla versione precedente${bulk && bulk.created > 0 ? `; ${bulk.created} ${bulk.created === 1 ? 'file creato' : 'file creati'} da Claude ${bulk.created === 1 ? 'viene cancellato' : 'vengono cancellati'}` : ''}. I file cambiati dopo Claude non si toccano senza una seconda conferma. Claude lo saprà al prossimo messaggio della sessione.`
+        }
+        confirmLabel={bulk?.stage === 'force' ? 'Ripristina comunque' : 'Respingi tutte'}
+        destructive
+        onCancel={() => setBulk(null)}
+        onConfirm={() => void runRejectMany(bulk?.stage === 'force')}
       />
     </div>
   )

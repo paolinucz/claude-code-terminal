@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import type { Sheet } from '@shared/types'
-import { useWorkspace } from '@/state/workspace'
+import { sheetsOf, useWorkspace } from '@/state/workspace'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -32,7 +32,9 @@ function draggedTerminal(): { sheetId: string; panelId: string; title: string } 
 
 /** Schede dei fogli in basso, come in Excel (L1): crea, rinomina, riordina, chiudi. */
 export function SheetTabs() {
-  const { sheets, activeSheetId, status, setActive, addSheet, renameSheet, closeSheet, moveSheet } = useWorkspace()
+  const { sheets: allSheets, contextId, activeSheetId, status, setActive, addSheet, renameSheet, closeSheet, moveSheet } = useWorkspace()
+  // Le schede sono quelle del contesto attivo; gli altri fogli restano montati in background.
+  const sheets = useMemo(() => sheetsOf(allSheets, contextId), [allSheets, contextId])
   const [editing, setEditing] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)

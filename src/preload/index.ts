@@ -25,6 +25,8 @@ const api: AppApi = {
     contents: (id) => ipcRenderer.invoke('changes:contents', id),
     approve: (id) => ipcRenderer.invoke('changes:approve', id),
     approveAll: (sessionId) => ipcRenderer.invoke('changes:approveAll', sessionId),
+    approveMany: (ids) => ipcRenderer.invoke('changes:approveMany', ids),
+    rejectMany: (ids, force) => ipcRenderer.invoke('changes:rejectMany', ids, force),
     reject: (id, force) => ipcRenderer.invoke('changes:reject', id, force),
     requestRevision: (id, notes) => ipcRenderer.invoke('changes:requestRevision', id, notes),
     onChanged: (cb) => on('changes:changed', cb)
@@ -88,12 +90,27 @@ const api: AppApi = {
     resize: (sessionId, viewId, cols, rows, claim) => ipcRenderer.send('sessions:resize', sessionId, viewId, cols, rows, claim),
     setModel: (sessionId, model, effort) => ipcRenderer.invoke('sessions:setModel', sessionId, model, effort),
     kill: (sessionId) => ipcRenderer.invoke('sessions:kill', sessionId),
+    sendPrompt: (sessionId, text) => ipcRenderer.invoke('sessions:sendPrompt', sessionId, text),
     onChanged: (cb) => on('sessions:changed', cb),
     onData: (cb) => on('session:data', cb),
     onResize: (cb) => on('session:resize', cb),
     onExit: (cb) => on('session:exit', cb),
     onAttention: (cb) => on('session:attention', cb),
     onReveal: (cb) => on('session:reveal', cb)
+  },
+  explain: {
+    peek: (changeId) => ipcRenderer.invoke('explain:peek', changeId),
+    run: (requestId, changeId, force) => ipcRenderer.invoke('explain:run', requestId, changeId, force),
+    cancel: (requestId) => ipcRenderer.invoke('explain:cancel', requestId)
+  },
+  project: {
+    open: (path) => ipcRenderer.invoke('project:open', path),
+    create: (root, name) => ipcRenderer.invoke('project:create', root, name),
+    save: (root, data) => ipcRenderer.invoke('project:save', root, data),
+    recents: () => ipcRenderer.invoke('project:recents'),
+    forget: (root) => ipcRenderer.invoke('project:forget', root),
+    pickFile: (defaultPath) => ipcRenderer.invoke('project:pickFile', defaultPath),
+    pickRelative: (root, mode) => ipcRenderer.invoke('project:pickRelative', root, mode)
   },
   env: {
     claudeCli: (refresh) => ipcRenderer.invoke('env:claudeCli', refresh),

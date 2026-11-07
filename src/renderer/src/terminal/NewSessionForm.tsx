@@ -17,6 +17,8 @@ import { cn } from '@/lib/cn'
 import type { SessionHint } from '@/panels/kinds'
 import { Segmented } from '@/components/ui-kit'
 import { sessionList, STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/sessions'
+import { useProject, workdirForSheet } from '@/state/project'
+import { useWorkspace } from '@/state/workspace'
 import { sessionLocations, type Placement } from '@/workspace/panels'
 
 type Kind = 'claude' | 'shell'
@@ -81,8 +83,10 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
     })
     void api.env.recentProjects().then(async (list) => {
       setRecent(list)
-      if (!hint?.cwd) setCwd((c) => c || list[0]?.cwd || '')
-      if (!hint?.cwd && list.length === 0) {
+      // Con un progetto aperto la cartella parte da quella del contesto del foglio attivo (J7).
+      const workdir = workdirForSheet(useWorkspace.getState().activeSheetId)
+      if (!hint?.cwd) setCwd((c) => c || workdir || list[0]?.cwd || '')
+      if (!hint?.cwd && !workdir && list.length === 0) {
         const home = await api.env.homeDir()
         setCwd((c) => c || home)
       }
@@ -94,7 +98,14 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
     if (!cwd || hint?.model) return
     let stale = false
     void api.env.projectPrefs(cwd).then((p) => {
-      if (stale || !p) return
+      if (stale) return
+      if (!p) {
+        // Cartella mai usata: valgono le impostazioni predefinite del progetto, se ci sono (J2).
+        const defaults = useProject.getState().active?.data.defaults
+        if (defaults?.model) setModel(defaults.model)
+        if (defaults?.effort) setEffort(defaults.effort)
+        return
+      }
       setModel(p.model)
       setEffort(p.effort)
       setAddDirs(p.addDirs)
