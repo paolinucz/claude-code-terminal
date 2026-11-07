@@ -526,6 +526,13 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
       },
       async homeDir() {
         return 'C:\\Users\\demo'
+      },
+      async pathStatus(path) {
+        if (!/^[a-zA-Z]:\\|^\\\\/.test(path)) return 'invalid'
+        return /nuovo|new/i.test(path) ? 'missing' : 'dir'
+      },
+      async createFolder() {
+        return { ok: true }
       }
     }
   }

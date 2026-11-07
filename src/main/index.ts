@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, shell, type WebContents } from 'electron'
+import { existsSync } from 'node:fs'
+import { mkdir, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -170,6 +172,14 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
+/** Percorso assoluto di Windows (C:\… o \\server\…) senza caratteri non ammessi nei nomi. */
+function isValidFolderPath(path: string): boolean {
+  if (typeof path !== 'string' || path.length > 240) return false
+  const m = /^([a-zA-Z]:\\|\\\\[^\\]+\\[^\\]+\\?)(.*)$/.exec(path.replace(/\//g, '\\'))
+  if (!m) return false
+  return m[2].split('\\').every((part) => !/[<>:"|?*\x00-\x1f]/.test(part) && !/[ .]$/.test(part) && part !== '..')
+}
+
 function isPopoutUrl(url: string): boolean {
   try {
     const u = new URL(url)
@@ -316,11 +326,32 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('env:recentProjects', () => store.recentProjects())
   ipcMain.handle('env:saveProjectPrefs', (_e, p: Omit<ProjectPrefs, 'updatedAt'>) => store.saveProjectPrefs(p))
   ipcMain.handle('env:homeDir', () => homedir())
-  ipcMain.handle('env:pickFolder', async (e, defaultPath?: string) => {
+  ipcMain.handle('env:pickFolder', async (e, defaultPath?: string, title?: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    const opts: Electron.OpenDialogOptions = { title: 'Scegli la cartella', defaultPath, properties: ['openDirectory'] }
+    const opts: Electron.OpenDialogOptions = {
+      title: title ?? 'Scegli la cartella',
+      defaultPath: defaultPath && existsSync(defaultPath) ? defaultPath : undefined,
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
+    }
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return res.canceled ? null : (res.filePaths[0] ?? null)
+  })
+  ipcMain.handle('env:pathStatus', async (_e, path: string) => {
+    if (!isValidFolderPath(path)) return 'invalid'
+    try {
+      return (await stat(path)).isDirectory() ? 'dir' : 'file'
+    } catch {
+      return 'missing'
+    }
+  })
+  ipcMain.handle('env:createFolder', async (_e, path: string) => {
+    if (!isValidFolderPath(path)) return { ok: false, error: 'Scrivi un percorso completo, per esempio D:\\PROGETTI\\nuovo-progetto.' }
+    try {
+      await mkdir(path, { recursive: true })
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: `Impossibile creare la cartella: ${(err as Error).message}` }
+    }
   })
 }
 

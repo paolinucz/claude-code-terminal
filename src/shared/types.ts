@@ -153,7 +153,11 @@ export interface AppApi {
     projectPrefs(cwd: string): Promise<ProjectPrefs | null>
     recentProjects(): Promise<ProjectPrefs[]>
     saveProjectPrefs(p: Omit<ProjectPrefs, 'updatedAt'>): Promise<void>
-    pickFolder(defaultPath?: string): Promise<string | null>
+    pickFolder(defaultPath?: string, title?: string): Promise<string | null>
     homeDir(): Promise<string>
+    /** Cosa c'è a quel percorso: cartella, file, niente, oppure percorso non valido (non assoluto). */
+    pathStatus(path: string): Promise<'dir' | 'file' | 'missing' | 'invalid'>
+    /** Crea la cartella (e quelle che mancano sopra), per un progetto nuovo. */
+    createFolder(path: string): Promise<{ ok: boolean; error?: string }>
   }
 }

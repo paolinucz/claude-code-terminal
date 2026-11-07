@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { FolderOpen, History, Link2, Plus, SquareTerminal, X } from 'lucide-react'
+import { FolderOpen, FolderPlus, History, Link2, Plus, SquareTerminal, X } from 'lucide-react'
 import {
   CLAUDE_EFFORTS,
   CLAUDE_MODELS,
@@ -118,11 +118,36 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
     if (mode === 'attach') setAttachId((id) => (id && live.some((s) => s.id === id) ? id : (live[0]?.id ?? null)))
   }, [mode, live])
 
-  const browse = async (current: string) => api.env.pickFolder(current || undefined)
+  const browse = async (current: string, title?: string) => api.env.pickFolder(current || undefined, title)
+
+  // Cosa c'è al percorso scritto: una cartella nuova si crea all'avvio.
+  const [folder, setFolder] = useState<FolderStatus | null>(null)
+  useEffect(() => {
+    if (!cwd.trim()) return setFolder(null)
+    let stale = false
+    const t = setTimeout(() => void api.env.pathStatus(cwd.trim()).then((s) => !stale && setFolder(s)), 200)
+    return () => {
+      stale = true
+      clearTimeout(t)
+    }
+  }, [cwd])
+  const needsFolder = kind === 'shell' || mode === 'new'
+  const folderBlocked = needsFolder && (folder === 'invalid' || folder === 'file')
+  const willCreate = needsFolder && folder === 'missing'
+
+  // «Nuovo progetto…»: cartella madre + nome.
+  const [newProject, setNewProject] = useState<{ parent: string; name: string } | null>(null)
+  const startNewProject = async () => {
+    const base = recent[0]?.cwd ?? cwd
+    const parent = base ? base.replace(/[\\/][^\\/]+[\\/]?$/, '') || base : await api.env.homeDir()
+    setNewProject({ parent, name: '' })
+  }
+  const newProjectPath = newProject && newProject.name.trim() ? `${newProject.parent.replace(/[\\/]+$/, '')}\\${newProject.name.trim()}` : ''
 
   const cliMissing = kind === 'claude' && mode !== 'attach' && cli !== null && !cli.path
   const canSubmit =
     !busy &&
+    !folderBlocked &&
     (kind === 'shell'
       ? Boolean(shell && cwd)
       : mode === 'new'
@@ -135,9 +160,16 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
     setError('')
     setBusy(true)
     try {
+      // Progetto nuovo: la cartella si crea prima di avviare il terminale.
+      const dir = cwd.trim()
+      if (needsFolder && (await api.env.pathStatus(dir)) === 'missing') {
+        const res = await api.env.createFolder(dir)
+        if (!res.ok) throw new Error(res.error ?? 'Impossibile creare la cartella.')
+        setFolder('dir')
+      }
       let session: SessionInfo
       if (kind === 'shell') {
-        session = await api.sessions.create({ kind: 'shell', shell: shell!, cwd })
+        session = await api.sessions.create({ kind: 'shell', shell: shell!, cwd: dir })
       } else if (mode === 'attach') {
         const s = live.find((x) => x.id === attachId)
         if (!s) throw new Error('La sessione scelta non è più attiva.')
@@ -147,7 +179,7 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
         session = await api.sessions.create({
           kind: 'claude',
           claude: {
-            cwd: resumed?.cwd ?? cwd,
+            cwd: resumed?.cwd ?? dir,
             model,
             effort,
             addDirs,
@@ -156,7 +188,7 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
             title: resumed?.title
           }
         })
-        void api.env.saveProjectPrefs({ cwd, model, effort, addDirs })
+        void api.env.saveProjectPrefs({ cwd: resumed?.cwd ?? dir, model, effort, addDirs })
       }
       onDone(session, placement)
     } catch (err) {
@@ -166,7 +198,9 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
     }
   }
 
-  const cta = kind === 'shell' ? 'Apri shell' : mode === 'new' ? 'Avvia Claude' : mode === 'resume' ? 'Riprendi sessione' : 'Collega'
+  const cta =
+    (willCreate ? 'Crea cartella e ' : '') +
+    (kind === 'shell' ? (willCreate ? 'apri shell' : 'Apri shell') : mode === 'new' ? (willCreate ? 'avvia Claude' : 'Avvia Claude') : mode === 'resume' ? 'Riprendi sessione' : 'Collega')
 
   return (
     <form
@@ -204,21 +238,19 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
 
       {/* Cartella di lavoro (W1) */}
       {!(kind === 'claude' && mode === 'attach') && (
-        <Field label="Cartella">
+        <Field label="Cartella del progetto" hint={kind === 'claude' ? 'Claude crea e modifica i file qui' : undefined}>
           <div className="flex gap-2">
             <input
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
-              list="cct-recent-projects"
               spellCheck={false}
+              placeholder="D:\PROGETTI\nome-progetto"
               aria-label="Cartella di lavoro"
-              className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 font-mono text-[12px] text-foreground outline-none focus:border-brand"
+              className={cn(
+                'h-9 min-w-0 flex-1 rounded-lg border bg-background px-3 font-mono text-[12px] text-foreground outline-none focus:border-brand placeholder:text-text-faint',
+                folderBlocked ? 'border-danger' : 'border-input'
+              )}
             />
-            <datalist id="cct-recent-projects">
-              {recent.map((r) => (
-                <option key={r.cwd} value={r.cwd} />
-              ))}
-            </datalist>
             <SmallButton
               onClick={async () => {
                 const dir = await browse(cwd)
@@ -227,7 +259,87 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
             >
               <FolderOpen size={14} /> Sfoglia…
             </SmallButton>
+            {needsFolder && (
+              <SmallButton onClick={() => (newProject ? setNewProject(null) : void startNewProject())} pressed={Boolean(newProject)}>
+                <FolderPlus size={14} /> Nuovo progetto…
+              </SmallButton>
+            )}
           </div>
+
+          {newProject && (
+            <div className="mt-1 flex flex-col gap-2 rounded-lg border border-border bg-surface-2 p-3">
+              <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2">
+                <span className="text-[12px] text-text-subtle">Dove</span>
+                <div className="flex gap-2">
+                  <input
+                    value={newProject.parent}
+                    onChange={(e) => setNewProject({ ...newProject, parent: e.target.value })}
+                    onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
+                    spellCheck={false}
+                    aria-label="Cartella in cui creare il progetto"
+                    className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[12px] text-foreground outline-none focus:border-brand"
+                  />
+                  <SmallButton
+                    compact
+                    onClick={async () => {
+                      const dir = await browse(newProject.parent, 'Dove creare il nuovo progetto')
+                      if (dir) setNewProject({ ...newProject, parent: dir })
+                    }}
+                  >
+                    Sfoglia…
+                  </SmallButton>
+                </div>
+                <span className="text-[12px] text-text-subtle">Nome</span>
+                <input
+                  value={newProject.name}
+                  onChange={(e) => setNewProject({ ...newProject, name: e.target.value.replace(/[\\/]/g, '') })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      if (newProjectPath) (setCwd(newProjectPath), setNewProject(null))
+                    }
+                  }}
+                  autoFocus
+                  spellCheck={false}
+                  placeholder="nome-progetto"
+                  aria-label="Nome del nuovo progetto"
+                  className="h-8 rounded-md border border-input bg-background px-2 font-mono text-[12px] text-foreground outline-none placeholder:text-text-faint focus:border-brand"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-faint">{newProjectPath || 'Scegli dove e scrivi il nome della cartella'}</span>
+                <SmallButton compact disabled={!newProjectPath} onClick={() => (setCwd(newProjectPath), setNewProject(null))}>
+                  Usa questa cartella
+                </SmallButton>
+              </div>
+            </div>
+          )}
+
+          {needsFolder && folder && <FolderNote status={folder} />}
+
+          {recent.length > 0 && (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-text-faint">Recenti:</span>
+              {recent.slice(0, 6).map((r) => {
+                const active = r.cwd.toLowerCase() === cwd.trim().toLowerCase()
+                return (
+                  <button
+                    key={r.cwd}
+                    type="button"
+                    title={r.cwd}
+                    aria-pressed={active}
+                    onClick={() => setCwd(r.cwd)}
+                    className={cn(
+                      'rounded-md border px-2 py-0.5 font-mono text-[11px] transition-colors',
+                      active ? 'border-brand bg-border text-foreground' : 'border-border text-text-muted hover:bg-surface-2 hover:text-foreground'
+                    )}
+                  >
+                    {r.cwd.split(/[\\/]/).filter(Boolean).pop() ?? r.cwd}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </Field>
       )}
 
@@ -408,16 +520,35 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-function SmallButton({ onClick, children }: { onClick(): void; children: ReactNode }) {
+function SmallButton(props: { onClick(): void; children: ReactNode; compact?: boolean; disabled?: boolean; pressed?: boolean }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-text-muted transition-colors hover:bg-border hover:text-foreground"
+      onClick={props.onClick}
+      disabled={props.disabled}
+      aria-pressed={props.pressed}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1.5 border px-3 text-text-muted transition-colors hover:bg-border hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
+        props.compact ? 'h-8 rounded-md text-[12px]' : 'h-9 rounded-lg',
+        props.pressed ? 'border-brand bg-border text-foreground' : 'border-border'
+      )}
     >
-      {children}
+      {props.children}
     </button>
   )
+}
+
+type FolderStatus = 'dir' | 'file' | 'missing' | 'invalid'
+
+/** Cosa succederà con la cartella scritta: chiaro prima di avviare. */
+function FolderNote({ status }: { status: FolderStatus }) {
+  const text: Record<FolderStatus, { cls: string; msg: string }> = {
+    dir: { cls: 'text-text-faint', msg: 'Il terminale partirà in questa cartella: i file nuovi verranno creati qui.' },
+    missing: { cls: 'text-warn', msg: 'La cartella non esiste ancora: verrà creata all\'avvio.' },
+    invalid: { cls: 'text-danger', msg: 'Scrivi un percorso completo, per esempio D:\\PROGETTI\\nuovo-progetto.' },
+    file: { cls: 'text-danger', msg: 'Questo percorso è un file, non una cartella.' }
+  }
+  return <p className={cn('text-[11px]', text[status].cls)}>{text[status].msg}</p>
 }
 
 function List({ label, empty, children }: { label: string; empty: string; children: ReactNode }) {

@@ -94,8 +94,10 @@ const api: AppApi = {
     projectPrefs: (cwd) => ipcRenderer.invoke('env:projectPrefs', cwd),
     recentProjects: () => ipcRenderer.invoke('env:recentProjects'),
     saveProjectPrefs: (p) => ipcRenderer.invoke('env:saveProjectPrefs', p),
-    pickFolder: (defaultPath) => ipcRenderer.invoke('env:pickFolder', defaultPath),
-    homeDir: () => ipcRenderer.invoke('env:homeDir')
+    pickFolder: (defaultPath, title) => ipcRenderer.invoke('env:pickFolder', defaultPath, title),
+    homeDir: () => ipcRenderer.invoke('env:homeDir'),
+    pathStatus: (path) => ipcRenderer.invoke('env:pathStatus', path),
+    createFolder: (path) => ipcRenderer.invoke('env:createFolder', path)
   }
 }
 
