@@ -101,7 +101,8 @@ export function takePendingReveal(path: string): RevealPosition | undefined {
 
 /**
  * Apre un file nell'editor del foglio attivo (F2). Se è già aperto lo attiva; altrimenti apre un
- * pannello nuovo accanto agli altri editor (o al posto di un pannello Editor vuoto).
+ * pannello nuovo accanto agli altri editor (o al posto di un pannello Editor vuoto); il primo file
+ * del foglio apre un gruppo Editor a destra dell'Esplora file.
  */
 export function openFile(path: string, position?: RevealPosition, workspace?: string): void {
   const sheetId = useWorkspace.getState().activeSheetId
@@ -131,11 +132,26 @@ export function openFile(path: string, position?: RevealPosition, workspace?: st
     return
   }
   const anotherEditor = dock.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'editor')
-  addPanel(dock, 'editor', {
+  if (anotherEditor) {
+    addPanel(dock, 'editor', { title: name, params: { filePath: path, cwd: ws }, position: { referencePanel: anotherEditor.id, direction: 'within' } })
+    return
+  }
+  // Primo file del foglio: l'editor ha un gruppo tutto suo, a destra dell'Esplora file (come negli IDE).
+  // Senza posizione Dockview lo metterebbe come scheda nel gruppo attivo, cioè dentro l'Esplora file.
+  const explorer = dock.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'explorer')
+  const reference = explorer ?? dock.activePanel
+  // Dockview ridistribuisce la larghezza fra tutte le colonne: si ricordano quelle di prima, così le
+  // colonne laterali (Esplora, Widget…) restano com'erano e l'editor divide lo spazio della più larga.
+  const before = dock.groups.map((g) => ({ group: g, width: g.api.width }))
+  const widest = before.reduce<(typeof before)[number] | undefined>((a, b) => (!a || b.width > a.width ? b : a), undefined)
+  const id = addPanel(dock, 'editor', {
     title: name,
     params: { filePath: path, cwd: ws },
-    position: anotherEditor ? { referencePanel: anotherEditor.id, direction: 'within' } : undefined
+    position: reference ? { referencePanel: reference.id, direction: 'right' } : undefined
   })
+  if (!reference || !widest || widest.width <= 0) return
+  dock.getPanel(id)?.group.api.setSize({ width: Math.round(widest.width / 2) })
+  for (const b of before) if (b.width > 0 && b.width < widest.width) b.group.api.setSize({ width: b.width })
 }
 
 /** X8/X9: apre (o attiva) il pannello dei plugin nel foglio attivo. */
