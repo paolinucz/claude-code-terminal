@@ -1,7 +1,8 @@
 import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
 import type { SessionAttention, SessionInfo } from '@shared/sessions'
 import { isOpen, type FileChange, type RevisionRequest } from '@shared/changes'
-import type { FileDiagnostics } from '@shared/files'
+import type { FileDiagnostics, LspStatus } from '@shared/files'
+import type { InstalledPlugin, PluginLanguageInfo, PluginManifest } from '@shared/plugins'
 import type {
   Decision,
   ExternalChange,
@@ -77,7 +78,7 @@ function createLocalStorageApi(): AppApi {
 }
 
 /** File e language server finti per il browser: il progetto Java del mockup, con una diagnostica di prova. */
-function createDemoFiles(): Pick<AppApi, 'files' | 'lsp'> {
+function createDemoFiles(): Pick<AppApi, 'files' | 'lsp' | 'plugins'> {
   const root = 'C:\\Users\\demo'
   const pkg = `${root}\\src\\main\\java\\it\\acme\\orders`
   const contents: Record<string, string> = {
@@ -90,6 +91,7 @@ function createDemoFiles(): Pick<AppApi, 'files' | 'lsp'> {
   }
   const isDir = (p: string) => Object.keys(contents).some((f) => f.toLowerCase().startsWith(p.toLowerCase() + '\\'))
   const diagListeners = new Set<(d: FileDiagnostics) => void>()
+  const statusListeners = new Set<(s: LspStatus) => void>()
   return {
     files: {
       async list(dir) {
@@ -118,38 +120,101 @@ function createDemoFiles(): Pick<AppApi, 'files' | 'lsp'> {
       onChanged: () => () => {}
     },
     lsp: {
-      open(language, path) {
+      open(path) {
         if (!path.endsWith('OrderService.java')) return
         setTimeout(
           () =>
             diagListeners.forEach((cb) =>
-              cb({ path, language, diagnostics: [{ severity: 1, message: "Syntax error, insert \";\" to complete BlockStatements", source: 'Java', range: { startLine: 8, startColumn: 34, endLine: 8, endColumn: 35 } }, { severity: 2, message: 'The value of the field OrderService.repo is not used', source: 'Java', range: { startLine: 4, startColumn: 33, endLine: 4, endColumn: 37 } }] })
+              cb({ path, server: 'cct.java/jdtls|demo', diagnostics: [{ severity: 1, message: 'Syntax error, insert ";" to complete BlockStatements', source: 'Java', range: { startLine: 8, startColumn: 34, endLine: 8, endColumn: 35 } }, { severity: 2, message: 'The value of the field OrderService.repo is not used', source: 'Java', range: { startLine: 4, startColumn: 33, endLine: 4, endColumn: 37 } }] })
             ),
           600
         )
+        setTimeout(() => statusListeners.forEach((cb) => cb({ key: 'cct.java/jdtls|demo', pluginId: 'cct.java', name: 'Eclipse JDT Language Server', languages: ['java'], root, state: 'ready' })), 300)
       },
       change() {},
       save() {},
       close() {},
-      async request() {
+      async completion() {
+        return { items: [], incomplete: false }
+      },
+      async hover() {
         return null
+      },
+      async definition() {
+        return []
       },
       async statuses() {
         return []
       },
       onDiagnostics: (cb) => (diagListeners.add(cb), () => diagListeners.delete(cb)),
-      onStatus: () => () => {},
-      async javaInstalled() {
-        return true
-      },
-      async installJava() {
-        return { ok: true }
-      },
-      onJavaProgress: () => () => {}
-    }
+      onStatus: (cb) => (statusListeners.add(cb), () => statusListeners.delete(cb))
+    },
+    plugins: createDemoPlugins()
   }
 }
 
+/** Plugin finti per il browser: Java installato, e un pacchetto Maven da «importare». */
+function createDemoPlugins(): AppApi['plugins'] {
+  const java: PluginManifest = {
+    id: 'cct.java', name: 'Java', version: '1.0.0', publisher: 'Claude Code Terminal', license: 'EPL-2.0',
+    description: 'Eclipse JDT Language Server con un JRE 25 Temurin.',
+    languages: [{ id: 'java', extensions: ['.java'], monaco: 'java' }],
+    provides: { runtimes: { java: { command: '${downloads}/jre/bin/java.exe' } } },
+    downloads: [
+      { id: 'jre', url: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_windows_hotspot_25.0.5_8.zip', sha256: 'a'.repeat(64), size: 58720256, type: 'zip', to: 'jre', strip: true },
+      { id: 'jdtls', url: 'https://download.eclipse.org/jdtls/snapshots/jdt-language-server-1.64.0-202611042043.tar.gz', sha256: 'b'.repeat(64), size: 50331648, type: 'tar.gz', to: 'jdtls' }
+    ],
+    apiVersion: 1,
+    main: 'adapter.mjs',
+    activities: ['Avvia Eclipse JDT Language Server con il JRE del plugin, uno per progetto Maven o Gradle', 'Importa i progetti Maven e Gradle (scarica le dipendenze)']
+  }
+  const maven: PluginManifest = {
+    id: 'cct.maven', name: 'Maven (e XML)', version: '1.0.0', publisher: 'Claude Code Terminal', license: 'EPL-2.0',
+    description: 'LemMinX con l\'estensione Maven: completamento e controlli in pom.xml e negli altri file XML.',
+    requires: ['cct.java'],
+    languages: [{ id: 'xml', extensions: ['.xml', '.xsd'], monaco: 'xml' }],
+    apiVersion: 1,
+    main: 'adapter.mjs',
+    activities: ['Avvia LemMinX con il runtime Java del plugin Java', 'Legge i pom.xml e il repository Maven locale per completare dipendenze e versioni']
+  }
+  let installed: InstalledPlugin[] = [{ manifest: java, enabled: true, installedAt: new Date().toISOString(), packageHash: 'c'.repeat(64), state: 'ok', sizeBytes: 251658240 }]
+  const listeners = new Set<(l: InstalledPlugin[], langs: PluginLanguageInfo[]) => void>()
+  const langs = (): PluginLanguageInfo[] =>
+    installed.filter((p) => p.enabled).flatMap((p) => (p.manifest.languages ?? []).map((l) => ({ id: l.id, monaco: l.monaco, extensions: l.extensions ?? [], filenames: l.filenames ?? [], pluginId: p.manifest.id, hasServer: true })))
+  const emit = () => listeners.forEach((cb) => cb(installed, langs()))
+  return {
+    async list() {
+      return installed
+    },
+    async languages() {
+      return langs()
+    },
+    async pick() {
+      return { ok: true, preview: { token: 'demo', file: 'cct.maven-1.0.0.ccplugin', manifest: maven, packageHash: 'd'.repeat(64), packageSize: 14680064, entry: { main: 'adapter.mjs', apiVersion: 1 }, missingRequirements: [], warnings: [] } }
+    },
+    async previewFile() {
+      return { ok: false, error: 'demo' }
+    },
+    async cancel() {},
+    async install() {
+      installed = [...installed, { manifest: maven, enabled: true, installedAt: new Date().toISOString(), packageHash: 'd'.repeat(64), state: 'ok', sizeBytes: 15728640 }]
+      emit()
+      return { ok: true }
+    },
+    async setEnabled(id, enabled) {
+      installed = installed.map((p) => (p.manifest.id === id ? { ...p, enabled } : p))
+      emit()
+    },
+    async uninstall(id) {
+      if (id === 'cct.java' && installed.some((p) => p.manifest.requires?.includes('cct.java'))) return { ok: false, error: 'Prima disinstalla: Maven (e XML) (lo richiede).' }
+      installed = installed.filter((p) => p.manifest.id !== id)
+      emit()
+      return { ok: true }
+    },
+    onChanged: (cb) => (listeners.add(cb), () => listeners.delete(cb)),
+    onProgress: () => () => {}
+  }
+}
 /**
  * Permessi finti per il browser (regole del mockup). `window.__demoRemember()` simula un
  * «Sì, e ricorda» dal terminale, per provare l'aggiornamento automatico (P3, P6).

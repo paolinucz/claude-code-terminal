@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { DockviewApi } from 'dockview-react'
-import { normPath, type FileDiagnostics, type JavaInstallProgress, type LspStatus } from '@shared/files'
+import { normPath, type Diagnostic, type LspStatus } from '@shared/files'
+import type { InstalledPlugin, PluginInstallProgress, PluginLanguageInfo } from '@shared/plugins'
 import { api } from '@/lib/api'
 import type { PanelParams } from '@/panels/kinds'
 import { useSessions } from '@/state/sessions'
@@ -8,36 +9,65 @@ import { useWorkspace } from '@/state/workspace'
 import { addPanel } from '@/workspace/panels'
 import { dockRegistry } from '@/workspace/registry'
 
+/** Diagnostica di un file, unita da tutti i server che lo gestiscono. */
+export interface MergedDiagnostics {
+  path: string
+  diagnostics: Diagnostic[]
+}
+
 interface EditorStore {
   /** Diagnostica per file (percorso normalizzato), da tutti i language server (F3). */
-  diagnostics: Record<string, FileDiagnostics>
-  /** Stato dei language server (chiave linguaggio|radice). */
+  diagnostics: Record<string, MergedDiagnostics>
+  /** Stato dei language server (per chiave del server). */
   servers: Record<string, LspStatus>
-  javaProgress: JavaInstallProgress | null
+  /** Plugin installati e linguaggi che rendono disponibili (X8). */
+  plugins: InstalledPlugin[]
+  languages: PluginLanguageInfo[]
+  installProgress: PluginInstallProgress | null
   init(): void
 }
 
 let initialized = false
+/** Diagnostica separata per server: file → server → elenco. */
+const perServer = new Map<string, { path: string; byServer: Map<string, Diagnostic[]> }>()
 
 export const useEditor = create<EditorStore>((set, get) => ({
   diagnostics: {},
   servers: {},
-  javaProgress: null,
+  plugins: [],
+  languages: [],
+  installProgress: null,
   init() {
     if (initialized) return
     initialized = true
     api.lsp.onDiagnostics((d) => {
       const key = normPath(d.path)
+      const entry = perServer.get(key) ?? { path: d.path, byServer: new Map() }
+      if (d.diagnostics.length) entry.byServer.set(d.server, d.diagnostics)
+      else entry.byServer.delete(d.server)
       const next = { ...get().diagnostics }
-      if (d.diagnostics.length) next[key] = d
-      else delete next[key]
+      if (entry.byServer.size) {
+        perServer.set(key, entry)
+        next[key] = { path: entry.path, diagnostics: [...entry.byServer.values()].flat() }
+      } else {
+        perServer.delete(key)
+        delete next[key]
+      }
       set({ diagnostics: next })
     })
-    api.lsp.onStatus((s) => set({ servers: { ...get().servers, [`${s.language}|${normPath(s.root)}`]: s } }))
-    api.lsp.onJavaProgress((p) => set({ javaProgress: p }))
-    void api.lsp.statuses().then((list) => set({ servers: Object.fromEntries(list.map((s) => [`${s.language}|${normPath(s.root)}`, s])) }))
+    api.lsp.onStatus((s) => set({ servers: { ...get().servers, [s.key]: s } }))
+    api.plugins.onChanged((plugins, languages) => set({ plugins, languages }))
+    api.plugins.onProgress((p) => set({ installProgress: p }))
+    void api.lsp.statuses().then((list) => set({ servers: Object.fromEntries(list.map((s) => [s.key, s])) }))
+    void Promise.all([api.plugins.list(), api.plugins.languages()]).then(([plugins, languages]) => set({ plugins, languages }))
   }
 }))
+
+/** Linguaggio di un file secondo i plugin attivi: prima i nomi esatti (pom.xml), poi le estensioni. */
+export function pluginLanguageOf(path: string, languages: PluginLanguageInfo[]): PluginLanguageInfo | null {
+  const name = (path.split(/[\\/]/).pop() ?? path).toLowerCase()
+  return languages.find((l) => l.filenames.includes(name)) ?? languages.find((l) => l.extensions.some((e) => name.endsWith(e))) ?? null
+}
 
 /** Posizione a cui portare il cursore aprendo un file (righe e colonne da 1). */
 export interface RevealPosition {
@@ -106,6 +136,15 @@ export function openFile(path: string, position?: RevealPosition, workspace?: st
     params: { filePath: path, cwd: ws },
     position: anotherEditor ? { referencePanel: anotherEditor.id, direction: 'within' } : undefined
   })
+}
+
+/** X8/X9: apre (o attiva) il pannello dei plugin nel foglio attivo. */
+export function openPluginsPanel(): void {
+  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  if (!dock) return
+  const existing = dock.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'plugins')
+  if (existing) existing.api.setActive()
+  else addPanel(dock, 'plugins')
 }
 
 /** Cartella di progetto di un foglio: quella dell'esplora file o del terminale attivo. */

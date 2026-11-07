@@ -34,15 +34,19 @@ export interface SaveFileResult {
   conflict?: boolean
 }
 
-// ---- Language server (F2, F3) ----
+// ---- Language server (F2, F3), forniti dai plugin (X1–X9) ----
 
-export type LspLanguage = 'java' | 'typescript' | 'python' | 'yaml'
-
-/** Stato di un language server, per la barra dell'editor. */
+/** Stato di un language server, per la barra dell'editor e la schermata dei plugin. */
 export interface LspStatus {
-  language: LspLanguage
+  /** Chiave del server: plugin/server|radice. */
+  key: string
+  pluginId: string
+  /** Nome del server, es. «Eclipse JDT Language Server». */
+  name: string
+  /** Linguaggi gestiti (id dei linguaggi dei plugin). */
+  languages: string[]
   root: string
-  state: 'starting' | 'ready' | 'error' | 'stopped' | 'needs-install'
+  state: 'starting' | 'ready' | 'error' | 'stopped'
   message?: string
 }
 
@@ -55,28 +59,12 @@ export interface Diagnostic {
   range: { startLine: number; startColumn: number; endLine: number; endColumn: number }
 }
 
+/** Diagnostica di un file da un server. Più server sullo stesso file mandano diagnostiche separate. */
 export interface FileDiagnostics {
   path: string
-  language: LspLanguage
+  /** Chiave del server che la invia. */
+  server: string
   diagnostics: Diagnostic[]
-}
-
-/** Avanzamento dell'installazione del supporto Java (JRE + jdtls, scaricati al primo uso). */
-export interface JavaInstallProgress {
-  step: 'jre' | 'jdtls' | 'done' | 'error'
-  /** 0–1 */
-  progress: number
-  message: string
-}
-
-/** Linguaggio LSP in base all'estensione del file (null = solo colorazione della sintassi). */
-export function lspLanguageOf(path: string): LspLanguage | null {
-  const ext = path.toLowerCase().split('.').pop() ?? ''
-  if (ext === 'java') return 'java'
-  if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts'].includes(ext)) return 'typescript'
-  if (ext === 'py' || ext === 'pyi') return 'python'
-  if (ext === 'yml' || ext === 'yaml') return 'yaml'
-  return null
 }
 
 export const normPath = (p: string): string => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()

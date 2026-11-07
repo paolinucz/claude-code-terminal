@@ -110,6 +110,13 @@ Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di 
 - **XML (LemMinX) e SQL (sqls)**: non ancora; solo colorazione della sintassi.
 - Nell'installer `@typescript`, `pyright` e `yaml-language-server` restano fuori dall'archivio asar (`asarUnpack`).
 
+*Fase 6a: i language server diventano plugin (X1–X9).* Sostituisce le scelte della fase 6 su server inclusi e download di Java.
+- **Pacchetti `.ccplugin`** (zip con `plugin.json`), importati dall'app. L'app parte senza language server. Download verificati con SHA-256 o integrity npm; impronta dei file ricontrollata a ogni avvio.
+- **CCT Plugin API** ([docs/plugin-api.md](docs/plugin-api.md)): ogni plugin ha un **adapter** (`adapter.mjs`) che l'app avvia in un processo separato con Electron in modalità Node e con cui parla in JSON-RPC su stdio. L'API è dell'app, non LSP: percorsi Windows, righe e colonne da 1, completamento, hover, definizione, diagnostica e stato. Lato app: `PluginManager` (installazione) e `PluginHost` (processi degli adapter, unione dei risultati tra più plugin).
+- **SDK** `plugins/sdk/cct-plugin-sdk.mjs`, senza dipendenze, copiato in ogni pacchetto: protocollo verso l'app e `lspAdapter()`, ponte generico verso un server LSP (radice del progetto, un server per radice, stdio o named pipe, diagnostica push e pull, `workspace/configuration`). Le particolarità di ogni server stanno nel suo adapter: jdtls cerca il jar di avvio e mostra `language/status`; Gradle si collega a una named pipe e vuole `initializationOptions.settings`; Angular parte solo con `angular.json`.
+- **Plugin preparati** (sorgenti in `plugins/`, pacchetti con `node scripts/build-plugins.mjs`): TypeScript/JavaScript (tsc 7 da npm), Python (Pyright da npm), YAML (incluso), Java (JRE 25 Temurin + jdtls, fornisce il runtime `java`), Maven e XML (LemMinX + lemminx-maven, raccolti con Maven), Gradle (dal pacchetto di vscode-gradle, MIT), Angular (incluso).
+- Limite noto: l'importazione Gradle di jdtls avvia un daemon Gradle con il JRE del plugin Java, che resta attivo per ore e tiene bloccati quei file; per aggiornare o disinstallare il plugin Java può servire chiuderlo.
+
 ### Widget (G1–G4, A1–A5, I1–I8)
 
 - **Isolamento.** iframe con `sandbox="allow-scripts"` senza `allow-same-origin`, servito da un protocollo personalizzato `ccwidget://<id>/` con una CSP rigida: niente rete diretta, `connect-src 'none'`.
@@ -134,6 +141,7 @@ Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di 
 | 4 | Pannello Modifiche e diff | F4–F7 |
 | 5 | Schermata Permessi | P1–P6 |
 | 6 | Esplora file, editor Monaco, jdtls, poi gli altri language server | F1–F3 |
+| 6a | Plugin di linguaggio: pacchetti, CCT Plugin API, adapter e SDK | X1–X9 |
 | 7 | Widget: runtime, API, installazione sicura | G, A, I |
 | 8 | Palette comandi, rifiniture, installer | L7 |
 

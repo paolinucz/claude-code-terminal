@@ -5,6 +5,7 @@ import { EditorPanel } from '@/files/EditorPanel'
 import { ExplorerPanel } from '@/files/ExplorerPanel'
 import { ProblemsPanel } from '@/files/ProblemsPanel'
 import { PermissionsPanel } from '@/permissions/PermissionsPanel'
+import { PluginsPanel } from '@/plugins/PluginsPanel'
 import { TerminalPanel } from '@/terminal/TerminalPanel'
 import type { PanelParams } from './kinds'
 import { PlaceholderPanel } from './PlaceholderPanel'
@@ -25,6 +26,8 @@ export function PanelHost(props: IDockviewPanelProps<PanelParams>) {
         return <EditorPanel {...props} />
       case 'problems':
         return <ProblemsPanel />
+      case 'plugins':
+        return <PluginsPanel />
       default:
         return <PlaceholderPanel {...props} />
     }

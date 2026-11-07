@@ -80,6 +80,25 @@ Tutto succede dentro l'app, senza aprire editor esterni. Ogni modifica di Claude
 | F7 | Se rifiuti, l'app ripristina la versione precedente del file e lo comunica alla sessione di Claude. |
 | F8 | Oltre ad Approva e Rifiuta c'è **Richiedi modifiche**: aggiungi accortezze (cosa fare o a cosa stare attento) e divieti (cosa non fare), anche riferiti a righe precise del diff. Le indicazioni arrivano a Claude come un tuo messaggio nella sessione; quando Claude riscrive il file, la modifica torna da rivedere e puoi di nuovo approvare, rifiutare o chiedere altre modifiche. Il diff si può confrontare con l'originale o con la versione al momento dell'ultima richiesta, e lo storico delle richieste resta visibile. |
 
+## 6a. Plugin di linguaggio
+
+Il supporto ai linguaggi nell'editor (completamento, errori, vai alla definizione) arriva da plugin, come le estensioni di VS Code. L'app parte senza language server: ogni linguaggio si aggiunge importando il suo pacchetto.
+
+| ID | Requisito |
+| --- | --- |
+| X1 | Un plugin è un pacchetto `.ccplugin` (zip) con un `plugin.json` che dichiara linguaggi ed estensioni dei file, e un **adapter**: il modulo che parla con l'app. |
+| X1a | L'app parla con tutti i plugin con una sola interfaccia, generica e stabile: la **CCT Plugin API** ([docs/plugin-api.md](docs/plugin-api.md)). Le differenze tra i language server (avvio, trasporto, impostazioni, notifiche proprie) stanno nell'adapter di ciascun plugin, non nell'app. Un SDK aiuta a scrivere gli adapter per i server LSP. |
+| X2 | I plugin si importano solo dall'interno dell'app, come i widget (I1). |
+| X3 | Prima di installare vedi cosa fa il plugin: linguaggi, attività che svolgerà, adapter e versione dell'API, file che scaricherà (indirizzo, dimensione, checksum), plugin richiesti e SHA-256 del pacchetto. |
+| X4 | I file scaricati all'installazione (runtime, server) vengono verificati con SHA-256 o integrity npm; se non corrispondono l'installazione si annulla. |
+| X5 | Un plugin può fornire un runtime agli altri (es. il plugin Java fornisce Java a Maven e Gradle) e dichiarare i plugin che richiede. |
+| X6 | Più plugin possono gestire lo stesso file (es. TypeScript e Angular): i risultati si uniscono. |
+| X7 | A ogni avvio l'app ricontrolla i file del plugin; se sono cambiati il plugin resta bloccato finché non lo reinstalli. |
+| X8 | Una schermata elenca i plugin installati con versione, linguaggi e stato, e permette di attivarli, disattivarli, aggiornarli e disinstallarli. |
+| X9 | Se apri un file senza plugin per il suo linguaggio, l'editor lo dice e porta alla schermata dei plugin. |
+
+Plugin preparati nella fase 6a: TypeScript/JavaScript, Python, YAML, Java, Maven (con XML), Gradle, Angular.
+
 ## 7. Widget
 
 I widget sono moduli scritti in HTML e JavaScript puri, con taglie fisse come i widget della home di iOS o Android. Servono ad aggiungere funzioni nuove senza modificare l'app.

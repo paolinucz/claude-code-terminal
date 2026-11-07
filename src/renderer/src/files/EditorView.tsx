@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Download, RefreshCw } from 'lucide-react'
-import { lspLanguageOf, normPath, type LspLanguage } from '@shared/files'
+import { AlertTriangle, Puzzle, RefreshCw } from 'lucide-react'
+import { normPath } from '@shared/files'
 import { api } from '@/lib/api'
 import { languageOf, monaco } from '@/lib/monaco'
-import { registerEditor, takePendingReveal, useEditor } from '@/state/editor'
+import { openPluginsPanel, pluginLanguageOf, registerEditor, takePendingReveal, useEditor } from '@/state/editor'
 import { TERMINAL_FONT_FAMILY, useTerminalSettings } from '@/state/terminalSettings'
 import { useWorkspace } from '@/state/workspace'
 import { applyDiagnostics, ensureProviders, setModelWorkspace } from './lspMonaco'
@@ -14,18 +14,25 @@ interface Doc {
   mtime: number
   savedVersion: number
   views: number
-  language: LspLanguage | null
+  /** Il documento è stato mandato ai language server. */
+  lspOpen: boolean
   workspace?: string
 }
 const docs = new Map<string, Doc>()
 
-const LSP_LABELS: Record<LspLanguage, string> = { java: 'Java', typescript: 'TypeScript', python: 'Python', yaml: 'YAML' }
+/** Estensioni per cui esiste un plugin preparato (per suggerire quale importare, X9). */
+const KNOWN_PLUGINS: Record<string, string> = {
+  java: 'Java', ts: 'TypeScript/JavaScript', tsx: 'TypeScript/JavaScript', js: 'TypeScript/JavaScript', jsx: 'TypeScript/JavaScript',
+  mjs: 'TypeScript/JavaScript', cjs: 'TypeScript/JavaScript', py: 'Python', yml: 'YAML', yaml: 'YAML', xml: 'Maven (e XML)',
+  gradle: 'Gradle', html: 'Angular'
+}
 
-/** Editor di un file (F2): Monaco + language server. Caricato con React.lazy. */
+/** Editor di un file (F2): Monaco + language server dei plugin. Caricato con React.lazy. */
 export default function EditorView({ filePath, workspace, onDirty }: { filePath: string; workspace?: string; onDirty(dirty: boolean): void }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   const docRef = useRef<Doc | null>(null)
+  const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [dirty, setDirty] = useState(false)
   const [external, setExternal] = useState(false)
@@ -33,20 +40,16 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
   const [cursor, setCursor] = useState({ line: 1, column: 1 })
   const fontSize = useTerminalSettings((s) => s.fontSize)
   const setStatus = useWorkspace((s) => s.setStatus)
-  const language = lspLanguageOf(filePath)
-  const server = useEditor((s) =>
-    language
-      ? Object.values(s.servers)
-          .filter((x) => x.language === language && normPath(filePath).startsWith(normPath(x.root)))
-          .sort((a, b) => b.root.length - a.root.length)[0]
-      : undefined
+  const languages = useEditor((s) => s.languages)
+  const lang = pluginLanguageOf(filePath, languages)
+  const servers = useEditor((s) =>
+    lang ? Object.values(s.servers).filter((x) => x.languages.includes(lang.id) && normPath(filePath).startsWith(normPath(x.root))) : []
   )
-  const javaProgress = useEditor((s) => s.javaProgress)
   const diagnostics = useEditor((s) => s.diagnostics[normPath(filePath)])
   const onDirtyRef = useRef(onDirty)
   onDirtyRef.current = onDirty
 
-  // Apertura: modello condiviso, editor, sincronizzazione con il language server.
+  // Apertura: modello condiviso ed editor.
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
@@ -65,20 +68,16 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
           return
         }
         if (file.binary || file.tooLarge) {
-          setError(file.binary ? 'File binario: non si può aprire nell\'editor.' : 'File troppo grande per l\'editor (oltre 5 MB).')
+          setError(file.binary ? "File binario: non si può aprire nell'editor." : "File troppo grande per l'editor (oltre 5 MB).")
           return
         }
         if (disposed) return
         const uri = monaco.Uri.file(filePath)
         const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(file.text, languageOf(filePath), uri)
         if (model.getValue() !== file.text) model.setValue(file.text)
-        doc = { model, mtime: file.mtime, savedVersion: model.getAlternativeVersionId(), views: 0, language, workspace }
+        doc = { model, mtime: file.mtime, savedVersion: model.getAlternativeVersionId(), views: 0, lspOpen: false, workspace }
         docs.set(key, doc)
         setModelWorkspace(filePath, workspace)
-        if (language) {
-          ensureProviders(language)
-          api.lsp.open(language, filePath, file.text, workspace)
-        }
       }
       if (disposed) return
       doc.views++
@@ -111,9 +110,9 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
       subs.push(
         d.model.onDidChangeContent(() => {
           updateDirty()
-          if (!d.language) return
+          if (!d.lspOpen) return
           window.clearTimeout(changeTimer)
-          changeTimer = window.setTimeout(() => api.lsp.change(d.language!, filePath, d.model.getValue(), d.workspace), 250)
+          changeTimer = window.setTimeout(() => api.lsp.change(filePath, d.model.getValue(), d.workspace), 250)
         }),
         editor.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, column: e.position.column }))
       )
@@ -151,8 +150,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
         }
       })
       subs.push({ dispose: () => (off(), api.files.unwatch(dir)) })
-      const diag = useEditor.getState().diagnostics[key]
-      if (diag) applyDiagnostics(diag)
+      setReady(true)
     })()
 
     return () => {
@@ -163,17 +161,31 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
       const d = docRef.current
       if (d) {
         d.views--
-        // Ultima vista chiusa senza modifiche non salvate: si libera il modello e si avvisa il server.
+        // Ultima vista chiusa senza modifiche non salvate: si libera il modello e si avvisano i server.
         if (d.views <= 0 && d.model.getAlternativeVersionId() === d.savedVersion) {
           docs.delete(key)
-          if (d.language) api.lsp.close(d.language, filePath, d.workspace)
+          if (d.lspOpen) api.lsp.close(filePath)
           d.model.dispose()
         }
       }
       docRef.current = null
+      setReady(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath])
+
+  // Linguaggio dai plugin: colorazione, provider e apertura nei server. Si ripete se cambiano i plugin installati.
+  useEffect(() => {
+    const d = docRef.current
+    if (!ready || !d || !lang) return
+    if (d.model.getLanguageId() !== lang.monaco) monaco.editor.setModelLanguage(d.model, lang.monaco)
+    if (!lang.hasServer) return
+    ensureProviders(lang.monaco)
+    if (!d.lspOpen) {
+      d.lspOpen = true
+      api.lsp.open(filePath, d.model.getValue(), d.workspace)
+    }
+  }, [ready, lang?.id, lang?.monaco, lang?.hasServer, filePath])
 
   useEffect(() => {
     editorRef.current?.updateOptions({ fontSize: Math.max(11, fontSize - 1) })
@@ -185,7 +197,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
       const model = docRef.current?.model
       if (model && !model.isDisposed()) monaco.editor.setModelMarkers(model, 'lsp', [])
     }
-  }, [diagnostics])
+  }, [diagnostics, ready])
 
   async function save(force: boolean) {
     const d = docRef.current
@@ -207,7 +219,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
     onDirtyRef.current(d.model.getAlternativeVersionId() !== version)
     setConflict(false)
     setExternal(false)
-    if (d.language) api.lsp.save(d.language, filePath, text, d.workspace)
+    if (d.lspOpen) api.lsp.save(filePath, text)
     setStatus(`${filePath.split(/[\\/]/).pop()} salvato`)
   }
 
@@ -228,42 +240,32 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
 
   const errors = diagnostics?.diagnostics.filter((x) => x.severity === 1).length ?? 0
   const warnings = diagnostics?.diagnostics.filter((x) => x.severity === 2).length ?? 0
+  const ext = filePath.toLowerCase().split('.').pop() ?? ''
+  const suggested = KNOWN_PLUGINS[ext]
+  // X9: niente plugin (o plugin senza server attivo) per questo file.
+  const missingPlugin = (!lang && suggested) || (lang && !lang.hasServer)
+  const STATE: Record<string, string> = { starting: 'avvio…', ready: 'pronto', error: 'errore', stopped: 'fermo' }
 
   return (
     <div className="flex h-full flex-col bg-background">
-      {language === 'java' && server?.state === 'needs-install' && (
+      {missingPlugin && (
         <div className="flex shrink-0 items-center gap-3 border-b border-info/30 bg-info/10 px-3 py-2 text-[12px]">
-          <Download size={14} className="shrink-0 text-info" />
+          <Puzzle size={14} className="shrink-0 text-info" />
           <span className="min-w-0 flex-1 text-foreground">
-            {javaProgress && javaProgress.step !== 'done' && javaProgress.step !== 'error'
-              ? javaProgress.message
-              : javaProgress?.step === 'error'
-                ? `Installazione non riuscita: ${javaProgress.message}`
-                : 'Per completamento, errori e «vai alla definizione» in Java serve il supporto Java: un JRE 25 (Eclipse Temurin) e jdtls, circa 105 MB nella cartella dell\'app.'}
+            {lang
+              ? `Il plugin per i file .${ext} è installato ma il suo language server non è attivo (disattivato o manca un plugin richiesto).`
+              : `Nessun plugin per i file .${ext}: importa il plugin «${suggested}» per completamento, errori e «vai alla definizione».`}
           </span>
-          {javaProgress && javaProgress.step !== 'done' && javaProgress.step !== 'error' ? (
-            <span className="h-1.5 w-32 shrink-0 overflow-hidden rounded-full bg-border">
-              <span className="block h-full rounded-full bg-info transition-[width]" style={{ width: `${Math.round(javaProgress.progress * 100)}%` }} />
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={async () => {
-                const res = await api.lsp.installJava()
-                if (res.ok && docRef.current) api.lsp.open('java', filePath, docRef.current.model.getValue(), workspace)
-              }}
-              className="h-7 shrink-0 rounded-md bg-info px-2.5 font-semibold text-on-brand"
-            >
-              Scarica e installa
-            </button>
-          )}
+          <button type="button" onClick={openPluginsPanel} className="h-7 shrink-0 rounded-md bg-info px-2.5 font-semibold text-on-brand">
+            Gestisci plugin
+          </button>
         </div>
       )}
       {(external || conflict) && (
         <div className="flex shrink-0 items-center gap-2 border-b border-warn/40 bg-warn/10 px-3 py-1.5 text-[12px]">
           <AlertTriangle size={14} className="shrink-0 text-warn" />
           <span className="min-w-0 flex-1 text-foreground">
-            {conflict ? 'Il file è cambiato su disco dopo che l\'hai aperto.' : 'Il file è cambiato su disco e hai modifiche non salvate.'}
+            {conflict ? "Il file è cambiato su disco dopo che l'hai aperto." : 'Il file è cambiato su disco e hai modifiche non salvate.'}
           </span>
           <button type="button" onClick={() => void reloadFromDisk()} className="inline-flex h-7 items-center gap-1 rounded-md bg-border px-2.5 text-foreground hover:bg-strong">
             <RefreshCw size={12} /> Ricarica dal disco
@@ -287,11 +289,12 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
             <span className={errors ? 'text-danger' : ''}>{errors} err</span> · <span className={warnings ? 'text-warn' : ''}>{warnings} avv</span>
           </span>
         )}
-        <span className="shrink-0" title={server?.message}>
-          {language
-            ? `${LSP_LABELS[language]} · ${server ? { starting: 'avvio…', ready: 'pronto', error: 'errore', stopped: 'fermo', 'needs-install': 'da installare' }[server.state] : 'avvio…'}`
-            : languageOf(filePath)}
-        </span>
+        {servers.map((s) => (
+          <span key={s.key} className="shrink-0" title={`${s.name} · ${s.root}${s.message ? `\n${s.message}` : ''}`}>
+            {s.name} · {STATE[s.state] ?? s.state}
+          </span>
+        ))}
+        {!servers.length && <span className="shrink-0">{lang?.monaco ?? languageOf(filePath)}</span>}
       </div>
     </div>
   )

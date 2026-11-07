@@ -44,12 +44,24 @@ Nota: con la status line attiva, Claude Code non mostra più i suoi suggerimenti
 **Fase 6 completata**: file, editor e language server (F1–F3).
 - **Esplora file**: albero del progetto e delle cartelle aggiuntive (`add-dir`) delle sessioni; file segnati M, A, D, R, U secondo git, etichetta «Claude» sui file con modifiche in revisione, numero di errori; si aggiorna da solo quando i file cambiano. Menu: Apri, Mostra in Esplora risorse, Copia percorso.
 - **Editor** (Monaco): un file per pannello, ● nel titolo se non salvato, Ctrl+S per salvare. Se il file cambia su disco (per esempio dopo una modifica di Claude) si ricarica da solo; se hai modifiche non salvate chiede cosa fare.
-- **Language server**: completamento, descrizioni al passaggio del mouse, «vai alla definizione» (anche in altri file) ed errori sottolineati.
+- **Language server**: completamento, descrizioni al passaggio del mouse, «vai alla definizione» (anche in altri file) ed errori sottolineati. Dalla fase 6a arrivano tutti da plugin (vedi sotto).
   - TypeScript/JavaScript: server nativo di TypeScript 7 (`tsc --lsp`).
   - Python: Pyright. YAML: yaml-language-server.
   - Java: jdtls. Al primo file `.java` l'editor propone di scaricare il supporto Java nella cartella dell'app: un JRE 25 (Eclipse Temurin) e jdtls, circa 105 MB, con verifica SHA-256. I progetti Maven e Gradle vengono importati da jdtls.
   - XML e SQL per ora hanno solo la colorazione della sintassi.
 - **Problemi**: errori e avvisi di tutti i server, per file; un clic porta alla riga.
+
+**Fase 6a completata**: plugin di linguaggio (X1–X9). Il supporto ai linguaggi non è più incluso nell'app: si aggiunge importando plugin, come le estensioni di VS Code.
+- Pulsante **Plugin** nella barra in alto: elenco dei plugin con stato dei loro server, attiva/disattiva, disinstalla, «Importa plugin…». Prima di installare si vedono linguaggi, attività, download (con checksum), plugin richiesti e SHA-256 del pacchetto.
+- Ogni plugin contiene un **adapter** che parla con l'app tramite la [CCT Plugin API](docs/plugin-api.md), generica e uguale per tutti; le differenze tra i language server stanno negli adapter. Un SDK (`plugins/sdk`) fa quasi tutto il lavoro per i server LSP.
+- Plugin pronti: TypeScript/JavaScript, Python, YAML, Java, Maven (e XML), Gradle, Angular. Maven e Gradle richiedono il plugin Java; Angular lavora insieme al plugin TypeScript.
+- Se apri un file senza plugin per il suo linguaggio, l'editor lo dice e porta alla schermata dei plugin.
+
+Per costruire i pacchetti in `dist/plugins` (Maven e Gradle hanno bisogno di Java: plugin Java installato o `JAVA_HOME`):
+
+```bash
+node scripts/build-plugins.mjs
+```
 
 Le modifiche fatte da Claude con comandi di shell (per esempio `sed` o `git checkout`) non passano dagli strumenti di modifica e quindi non compaiono nel pannello.
 

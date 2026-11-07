@@ -40,19 +40,29 @@ const api: AppApi = {
     onChanged: (cb) => on('files:changed', cb)
   },
   lsp: {
-    open: (language, path, text, workspace) => ipcRenderer.send('lsp:open', language, path, text, workspace),
-    change: (language, path, text, workspace) => ipcRenderer.send('lsp:change', language, path, text, workspace),
-    save: (language, path, text, workspace) => ipcRenderer.send('lsp:save', language, path, text, workspace),
-    close: (language, path, workspace) => ipcRenderer.send('lsp:close', language, path, workspace),
-    request: (language, path, method, params, workspace) => ipcRenderer.invoke('lsp:request', language, path, method, params, workspace),
+    open: (path, text, workspace) => ipcRenderer.send('lsp:open', path, text, workspace),
+    change: (path, text, workspace) => ipcRenderer.send('lsp:change', path, text, workspace),
+    save: (path, text) => ipcRenderer.send('lsp:save', path, text),
+    close: (path) => ipcRenderer.send('lsp:close', path),
+    completion: (path, position) => ipcRenderer.invoke('lsp:completion', path, position),
+    hover: (path, position) => ipcRenderer.invoke('lsp:hover', path, position),
+    definition: (path, position) => ipcRenderer.invoke('lsp:definition', path, position),
     statuses: () => ipcRenderer.invoke('lsp:statuses'),
     onDiagnostics: (cb) => on('lsp:diagnostics', cb),
-    onStatus: (cb) => on('lsp:status', cb),
-    javaInstalled: () => ipcRenderer.invoke('java:installed'),
-    installJava: () => ipcRenderer.invoke('java:install'),
-    onJavaProgress: (cb) => on('java:progress', cb)
+    onStatus: (cb) => on('lsp:status', cb)
   },
-  permissions: {
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    languages: () => ipcRenderer.invoke('plugins:languages'),
+    pick: () => ipcRenderer.invoke('plugins:pick'),
+    previewFile: (file) => ipcRenderer.invoke('plugins:previewFile', file),
+    cancel: (token) => ipcRenderer.invoke('plugins:cancel', token),
+    install: (token) => ipcRenderer.invoke('plugins:install', token),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
+    uninstall: (id) => ipcRenderer.invoke('plugins:uninstall', id),
+    onChanged: (cb) => on('plugins:changed', cb),
+    onProgress: (cb) => on('plugins:progress', cb)
+  },  permissions: {
     read: (cwd) => ipcRenderer.invoke('permissions:read', cwd),
     save: (cwd, scope, data) => ipcRenderer.invoke('permissions:save', cwd, scope, data),
     onExternalChange: (cb) => on('permissions:external', cb)

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SerializedDockview } from 'dockview-react'
-import { ChevronDown, LayoutGrid, Plus, Search, ShieldCheck, SquareTerminal } from 'lucide-react'
+import { ChevronDown, LayoutGrid, Plus, Puzzle, Search, ShieldCheck, SquareTerminal } from 'lucide-react'
+import { openPluginsPanel } from '@/state/editor'
 import type { PanelParams } from '@/panels/kinds'
 import { useSessions } from '@/state/sessions'
 import type { NamedLayout } from '@shared/types'
@@ -199,6 +200,9 @@ export function TopBar() {
 
         <button type="button" className={buttonClass} onClick={openPermissions} title="Permessi di Claude Code per il progetto del terminale attivo">
           <ShieldCheck size={14} /> Permessi
+        </button>
+        <button type="button" className={buttonClass} onClick={openPluginsPanel} title="Plugin di linguaggio (language server)">
+          <Puzzle size={14} /> Plugin
         </button>
         <button type="button" className={buttonClass} disabled title="In arrivo nella fase 7">
           <Plus size={14} /> Widget

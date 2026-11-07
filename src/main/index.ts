@@ -11,9 +11,9 @@ import { HookServer } from './sessions/HookServer'
 import { ChangeTracker } from './changes/ChangeTracker'
 import { PermissionsService } from './permissions/PermissionsService'
 import { FileService } from './files/FileService'
-import { jdtlsDataDir, LanguageServerManager } from './lsp/LanguageServerManager'
-import { JavaToolchain } from './lsp/JavaToolchain'
-import type { LspLanguage } from '@shared/files'
+import { PluginHost } from './plugins/PluginHost'
+import { PluginManager } from './plugins/PluginManager'
+import type { ApiPosition } from '@shared/pluginApi'
 import type { PermissionScope, ScopeData } from '@shared/permissions'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
@@ -44,37 +44,15 @@ const sendToMain = (channel: string, ...args: unknown[]) => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
 }
 const files = new FileService((root, paths) => sendToMain('files:changed', root, paths))
-let java: JavaToolchain | null = null
+/** Fase 6a: plugin di linguaggio e i loro language server (creati quando il database è pronto). */
+let plugins: PluginManager | null = null
+let lsp: PluginHost | null = null
 
-/** Cartella dei pacchetti dell'app (nell'app installata, la parte fuori dall'archivio asar). */
-function appModules(...parts: string[]): string {
-  return join(app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked'), 'node_modules', ...parts)
+/** Ferma un plugin e quelli che lo richiedono (es. Java → Maven, Gradle: usano il suo runtime). */
+async function stopWithDependents(id: string): Promise<void> {
+  const ids = [id, ...(plugins?.list() ?? []).filter((p) => p.manifest.requires?.includes(id)).map((p) => p.manifest.id)]
+  await Promise.all(ids.map((x) => lsp?.stopPlugin(x)))
 }
-
-/** Come avviare ogni language server. I server JavaScript girano con Electron in modalità Node. */
-const lsp = new LanguageServerManager(
-  (language, root) => {
-    const asNode = { ELECTRON_RUN_AS_NODE: '1' }
-    switch (language) {
-      case 'typescript':
-        // TypeScript 7 (nativo) ha un server LSP incluso.
-        return { file: appModules('@typescript', 'typescript-win32-x64', 'lib', 'tsc.exe'), args: ['--lsp', '--stdio'] }
-      case 'python':
-        return { file: process.execPath, args: [appModules('pyright', 'langserver.index.js'), '--stdio'], env: asNode }
-      case 'yaml':
-        return { file: process.execPath, args: [appModules('yaml-language-server', 'bin', 'yaml-language-server'), '--stdio'], env: asNode }
-      case 'java': {
-        if (!java?.installed()) return 'needs-install'
-        const cmd = java.command(jdtlsDataDir(app.getPath('userData'), root))
-        return { ...cmd, initializationOptions: { settings: { java: { import: { maven: { enabled: true }, gradle: { enabled: true } } } } } }
-      }
-      default:
-        return null
-    }
-  },
-  (d) => sendToMain('lsp:diagnostics', d),
-  (s) => sendToMain('lsp:status', s)
-)
 const sessions = new SessionManager(
   (id) => hookServer.claudeSettings(id),
   join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`)
@@ -244,38 +222,59 @@ function registerIpc(store: AppDb): void {
   ipcMain.on('files:unwatch', (_e, root: string) => files.unwatch(root))
   ipcMain.handle('files:reveal', (_e, path: string) => shell.showItemInFolder(path))
 
-  // ---- Language server (F2, F3) ----
-  ipcMain.on('lsp:open', (_e, language: LspLanguage, path: string, text: string, workspace?: string) =>
-    void lsp.open(language, path, text, workspace).catch(() => {})
-  )
-  ipcMain.on('lsp:change', (_e, language: LspLanguage, path: string, text: string, workspace?: string) =>
-    void lsp.change(language, path, text, workspace).catch(() => {})
-  )
-  ipcMain.on('lsp:save', (_e, language: LspLanguage, path: string, text: string, workspace?: string) =>
-    void lsp.save(language, path, text, workspace).catch(() => {})
-  )
-  ipcMain.on('lsp:close', (_e, language: LspLanguage, path: string, workspace?: string) =>
-    void lsp.close(language, path, workspace).catch(() => {})
-  )
-  ipcMain.handle('lsp:request', async (_e, language: LspLanguage, path: string, method: string, params: Record<string, unknown>, workspace?: string) => {
+  // ---- Language server (F2, F3), forniti dai plugin ----
+  ipcMain.on('lsp:open', (_e, path: string, text: string, workspace?: string) => void lsp?.open(path, text, workspace).catch(() => {}))
+  ipcMain.on('lsp:change', (_e, path: string, text: string, workspace?: string) => void lsp?.change(path, text, workspace).catch(() => {}))
+  ipcMain.on('lsp:save', (_e, path: string, text: string) => void lsp?.save(path, text).catch(() => {}))
+  ipcMain.on('lsp:close', (_e, path: string) => void lsp?.close(path).catch(() => {}))
+  ipcMain.handle('lsp:completion', (_e, path: string, pos: ApiPosition) => lsp?.completion(path, pos).catch(() => null) ?? { items: [], incomplete: false })
+  ipcMain.handle('lsp:hover', (_e, path: string, pos: ApiPosition) => lsp?.hover(path, pos).catch(() => null) ?? null)
+  ipcMain.handle('lsp:definition', (_e, path: string, pos: ApiPosition) => lsp?.definition(path, pos).catch(() => []) ?? [])
+  ipcMain.handle('lsp:statuses', () => lsp?.statuses() ?? [])
+
+  // ---- Plugin di linguaggio (X1–X9) ----
+  ipcMain.handle('plugins:list', () => plugins?.list() ?? [])
+  ipcMain.handle('plugins:languages', () => plugins?.languages() ?? [])
+  ipcMain.handle('plugins:pick', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Importa un plugin',
+      filters: [{ name: 'Plugin di Claude Code Terminal', extensions: ['ccplugin'] }],
+      properties: ['openFile']
+    }
+    const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (res.canceled || !res.filePaths[0] || !plugins) return null
     try {
-      return await lsp.request(language, path, method, params, workspace)
-    } catch {
-      return null
+      return { ok: true, preview: await plugins.preview(res.filePaths[0]) }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
     }
   })
-  ipcMain.handle('lsp:statuses', () => lsp.statuses())
-  ipcMain.handle('java:installed', () => java?.installed() ?? false)
-  ipcMain.handle('java:install', async () => {
-    if (!java) return { ok: false, error: 'Non pronto' }
+  ipcMain.handle('plugins:previewFile', async (_e, file: string) => {
+    if (!plugins) return { ok: false, error: 'Non pronto' }
     try {
-      await java.install((p) => sendToMain('java:progress', p))
+      return { ok: true, preview: await plugins.preview(file) }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+  ipcMain.handle('plugins:cancel', (_e, token: string) => plugins?.cancelPreview(token))
+  ipcMain.handle('plugins:install', async (_e, token: string) => {
+    if (!plugins || !lsp) return { ok: false, error: 'Non pronto' }
+    try {
+      await plugins.install(token, (p) => sendToMain('plugins:progress', p), stopWithDependents)
+      void lsp.refresh()
       return { ok: true }
     } catch (err) {
       return { ok: false, error: (err as Error).message }
     }
   })
-
+  ipcMain.handle('plugins:setEnabled', async (_e, id: string, enabled: boolean) => {
+    if (!enabled) await stopWithDependents(id)
+    plugins?.setEnabled(id, enabled)
+    void lsp?.refresh()
+  })
+  ipcMain.handle('plugins:uninstall', async (_e, id: string) => (plugins ? plugins.uninstall(id, stopWithDependents) : { ok: false }))
   // ---- Permessi di Claude Code (P1–P6) ----
   ipcMain.handle('permissions:read', (_e, cwd: string) => {
     if (!permissions) return null
@@ -378,7 +377,15 @@ app.whenReady().then(async () => {
     if (win && !win.isDestroyed() && changes) win.webContents.send('changes:changed', changes.list())
   })
   changes.cleanup()
-  java = new JavaToolchain(join(app.getPath('userData'), 'toolchains', 'java'))
+  plugins = new PluginManager(db, join(app.getPath('userData'), 'plugins'), join(app.getPath('userData'), 'plugin-data'), () => {
+    sendToMain('plugins:changed', plugins?.list() ?? [], plugins?.languages() ?? [])
+  })
+  void plugins.verifyAll()
+  lsp = new PluginHost(
+    plugins,
+    (d) => sendToMain('lsp:diagnostics', d),
+    (s) => sendToMain('lsp:status', s)
+  )
   permissions = new PermissionsService(
     db,
     (cwd) => sessions.list().some((s) => s.kind === 'claude' && s.status !== 'exited' && s.cwd.toLowerCase() === cwd.toLowerCase()),
@@ -398,7 +405,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   sessions.killAll()
   hookServer.stop()
-  lsp.stopAll()
+  lsp?.stopAll()
   files.dispose()
 })
 

@@ -3,6 +3,16 @@ import { randomUUID } from 'node:crypto'
 import type { NamedLayout, SerializedLayout, Sheet, WorkspaceState } from '@shared/types'
 import type { ClaudeEffort, ClaudeModel, ProjectPrefs } from '@shared/sessions'
 
+export interface PluginRow {
+  id: string
+  version: string
+  manifest_json: string
+  enabled: number
+  installed_at: string
+  package_hash: string
+  tree_hash: string
+}
+
 export interface RequestRow {
   id: string
   change_id: string
@@ -152,6 +162,46 @@ export class AppDb {
         `)
       })
     }
+    if (version < 6) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE plugins (
+            id             TEXT PRIMARY KEY,
+            version        TEXT NOT NULL,
+            manifest_json  TEXT NOT NULL,
+            enabled        INTEGER NOT NULL,
+            installed_at   TEXT NOT NULL,
+            package_hash   TEXT NOT NULL,
+            tree_hash      TEXT NOT NULL
+          );
+          PRAGMA user_version = 6;
+        `)
+      })
+    }
+  }
+
+  // ---- Plugin di linguaggio (X1–X9) ----
+
+  listPlugins(): PluginRow[] {
+    return this.db.prepare('SELECT * FROM plugins ORDER BY id').all() as unknown as PluginRow[]
+  }
+
+  savePlugin(p: PluginRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO plugins (id, version, manifest_json, enabled, installed_at, package_hash, tree_hash) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET version = excluded.version, manifest_json = excluded.manifest_json, enabled = excluded.enabled,
+           installed_at = excluded.installed_at, package_hash = excluded.package_hash, tree_hash = excluded.tree_hash`
+      )
+      .run(p.id, p.version, p.manifest_json, p.enabled, p.installed_at, p.package_hash, p.tree_hash)
+  }
+
+  setPluginEnabled(id: string, enabled: boolean): void {
+    this.db.prepare('UPDATE plugins SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id)
+  }
+
+  deletePlugin(id: string): void {
+    this.db.prepare('DELETE FROM plugins WHERE id = ?').run(id)
   }
 
   // ---- Origine delle regole dei permessi (P3) ----

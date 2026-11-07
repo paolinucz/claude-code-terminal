@@ -6,11 +6,11 @@ import type {
   FileContent,
   FileDiagnostics,
   GitStatus,
-  JavaInstallProgress,
-  LspLanguage,
   LspStatus,
   SaveFileResult
 } from './files'
+import type { InstalledPlugin, PluginInstallProgress, PluginLanguageInfo, PluginPreview } from './plugins'
+import type { ApiCompletionList, ApiHover, ApiLocation, ApiPosition } from './pluginApi'
 import type {
   ClaudeCliInfo,
   ClaudeEffort,
@@ -87,21 +87,34 @@ export interface AppApi {
     reveal(path: string): Promise<void>
     onChanged(cb: (root: string, paths: string[]) => void): () => void
   }
-  /** Language server dell'editor (F2, F3) e supporto Java scaricato al primo uso. */
+  /** Language server dell'editor (F2, F3), forniti dai plugin. Il processo principale sceglie i server dal file. */
   lsp: {
-    open(language: LspLanguage, path: string, text: string, workspace?: string): void
-    change(language: LspLanguage, path: string, text: string, workspace?: string): void
-    save(language: LspLanguage, path: string, text: string, workspace?: string): void
-    close(language: LspLanguage, path: string, workspace?: string): void
-    request(language: LspLanguage, path: string, method: string, params: Record<string, unknown>, workspace?: string): Promise<unknown>
+    open(path: string, text: string, workspace?: string): void
+    change(path: string, text: string, workspace?: string): void
+    save(path: string, text: string): void
+    close(path: string): void
+    /** Richieste in formato CCT Plugin API (righe e colonne da 1); risultati uniti da tutti i plugin del file (X6). */
+    completion(path: string, position: ApiPosition): Promise<ApiCompletionList>
+    hover(path: string, position: ApiPosition): Promise<ApiHover | null>
+    definition(path: string, position: ApiPosition): Promise<ApiLocation[]>
     statuses(): Promise<LspStatus[]>
     onDiagnostics(cb: (d: FileDiagnostics) => void): () => void
     onStatus(cb: (s: LspStatus) => void): () => void
-    javaInstalled(): Promise<boolean>
-    installJava(): Promise<{ ok: boolean; error?: string }>
-    onJavaProgress(cb: (p: JavaInstallProgress) => void): () => void
   }
-  /** Permessi di Claude Code nei tre file di impostazioni (P1–P6). */
+  /** Plugin di linguaggio (X1–X9). */
+  plugins: {
+    list(): Promise<InstalledPlugin[]>
+    languages(): Promise<PluginLanguageInfo[]>
+    /** Sceglie un file .ccplugin e ne prepara l'anteprima (nessuna installazione). */
+    pick(): Promise<{ ok: boolean; preview?: PluginPreview; error?: string } | null>
+    previewFile(file: string): Promise<{ ok: boolean; preview?: PluginPreview; error?: string }>
+    cancel(token: string): Promise<void>
+    install(token: string): Promise<{ ok: boolean; error?: string }>
+    setEnabled(id: string, enabled: boolean): Promise<void>
+    uninstall(id: string): Promise<{ ok: boolean; error?: string }>
+    onChanged(cb: (list: InstalledPlugin[], languages: PluginLanguageInfo[]) => void): () => void
+    onProgress(cb: (p: PluginInstallProgress) => void): () => void
+  }  /** Permessi di Claude Code nei tre file di impostazioni (P1–P6). */
   permissions: {
     /** Legge i tre ambiti e inizia a osservarne i file (una cartella di progetto alla volta). */
     read(cwd: string): Promise<PermissionsState | null>
