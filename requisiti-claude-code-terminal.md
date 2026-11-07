@@ -1,6 +1,6 @@
 # Claude Code Terminal – Requisiti funzionali
 
-Versione 0.3 · 6 novembre 2026 · Paolo Coletta
+Versione 0.4 · 7 novembre 2026 · Paolo Coletta
 
 ## 1. Visione
 
@@ -101,6 +101,8 @@ Plugin preparati nella fase 6a: TypeScript/JavaScript, Python, YAML, Java, Maven
 
 ## 7. Widget
 
+> **Rimandato a dopo la 1.0** (decisione del 7 novembre 2026). Questa sezione verrà rivista insieme ai plugin di linguaggio (§6a) prima dello sviluppo. Nella 1.0 il pannello Widget non c'è.
+
 I widget sono moduli scritti in HTML e JavaScript puri, con taglie fisse come i widget della home di iOS o Android. Servono ad aggiungere funzioni nuove senza modificare l'app.
 
 ### Taglie e aspetto
@@ -153,7 +155,7 @@ I widget sono moduli scritti in HTML e JavaScript puri, con taglie fisse come i 
 
 ## 9. Decisioni prese
 
-Chiuse il 6 novembre 2026. Ogni decisione è riportata anche nel requisito indicato.
+Chiuse il 6 e il 7 novembre 2026. Ogni decisione è riportata anche nel requisito indicato.
 
 | Domanda | Decisione | Requisito |
 | --- | --- | --- |
@@ -163,3 +165,7 @@ Chiuse il 6 novembre 2026. Ogni decisione è riportata anche nel requisito indic
 | I layout salvati includono le sessioni? | No, solo la disposizione; i terminali vuoti propongono Nuova, Riprendi o Collega. | L5 |
 | Quali linguaggi oltre a Java? | TypeScript/JavaScript, Python, XML, YAML e SQL, con Java come priorità. | F2, F3 |
 | Serve un tema chiaro? | Non nella v1; i colori in variabili CSS lo rendono aggiungibile dopo. | §1, G3 |
+| Cosa contiene la 1.0? | Fogli, terminali, hook, Modifiche, Permessi, file ed editor, plugin di linguaggio, palette comandi, installer e aggiornamenti. I widget arrivano dopo, con un'analisi rivista. (7 novembre 2026) | §7, L7 |
+| Quale shell propone «Nuovo terminale»? | L'ultima usata; la prima volta Git Bash, altrimenti PowerShell. (7 novembre 2026) | S1 |
+| La 1.0 si aggiorna da sola? | Sì: le versioni nuove si pubblicano su GitHub Releases, l'app le scarica e le installa alla chiusura o subito su richiesta. (7 novembre 2026) | — |
+| I plugin di linguaggio sono inclusi nell'installer? | No: restano file `.ccplugin` distribuiti a parte. (7 novembre 2026) | X2 |

@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { SerializedDockview } from 'dockview-react'
-import { ChevronDown, LayoutGrid, Plus, Puzzle, Search, ShieldCheck, SquareTerminal } from 'lucide-react'
+import { ArrowDownToLine, ChevronDown, LayoutGrid, Plus, Puzzle, Search, ShieldCheck, SquareTerminal } from 'lucide-react'
 import { openPluginsPanel } from '@/state/editor'
 import type { PanelParams } from '@/panels/kinds'
 import { useSessions } from '@/state/sessions'
+import { useTerminalSettings } from '@/state/terminalSettings'
+import { describeUpdate, useUpdates } from '@/state/updates'
 import type { NamedLayout } from '@shared/types'
 import { api } from '@/lib/api'
 import { PANEL_KIND_LIST } from '@/panels/kinds'
@@ -21,8 +23,9 @@ import {
 } from '@/components/ui-kit'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { NewTerminalDialog } from '@/terminal/NewTerminalDialog'
-import { addPanel, buildDefaultLayout, stripSessions } from './panels'
+import { addPanel, buildDefaultLayout, removeHiddenPanels, stripSessions } from './panels'
 import { dockRegistry } from './registry'
+import { CommandPalette, type PaletteCommand } from './CommandPalette'
 import { SaveLayoutDialog } from './SaveLayoutDialog'
 
 /** In Electron i pulsanti della finestra (riduci, ingrandisci, chiudi) stanno sopra la barra, a destra. */
@@ -39,19 +42,24 @@ export function TopBar() {
   const [deleting, setDeleting] = useState<NamedLayout | null>(null)
   const [resetting, setResetting] = useState(false)
   const [newTerminal, setNewTerminal] = useState(false)
-  const paletteRef = useRef<HTMLInputElement>(null)
+  const [palette, setPalette] = useState(false)
+  const [installing, setInstalling] = useState(false)
+  const update = useUpdates((s) => s.status)
+  const appInfo = useUpdates((s) => s.info)
+  useEffect(() => useUpdates.getState().init(), [])
 
   const refreshLayouts = () => void api.layouts.list().then(setLayouts)
   useEffect(refreshLayouts, [])
 
-  // Ctrl+K porta alla palette comandi (L7). La ricerca vera arriva nella fase 8.
+  // Ctrl+K apre la palette comandi (L7).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Dentro un terminale Ctrl+K resta al terminale (in bash e in Claude Code cancella la riga).
       const inTerminal = (e.target as Element | null)?.closest?.('.xterm')
       if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !inTerminal) {
         e.preventDefault()
-        paletteRef.current?.focus()
+        refreshLayouts()
+        setPalette(true)
       }
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 't') {
         e.preventDefault()
@@ -90,12 +98,52 @@ export function TopBar() {
     if (!d || !activeSheet) return
     try {
       d.fromJSON(layout.layout as unknown as SerializedDockview)
+      removeHiddenPanels(d)
       setStatus(`Layout «${layout.name}» applicato a «${activeSheet.name}»`)
     } catch (err) {
       console.error(err)
       setStatus(`Impossibile applicare il layout «${layout.name}»`)
     }
   }
+
+  const commands = useMemo<PaletteCommand[]>(() => {
+    const d = () => (activeSheet ? dockRegistry.get(activeSheet.id) : undefined)
+    const font = useTerminalSettings.getState()
+    return [
+      { id: 'new-terminal', title: 'Nuovo terminale', hint: 'Ctrl+Maiusc+T', keywords: 'sessione claude shell', run: () => setNewTerminal(true) },
+      { id: 'new-sheet', title: 'Nuovo foglio', run: () => useWorkspace.getState().addSheet() },
+      ...PANEL_KIND_LIST.map((k) => ({
+        id: `panel-${k.kind}`,
+        title: `Aggiungi pannello: ${k.title}`,
+        hint: activeSheet ? `in «${activeSheet.name}»` : undefined,
+        run: () => {
+          const dd = d()
+          if (dd) addPanel(dd, k.kind)
+        }
+      })),
+      { id: 'permissions', title: 'Apri Permessi', keywords: 'regole claude settings', run: openPermissions },
+      { id: 'plugins', title: 'Apri Plugin', keywords: 'language server linguaggi', run: openPluginsPanel },
+      { id: 'save-layout', title: 'Salva layout con nome…', run: () => setSaving(true) },
+      ...layouts.map((l) => ({ id: `layout-${l.id}`, title: `Applica layout «${l.name}»`, run: () => applyLayout(l) })),
+      { id: 'reset-layout', title: 'Ripristina layout predefinito', run: () => setResetting(true) },
+      { id: 'font-bigger', title: 'Terminale: carattere più grande', hint: 'Ctrl+più', run: font.bigger },
+      { id: 'font-smaller', title: 'Terminale: carattere più piccolo', hint: 'Ctrl+meno', run: font.smaller },
+      { id: 'font-reset', title: 'Terminale: carattere normale', hint: 'Ctrl+0', run: font.reset },
+      { id: 'update-check', title: 'Cerca aggiornamenti', keywords: 'versione update', run: () => void useUpdates.getState().check() },
+      ...(update.state === 'ready'
+        ? [{ id: 'update-install', title: `Riavvia e aggiorna alla versione ${update.version}`, run: () => setInstalling(true) }]
+        : []),
+      {
+        id: 'version',
+        title: 'Versione dell\'app',
+        hint: appInfo ? appInfo.version : undefined,
+        keywords: 'informazioni about',
+        run: () => setStatus(`Claude Code Terminal ${appInfo?.version ?? ''} · ${describeUpdate(useUpdates.getState().status)}`)
+      }
+    ]
+    // openPermissions e applyLayout dipendono solo dal foglio attivo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSheet, layouts, update, appInfo])
 
   return (
     <header
@@ -112,23 +160,21 @@ export function TopBar() {
         <span className="whitespace-nowrap text-[13px] font-semibold max-lg:hidden">Claude Code Terminal</span>
       </div>
 
-      <label htmlFor="palette" className="sr-only">
-        Cerca o esegui un comando
-      </label>
-      <div className="app-no-drag relative mx-auto w-full max-w-md">
+      <button
+        type="button"
+        onClick={() => {
+          refreshLayouts()
+          setPalette(true)
+        }}
+        title="Palette comandi (Ctrl+K)"
+        className="app-no-drag relative mx-auto flex h-8 w-full max-w-md items-center rounded-lg border border-border bg-background pr-14 pl-8 text-left text-[13px] text-text-faint outline-none transition-colors hover:border-strong focus-visible:border-brand"
+      >
         <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-text-faint" />
-        <input
-          ref={paletteRef}
-          id="palette"
-          type="text"
-          placeholder="Cerca file, sessioni o comandi…"
-          title="Palette comandi: in arrivo nella fase 8"
-          className="h-8 w-full rounded-lg border border-border bg-background pr-14 pl-8 text-[13px] text-foreground placeholder:text-text-faint outline-none focus:border-brand"
-        />
+        Cerca file, sessioni o comandi…
         <kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border border-border px-1.5 font-mono text-[10px] text-text-faint">
           Ctrl K
         </kbd>
-      </div>
+      </button>
 
       <div className="flex items-center gap-2">
         <button
@@ -204,12 +250,26 @@ export function TopBar() {
         <button type="button" className={buttonClass} onClick={openPluginsPanel} title="Plugin di linguaggio (language server)">
           <Puzzle size={14} /> Plugin
         </button>
-        <button type="button" className={buttonClass} disabled title="In arrivo nella fase 7">
-          <Plus size={14} /> Widget
-        </button>
+        {update.state === 'ready' && (
+          <button
+            type="button"
+            onClick={() => setInstalling(true)}
+            title={describeUpdate(update)}
+            className={buttonClass + ' border-brand text-foreground'}
+          >
+            <ArrowDownToLine size={14} className="text-brand" /> Aggiorna alla {update.version}
+          </button>
+        )}
+        {update.state === 'downloading' && (
+          <span className="app-no-drag shrink-0 whitespace-nowrap text-[12px] text-text-faint" title={describeUpdate(update)}>
+            Scarico la {update.version}… {update.percent}%
+          </span>
+        )}
       </div>
 
       <NewTerminalDialog open={newTerminal} onClose={() => setNewTerminal(false)} />
+
+      <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} />
 
       <SaveLayoutDialog
         open={saving}
@@ -240,6 +300,18 @@ export function TopBar() {
           }
           setDeleting(null)
           refreshLayouts()
+        }}
+      />
+
+      <ConfirmDialog
+        open={installing}
+        title={`Riavviare e aggiornare alla versione ${update.state === 'ready' ? update.version : ''}?`}
+        description="L'app si chiude, installa la versione nuova e si riapre. I terminali aperti si chiudono: le sessioni di Claude Code si possono riprendere da «Nuovo terminale › Riprendi». Se preferisci, l'aggiornamento si installa da solo alla prossima chiusura."
+        confirmLabel="Riavvia e aggiorna"
+        onCancel={() => setInstalling(false)}
+        onConfirm={() => {
+          setInstalling(false)
+          void api.updates.install()
         }}
       />
 

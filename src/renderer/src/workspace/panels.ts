@@ -108,6 +108,14 @@ export function sheetOfPanel(api: DockviewApi): string | undefined {
   return useWorkspace.getState().sheets.find((s) => dockRegistry.get(s.id)?.id === api.id)?.id
 }
 
+/** Toglie i pannelli dei tipi nascosti (per esempio i Widget) da un layout appena caricato. */
+export function removeHiddenPanels(api: DockviewApi): void {
+  for (const p of [...api.panels]) {
+    const kind = (p.params as PanelParams | undefined)?.kind
+    if (kind && PANEL_KINDS[kind]?.hidden) api.removePanel(p)
+  }
+}
+
 /**
  * Un layout salvato con un nome contiene solo la disposizione, non le sessioni (L5):
  * si tolgono sessione e dati di ripresa dai parametri dei terminali.
@@ -125,7 +133,7 @@ export function stripSessions(layout: SerializedLayout): SerializedLayout {
 
 /**
  * Layout iniziali dei fogli predefiniti (L1). Il foglio Sviluppo ricalca il mockup:
- * esplora file a sinistra, terminali e modifiche al centro, widget a destra.
+ * esplora file a sinistra, terminali e modifiche al centro (i widget arriveranno dopo la 1.0).
  */
 export function buildDefaultLayout(api: DockviewApi, sheetId: string): void {
   api.clear()
@@ -135,10 +143,8 @@ export function buildDefaultLayout(api: DockviewApi, sheetId: string): void {
     case 'sviluppo': {
       const term = addPanel(api, 'terminal')
       const explorer = addPanel(api, 'explorer', { position: { referencePanel: term, direction: 'left' } })
-      const widgets = addPanel(api, 'widgets', { position: { referencePanel: term, direction: 'right' } })
       const changes = addPanel(api, 'changes', { position: { referencePanel: term, direction: 'below' } })
       size(explorer, { width: 260 })
-      size(widgets, { width: 330 })
       size(changes, { height: 300 })
       api.getPanel(term)?.api.setActive()
       break

@@ -1,6 +1,6 @@
 # Claude Code Terminal – Proposta di stack tecnico
 
-Versione 0.3 · 6 novembre 2026 · approvata (interfaccia in React) · aggiornata dopo la fase 1
+Versione 0.4 · 7 novembre 2026 · approvata (interfaccia in React) · aggiornata con la fase 8 (verso la 1.0)
 
 Versioni usate nella fase 1: Electron 45, electron-vite 6, Vite 8, React 19, TypeScript 7, Tailwind 4, Dockview 8, Animate UI 2.4 (`@animate-ui/react`), Node.js 26 LTS.
 
@@ -21,7 +21,8 @@ Riferimento: [requisiti-claude-code-terminal.md](requisiti-claude-code-terminal.
 | Dati dell'app | **SQLite** con il modulo `node:sqlite` integrato in Electron + cartella di snapshot dei file |
 | Osservazione dei file | chokidar |
 | Widget | iframe sandbox su protocollo `ccwidget://`, API via `MessageChannel` |
-| Build e distribuzione | electron-vite + electron-builder (installer NSIS), electron-rebuild per i moduli nativi |
+| Build e distribuzione | electron-vite + electron-builder (installer NSIS). node-pty usa i binari precompilati: niente ricompilazione (`npmRebuild: false`) |
+| Aggiornamenti | **electron-updater** con GitHub Releases: scarica in background, installa alla chiusura o con «Riavvia e aggiorna» |
 | Test | Vitest, Playwright per Electron |
 
 ## 2. Perché Electron e non Tauri
@@ -142,10 +143,19 @@ Hook e status line arrivano a Claude Code con il flag `--settings` all'avvio di 
 | 5 | Schermata Permessi | P1–P6 |
 | 6 | Esplora file, editor Monaco, jdtls, poi gli altri language server | F1–F3 |
 | 6a | Plugin di linguaggio: pacchetti, CCT Plugin API, adapter e SDK | X1–X9 |
-| 7 | Widget: runtime, API, installazione sicura | G, A, I |
-| 8 | Palette comandi, rifiniture, installer | L7 |
+| 7 | Widget: runtime, API, installazione sicura · **rimandata a dopo la 1.0** | G, A, I |
+| 8 | Palette comandi, rifiniture, installer e aggiornamenti automatici · **versione 1.0** | L7 |
 
 Le fasi 1–3 danno già un'app usabile tutti i giorni come terminale per Claude Code.
+
+**Verso la 1.0 (7 novembre 2026).** La 1.0 contiene le fasi 1–6a e la fase 8. La fase 7 (widget) è rimandata: l'analisi di widget e plugin verrà rivista prima di svilupparla. Nel frattempo il pannello Widget è nascosto (non compare nei menu e si toglie dai layout salvati) e gli sviluppi successivi arrivano come aggiornamenti dell'app.
+
+Fase 8, cosa contiene:
+- **Palette comandi (L7).** Ctrl+K o clic sul campo nella barra in alto. Cerca tra comandi, sessioni, fogli e file del progetto del foglio attivo. I file vengono da `git ls-files` (rispetta `.gitignore`), oppure da una visita delle cartelle che salta `node_modules`, `dist`, `target` e simili; al massimo 20.000 file.
+- **Shell predefinita.** «Nuovo terminale» propone l'ultima shell usata; la prima volta Git Bash, se c'è, altrimenti PowerShell.
+- **Installer.** NSIS per l'utente corrente (niente diritti di amministratore), con la scelta della cartella e i collegamenti sul desktop e nel menu Start. L'installer non è firmato: Windows SmartScreen lo segnala al primo avvio.
+- **Aggiornamenti automatici.** Primo controllo 15 secondi dopo l'avvio, poi ogni 6 ore e quando lo chiedi dalla palette («Cerca aggiornamenti»). La versione nuova si scarica da sola e si installa alla chiusura dell'app; il pulsante «Aggiorna alla x.y.z» nella barra in alto la installa subito. Dai sorgenti gli aggiornamenti sono spenti.
+- **Plugin di linguaggio.** Restano file `.ccplugin` distribuiti a parte, da importare dal pannello Plugin.
 
 ## 6. Rischi da verificare subito
 
@@ -162,5 +172,7 @@ Le fasi 1–3 danno già un'app usabile tutti i giorni come terminale per Claude
 
 - [x] Dimensione del terminale con più viste: comanda la vista con il focus o che ha scritto per ultima; le altre si adeguano (fase 2).
 - [x] JDK per jdtls: scaricato al primo uso nella cartella dell'app (JRE 25, fase 6).
-- [ ] Shell predefinita per i nuovi terminali.
-- [ ] Aggiornamenti automatici dell'app sin dalla v1?
+- [x] Shell predefinita per i nuovi terminali: l'ultima usata; la prima volta Git Bash, altrimenti PowerShell (fase 8).
+- [x] Aggiornamenti automatici sin dalla 1.0: sì, con GitHub Releases (fase 8).
+- [ ] Account e nome del repository GitHub che ospita le release (serve per attivare gli aggiornamenti nell'installer).
+- [ ] Icona dell'app (ora l'installer usa quella predefinita di Electron).

@@ -19,6 +19,7 @@ import type { ApiPosition } from '@shared/pluginApi'
 import type { PermissionScope, ScopeData } from '@shared/permissions'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
+import { Updater } from './updater'
 
 const isDev = !app.isPackaged
 let db: AppDb | null = null
@@ -55,6 +56,9 @@ async function stopWithDependents(id: string): Promise<void> {
   const ids = [id, ...(plugins?.list() ?? []).filter((p) => p.manifest.requires?.includes(id)).map((p) => p.manifest.id)]
   await Promise.all(ids.map((x) => lsp?.stopPlugin(x)))
 }
+/** Fase 8: aggiornamenti automatici da GitHub Releases. */
+const updater = new Updater((s) => sendToMain('updates:status', s))
+
 const sessions = new SessionManager(
   (id) => hookServer.claudeSettings(id),
   join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`)
@@ -228,6 +232,11 @@ function registerIpc(store: AppDb): void {
     files.write(path, text, expectedMtime, force)
   )
   ipcMain.handle('files:gitStatus', (_e, dir: string) => files.gitStatus(dir))
+  ipcMain.handle('files:index', (_e, root: string) => files.index(root))
+  ipcMain.handle('updates:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }))
+  ipcMain.handle('updates:status', () => updater.current)
+  ipcMain.handle('updates:check', () => updater.check())
+  ipcMain.handle('updates:install', () => updater.install())
   ipcMain.on('files:watch', (_e, root: string) => files.watch(root))
   ipcMain.on('files:unwatch', (_e, root: string) => files.unwatch(root))
   ipcMain.handle('files:reveal', (_e, path: string) => shell.showItemInFolder(path))
@@ -427,6 +436,7 @@ app.whenReady().then(async () => {
   )
   registerIpc(db)
   createMainWindow()
+  updater.start()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
@@ -438,6 +448,7 @@ app.on('before-quit', () => {
   hookServer.stop()
   lsp?.stopAll()
   files.dispose()
+  updater.dispose()
 })
 
 app.on('window-all-closed', () => {

@@ -15,7 +15,8 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "postinstall": "electron-builder install-app-deps",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --win --publish never",
+    "release": "npm run build && electron-builder --win --publish always"
   },
   "build": {
     "appId": "it.coletta.claude-code-terminal",
@@ -30,8 +31,23 @@
       "node_modules/node-pty/**"
     ],
     "win": {
-      "target": "nsis"
-    }
+      "target": "nsis",
+      "artifactName": "Claude-Code-Terminal-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Claude Code Terminal",
+      "installerLanguages": [
+        "it_IT"
+      ],
+      "language": "1040",
+      "deleteAppDataOnUninstall": false
+    },
+    "npmRebuild": false
   },
   "dependencies": {
     "@animate-ui/react": "^2.4.2",
@@ -49,6 +65,7 @@
     "diff": "^9.0.0",
     "dockview": "^8.8.3",
     "dockview-react": "^8.8.3",
+    "electron-updater": "^6.8.11",
     "lucide-react": "^1.70.0",
     "monaco-editor": "^0.57.0",
     "motion": "^14.10.0",

@@ -5,6 +5,7 @@ import type {
   DirEntry,
   FileContent,
   FileDiagnostics,
+  FileIndex,
   GitStatus,
   LspStatus,
   SaveFileResult
@@ -23,6 +24,7 @@ import type {
   SessionSnapshot,
   ShellInfo
 } from './sessions'
+import type { AppInfo, UpdateStatus } from './updates'
 
 /** Layout serializzato di Dockview (risultato di `api.toJSON()`). Lo trattiamo come dato opaco. */
 export type SerializedLayout = Record<string, unknown>
@@ -82,6 +84,8 @@ export interface AppApi {
     read(path: string): Promise<FileContent>
     write(path: string, text: string, expectedMtime?: number, force?: boolean): Promise<SaveFileResult>
     gitStatus(dir: string): Promise<GitStatus>
+    /** L7: tutti i file della cartella, con percorsi relativi (per la palette comandi). Rispetta .gitignore. */
+    index(root: string): Promise<FileIndex>
     watch(root: string): void
     unwatch(root: string): void
     reveal(path: string): Promise<void>
@@ -120,6 +124,16 @@ export interface AppApi {
     read(cwd: string): Promise<PermissionsState | null>
     save(cwd: string, scope: PermissionScope, data: ScopeData): Promise<SaveResult>
     onExternalChange(cb: (change: ExternalChange) => void): () => void
+  }
+  /** Versione dell'app e aggiornamenti automatici (fase 8). */
+  updates: {
+    info(): Promise<AppInfo>
+    status(): Promise<UpdateStatus>
+    /** Controlla subito se c'è una versione nuova. */
+    check(): Promise<UpdateStatus>
+    /** Chiude l'app e installa la versione scaricata. */
+    install(): Promise<void>
+    onStatus(cb: (s: UpdateStatus) => void): () => void
   }
   /** Impostazioni dell'app, salvate come JSON. */
   settings: {

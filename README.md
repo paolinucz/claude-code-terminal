@@ -1,6 +1,6 @@
 # Claude Code Terminal
 
-App desktop per Windows che riunisce in una finestra i terminali di Claude Code, le shell, i file, la revisione delle modifiche e i widget.
+App desktop per Windows che riunisce in una finestra i terminali di Claude Code, le shell, i file, l'editor e la revisione delle modifiche.
 
 - Requisiti funzionali: [requisiti-claude-code-terminal.md](requisiti-claude-code-terminal.md)
 - Stack tecnico e fasi: [stack-tecnico.md](stack-tecnico.md)
@@ -63,6 +63,13 @@ Per costruire i pacchetti in `dist/plugins` (Maven e Gradle hanno bisogno di Jav
 node scripts/build-plugins.mjs
 ```
 
+**Fase 7 (widget) rimandata a dopo la 1.0**: l'analisi di widget e plugin verrà rivista. Il pannello Widget è nascosto: non compare nei menu e, se un layout salvato lo conteneva, viene tolto all'apertura.
+
+**Fase 8 (versione 1.0)**: palette comandi, installer e aggiornamenti automatici.
+- **Palette comandi** (L7): **Ctrl+K** o clic sul campo «Cerca file, sessioni o comandi…» nella barra in alto. Cerca tra comandi (nuovo terminale, nuovo foglio, aggiungi pannello, permessi, plugin, layout, dimensione del carattere, aggiornamenti), sessioni, fogli e file del progetto del foglio attivo. Frecce per scegliere, Invio per eseguire, Esc per chiudere. Accetta anche lettere sparse: «nterm» trova «Nuovo terminale».
+- **Shell**: «Nuovo terminale» propone l'ultima shell usata.
+- **Installer** per Windows (NSIS, per l'utente corrente) e **aggiornamenti automatici** da GitHub Releases (vedi «Installer e aggiornamenti» più sotto).
+
 Le modifiche fatte da Claude con comandi di shell (per esempio `sed` o `git checkout`) non passano dagli strumenti di modifica e quindi non compaiono nel pannello.
 
 Claude Code viene cercato nel PATH, poi in `%USERPROFILE%\.local\bin` (installer ufficiale), poi nella copia dell'app desktop di Claude.
@@ -86,7 +93,8 @@ npm run dev
 | `npm start` | Avvia l'app compilata |
 | `npm run web` | Solo interfaccia nel browser (porta 5199), con salvataggio in localStorage al posto di SQLite |
 | `npm run typecheck` | Controllo dei tipi TypeScript |
-| `npm run dist` | Crea l'installer Windows in `dist/` |
+| `npm run dist` | Crea l'installer Windows in `dist/` (senza pubblicarlo) |
+| `npm run release` | Crea l'installer e lo pubblica come release su GitHub (serve `GH_TOKEN`) |
 
 ## Struttura
 
@@ -97,7 +105,7 @@ src/
   shared/     tipi condivisi
   renderer/   interfaccia React
     src/components/  componenti di base (Animate UI con il tema dell'app)
-    src/workspace/   barra superiore, fogli, Dockview, layout
+    src/workspace/   barra superiore, palette comandi, fogli, Dockview, layout
     src/panels/      tipi di pannello
     src/state/       store Zustand
 ```
@@ -106,8 +114,43 @@ I dati dell'app stanno in `%APPDATA%\Claude Code Terminal\claude-code-terminal.d
 
 Scorciatoie:
 - **Ctrl+Maiusc+T**: nuovo terminale.
-- **Ctrl+K**: palette comandi (la ricerca arriva nella fase 8). Dentro un terminale Ctrl+K resta al terminale.
+- **Ctrl+K**: palette comandi. Dentro un terminale Ctrl+K resta al terminale (in bash e in Claude Code cancella la riga): clicca il campo in alto.
 - **Doppio clic** o **F2** su un foglio per rinominarlo; **clic centrale** su una scheda per chiuderla.
 - **F12**: strumenti di sviluppo.
+
+## Installer e aggiornamenti
+
+```bash
+npm run dist
+```
+
+Produce in `dist/`:
+- `Claude-Code-Terminal-Setup-<versione>.exe`: l'installer da distribuire;
+- `latest.yml` e il file `.blockmap`: servono agli aggiornamenti automatici;
+- `win-unpacked/`: l'app già pronta, utile per provarla senza installarla.
+
+Note:
+- L'installer installa per l'utente corrente, senza diritti di amministratore. Si può scegliere la cartella; crea i collegamenti sul desktop e nel menu Start. Disinstallando, i dati in `%APPDATA%\Claude Code Terminal` restano.
+- L'installer non è firmato: al primo avvio Windows SmartScreen mostra un avviso («Ulteriori informazioni › Esegui comunque»).
+- node-pty non viene ricompilato (`npmRebuild: false`): si usano i suoi binari precompilati, quindi non servono gli strumenti di compilazione di Visual Studio.
+- I plugin di linguaggio non sono nell'installer: si costruiscono con `node scripts/build-plugins.mjs` e si distribuiscono a parte.
+
+**Aggiornamenti automatici.** L'app installata controlla le versioni nuove 15 secondi dopo l'avvio, poi ogni 6 ore, oppure quando scegli «Cerca aggiornamenti» nella palette. La versione nuova si scarica in background e si installa alla chiusura dell'app; il pulsante «Aggiorna alla x.y.z» nella barra in alto la installa subito (l'app si riapre da sola, i terminali aperti si chiudono). Dai sorgenti (`npm run dev`, `npm start`) gli aggiornamenti sono spenti.
+
+Da completare prima della prima release: indicare in `package.json` il repository GitHub che ospita le release, nella sezione `build`:
+
+```json
+"publish": { "provider": "github", "owner": "<account>", "repo": "<repository>" }
+```
+
+Senza questa configurazione l'installer funziona, ma l'app non trova aggiornamenti. Il repository delle release deve essere pubblico, altrimenti l'app installata non può scaricarle.
+
+Per pubblicare una versione nuova:
+1. aumenta `version` in `package.json` (per esempio da `1.0.0` a `1.0.1`);
+2. imposta un token GitHub con il permesso di scrivere le release, nella variabile `GH_TOKEN`;
+3. esegui `npm run release`: crea una release in bozza su GitHub con installer, `latest.yml` e blockmap;
+4. su GitHub pubblica la bozza: da quel momento le app installate la trovano.
+
+Per provare gli aggiornamenti senza pubblicare nulla, l'app avviata dai sorgenti accetta un file di configurazione di prova nella variabile `CCT_UPDATE_DEV_CONFIG` (per esempio con `provider: generic` e l'indirizzo di un server locale che espone `latest.yml`).
 
 Su Windows PowerShell, se `npm` non parte per i criteri di esecuzione degli script, usa `npm.cmd` (per esempio `npm.cmd start`).

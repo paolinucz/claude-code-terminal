@@ -7,7 +7,7 @@ import { PanelTab } from '@/panels/PanelTab'
 import { useWorkspace } from '@/state/workspace'
 import { GroupActions } from './GroupActions'
 import { EmptySheet } from './EmptySheet'
-import { buildDefaultLayout } from './panels'
+import { buildDefaultLayout, removeHiddenPanels } from './panels'
 import { dockRegistry } from './registry'
 import { cctDockTheme } from './theme'
 
@@ -38,6 +38,7 @@ export function SheetView({ sheet, active }: { sheet: Sheet; active: boolean }) 
       if (sheet.layout) {
         try {
           dock.fromJSON(sheet.layout as unknown as SerializedDockview)
+          removeHiddenPanels(dock)
           restored = true
         } catch (err) {
           console.warn(`Layout del foglio «${sheet.name}» non valido, uso quello predefinito`, err)

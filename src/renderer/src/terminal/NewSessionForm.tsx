@@ -20,6 +20,9 @@ import { sessionList, STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/
 import { sessionLocations, type Placement } from '@/workspace/panels'
 
 type Kind = 'claude' | 'shell'
+
+/** Impostazione con l'ultima shell aperta, proposta la volta dopo. */
+const LAST_SHELL_KEY = 'terminal.lastShell'
 type ClaudeMode = 'new' | 'resume' | 'attach'
 
 const MODES = [
@@ -70,9 +73,11 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
   // Dati iniziali: CLI, shell, progetti recenti; la cartella parte dall'ultimo progetto usato.
   useEffect(() => {
     void api.env.claudeCli().then(setCli)
-    void api.env.shells().then((list) => {
+    // Shell proposta: l'ultima usata, se c'è ancora; altrimenti la prima trovata (Git Bash, poi PowerShell…).
+    void Promise.all([api.env.shells(), api.settings.get(LAST_SHELL_KEY)]).then(([list, last]) => {
       setShells(list)
-      setShell((s) => s ?? list[0]?.id ?? null)
+      const remembered = list.find((x) => x.id === last)?.id
+      setShell((s) => s ?? remembered ?? list[0]?.id ?? null)
     })
     void api.env.recentProjects().then(async (list) => {
       setRecent(list)
@@ -170,6 +175,7 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
       let session: SessionInfo
       if (kind === 'shell') {
         session = await api.sessions.create({ kind: 'shell', shell: shell!, cwd: dir })
+        void api.settings.set(LAST_SHELL_KEY, shell)
       } else if (mode === 'attach') {
         const s = live.find((x) => x.id === attachId)
         if (!s) throw new Error('La sessione scelta non è più attiva.')

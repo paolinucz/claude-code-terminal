@@ -67,4 +67,13 @@ export interface FileDiagnostics {
   diagnostics: Diagnostic[]
 }
 
+/** Elenco dei file di una cartella per la palette comandi (L7). */
+export interface FileIndex {
+  root: string
+  /** Percorsi relativi alla cartella, con \ come separatore. */
+  files: string[]
+  /** true se l'elenco è stato tagliato al massimo consentito. */
+  truncated: boolean
+}
+
 export const normPath = (p: string): string => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()

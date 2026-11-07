@@ -65,6 +65,13 @@ function createLocalStorageApi(): AppApi {
     ...createDemoFiles(),
     changes: createDemoChanges(),
     permissions: createDemoPermissions(),
+    updates: {
+      info: async () => ({ version: '0.0.0-web', packaged: false }),
+      status: async () => ({ state: 'disabled', reason: 'Anteprima nel browser.' }),
+      check: async () => ({ state: 'disabled', reason: 'Anteprima nel browser.' }),
+      async install() {},
+      onStatus: () => () => {}
+    },
     settings: {
       async get(key) {
         return read<unknown>(`cct.setting.${key}`, undefined)
@@ -113,6 +120,11 @@ function createDemoFiles(): Pick<AppApi, 'files' | 'lsp' | 'plugins'> {
       },
       async gitStatus() {
         return { root, branch: 'feature/order-cancel', files: { [`${pkg}\\orderservice.java`.toLowerCase()]: 'M', [`${pkg}\\ordermapper.java`.toLowerCase()]: 'A' } }
+      },
+      async index(root) {
+        const prefix = root.toLowerCase() + '\\'
+        const files = Object.keys(contents).filter((f) => f.toLowerCase().startsWith(prefix)).map((f) => f.slice(prefix.length))
+        return { root, truncated: false, files }
       },
       watch() {},
       unwatch() {},

@@ -10,6 +10,8 @@ export interface PanelKindInfo {
   /** Fase dello sviluppo in cui il pannello diventa funzionante (stack-tecnico.md §5). */
   phase: number
   requirements: string
+  /** Pannello non ancora disponibile: non compare nei menu e si toglie dai layout salvati. */
+  hidden?: boolean
 }
 
 export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
@@ -67,11 +69,14 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     title: 'Widget',
     description: 'Zona widget: griglia con celle da 150 px e colonne che si adattano alla larghezza.',
     phase: 7,
-    requirements: 'G1–G4'
+    requirements: 'G1–G4',
+    // La fase 7 (widget) è rimandata a dopo la 1.0.
+    hidden: true
   }
 }
 
-export const PANEL_KIND_LIST: PanelKindInfo[] = Object.values(PANEL_KINDS)
+/** Pannelli che si possono aggiungere (senza quelli nascosti). */
+export const PANEL_KIND_LIST: PanelKindInfo[] = Object.values(PANEL_KINDS).filter((k) => !k.hidden)
 
 /** Quanto serve per riaprire una sessione quando il processo non c'è più (per esempio dopo un riavvio). */
 export interface SessionHint {

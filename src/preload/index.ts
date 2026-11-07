@@ -34,6 +34,7 @@ const api: AppApi = {
     read: (path) => ipcRenderer.invoke('files:read', path),
     write: (path, text, expectedMtime, force) => ipcRenderer.invoke('files:write', path, text, expectedMtime, force),
     gitStatus: (dir) => ipcRenderer.invoke('files:gitStatus', dir),
+    index: (root) => ipcRenderer.invoke('files:index', root),
     watch: (root) => ipcRenderer.send('files:watch', root),
     unwatch: (root) => ipcRenderer.send('files:unwatch', root),
     reveal: (path) => ipcRenderer.invoke('files:reveal', path),
@@ -66,6 +67,13 @@ const api: AppApi = {
     read: (cwd) => ipcRenderer.invoke('permissions:read', cwd),
     save: (cwd, scope, data) => ipcRenderer.invoke('permissions:save', cwd, scope, data),
     onExternalChange: (cb) => on('permissions:external', cb)
+  },
+  updates: {
+    info: () => ipcRenderer.invoke('updates:info'),
+    status: () => ipcRenderer.invoke('updates:status'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    install: () => ipcRenderer.invoke('updates:install'),
+    onStatus: (cb) => on('updates:status', cb)
   },
   settings: {
     get: (key) => ipcRenderer.invoke('settings:get', key),
