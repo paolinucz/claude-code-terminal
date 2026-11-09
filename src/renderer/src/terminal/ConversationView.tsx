@@ -43,6 +43,7 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
   const [shown, setShown] = useState(PAGE)
   const [atBottom, setAtBottom] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const attention = useSessions((s) => s.attention[session.id])
 
@@ -87,6 +88,19 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
     if (el && stickRef.current) el.scrollTop = el.scrollHeight
   }, [items, loaded, session.status])
 
+  // Il contenuto cresce dopo il primo disegno (Markdown, codice evidenziato, riquadri): finché si resta in fondo
+  // si segue l'altezza, altrimenti alla riapertura la vista resterebbe sui primi messaggi.
+  useEffect(() => {
+    const el = scrollRef.current
+    const content = contentRef.current
+    if (!el || !content) return
+    const ro = new ResizeObserver(() => {
+      if (stickRef.current) el.scrollTop = el.scrollHeight
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [])
+
   const blocks = useMemo(() => toBlocks(items.slice(Math.max(0, items.length - shown))), [items, shown])
   const hidden = Math.max(0, items.length - shown)
   const working = session.status === 'working'
@@ -104,7 +118,7 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
         }}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-3 px-5 py-5 text-[13.5px] leading-relaxed">
+        <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-3 px-5 py-5 text-[13.5px] leading-relaxed">
           {hidden > 0 && (
             <button type="button" onClick={() => setShown((n) => n + PAGE)} className="self-center rounded-lg border border-border px-3 py-1 text-[12px] text-text-subtle hover:bg-border hover:text-foreground">
               Mostra {Math.min(hidden, PAGE)} messaggi precedenti ({hidden})

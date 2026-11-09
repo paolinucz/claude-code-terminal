@@ -33,7 +33,7 @@
   --cct-info: #6ea8fe;
 
   /* Variabili attese dai componenti shadcn / Animate UI */
-  --radius: 0.625rem;
+  --radius: 0.75rem; /* come l'icona (angoli al 22%): era 0.625rem */
   --background: var(--cct-bg);
   --foreground: var(--cct-text);
   --card: var(--cct-surface);
@@ -121,6 +121,21 @@
     outline-offset: 1px;
   }
 }
+
+/* Il corpo dell'app non è selezionabile (è un'interfaccia), ma i contenuti da leggere e copiare sì:
+   Markdown, vista grafica della conversazione, blocchi di codice e testi di spiegazione. */
+.cct-md, .cct-md *, .cct-chat, .cct-chat *, pre, code, .cct-selectable, .cct-selectable * { user-select: text; }
+.cct-code-bar, .cct-code-bar * { user-select: none; }
+
+/* Ricerca nel documento (Ctrl+F) sul Markdown impaginato. */
+::highlight(cct-find) { background-color: color-mix(in srgb, var(--cct-warn) 35%, transparent); color: inherit; }
+::highlight(cct-find-current) { background-color: color-mix(in srgb, var(--cct-accent) 70%, transparent); color: var(--cct-text); }
+
+/* Debugger Java: breakpoint nel margine dell'editor e riga di sosta. */
+.cct-bp { background: #e5484d; border-radius: 50%; width: 11px !important; height: 11px !important; margin: 5px 0 0 5px; cursor: pointer; }
+.cct-bp-off { background: transparent; border: 1.5px solid #e5484d; box-sizing: border-box; }
+.cct-debug-line { background-color: color-mix(in srgb, var(--cct-warn) 22%, transparent); }
+.cct-debug-arrow { background: var(--cct-warn); clip-path: polygon(0 20%, 60% 20%, 60% 0, 100% 50%, 60% 100%, 60% 80%, 0 80%); width: 12px !important; height: 12px !important; margin: 4px 0 0 4px; }
 
 /* La barra superiore fa da barra del titolo (finestra senza cornice). */
 .app-drag {

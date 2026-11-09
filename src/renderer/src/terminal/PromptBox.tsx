@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { AtSign, CornerDownLeft, SquareTerminal } from 'lucide-react'
+import { isReviewLocked, REVIEW_LOCK_MESSAGE } from '@shared/changes'
 import { CLAUDE_MD, joinRel } from '@shared/project'
 import { normPath } from '@shared/files'
 import type { SessionInfo } from '@shared/sessions'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
+import { useChanges } from '@/state/changes'
 import { useDocs } from '@/state/docs'
 import type { PanelParams } from '@/panels/kinds'
 import { useWorkspace } from '@/state/workspace'
@@ -53,7 +55,10 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
   const [pick, setPick] = useState(0)
   const [dismissed, setDismissed] = useState(false)
 
-  const waiting = session.status === 'waiting'
+  const allChanges = useChanges((s) => s.changes)
+  // Revisione obbligatoria: con modifiche di Claude ancora da rivedere non si scrive.
+  const locked = useMemo(() => isReviewLocked(session, allChanges), [session, allChanges])
+  const waiting = session.status === 'waiting' || locked
   const working = session.status === 'working'
 
   useEffect(() => void usePrompt.getState().load(), [])
@@ -242,7 +247,12 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
         </ul>
       )}
 
-      {waiting && (
+      {locked && (
+        <p className="mb-1.5 text-[12px] text-warn" role="status">
+          {REVIEW_LOCK_MESSAGE}
+        </p>
+      )}
+      {session.status === 'waiting' && (
         <p className="mb-1.5 flex items-center gap-2 text-[12px] text-warn" role="status">
           Claude aspetta una tua risposta nel terminale (permesso o domanda): rispondi lì.
           <button type="button" onClick={props.focusTerminal} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-text-muted hover:bg-border hover:text-foreground">
@@ -258,7 +268,7 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
           rows={1}
           disabled={waiting}
           aria-label={`Messaggio per «${session.title}»`}
-          placeholder={waiting ? 'In attesa di una risposta nel terminale…' : working ? 'Claude sta lavorando: il messaggio va in coda…' : 'Scrivi a Claude… (@ per i file, / per i comandi)'}
+          placeholder={locked ? 'Revisione obbligatoria: rivedi le modifiche di Claude…' : waiting ? 'In attesa di una risposta nel terminale…' : working ? 'Claude sta lavorando: il messaggio va in coda…' : 'Scrivi a Claude… (@ per i file, / per i comandi)'}
           onChange={(e) => {
             setDraft(e.target.value)
             setCaret(e.target.selectionStart)

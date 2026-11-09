@@ -50,7 +50,7 @@ interface Props {
 
 /** Apertura di un terminale (S1, S2, W1–W4): Claude Code nuova/ripresa/collegata, oppure shell semplice. */
 export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
-  const [kind, setKind] = useState<Kind>(hint?.kind ?? 'claude')
+  const [kind, setKind] = useState<Kind>(hint?.kind === 'shell' ? 'shell' : 'claude')
   const [mode, setMode] = useState<ClaudeMode>(hint?.kind === 'claude' && hint.claudeSessionId ? 'resume' : 'new')
   const [cwd, setCwd] = useState(hint?.cwd ?? '')
   const [model, setModel] = useState<ClaudeModel>(hint?.model ?? 'default')

@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, BookOpen, Code2, Puzzle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, BookOpen, ClipboardCheck, Code2, Puzzle, RefreshCw } from 'lucide-react'
+import type { ReviewNote } from '@shared/changes'
+import type { LineSelection } from '@/changes/DiffView'
+import { RevisionComposer } from '@/changes/RevisionComposer'
+import { targetClaudeSession } from '@/workspace/presets'
 import { MarkdownView } from '@/docs/MarkdownView'
 import { renderMarkdown } from '@/docs/markdown'
 import { useExplainSettings } from '@/state/explain'
 import { useSnippetExplain } from '@/state/snippetExplain'
+import { breakpointsOf, useJavaDev } from '@/state/javaDev'
+import { stoppedLineIn } from '@/state/javaFollow'
 import { normPath } from '@shared/files'
 import { api } from '@/lib/api'
 import { languageOf, monaco } from '@/lib/monaco'
@@ -58,6 +64,31 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
   const isMarkdown = /\.(md|markdown)$/i.test(filePath)
   const [mode, setMode] = useState<'preview' | 'source'>(isMarkdown ? 'preview' : 'source')
   const [mdText, setMdText] = useState('')
+  const explainOn = useExplainSettings((s) => s.enabled)
+  // Anteprima con le righe del sorgente sui blocchi (per revisionare e spiegare dal Markdown impaginato).
+  const mdPreview = useMemo(
+    () => (isMarkdown ? renderMarkdown(mdText, filePath.replace(/[\/][^\/]*$/, ''), '', true).html : ''),
+    [isMarkdown, mdText, filePath]
+  )
+  // Modalità revisione: dal tasto destro sulle righe selezionate si chiedono modifiche a Claude, per qualsiasi file.
+  const [reviewMode, setReviewMode] = useState(false)
+  const [composing, setComposing] = useState(false)
+  const [seed, setSeed] = useState<{ selection: LineSelection; n: number } | null>(null)
+  const [selection, setSelection] = useState<LineSelection | null>(null)
+  const [sending, setSending] = useState(false)
+  const [composeError, setComposeError] = useState('')
+  const [target, setTarget] = useState<{ id: string; title: string } | null>(null)
+  const startReview = (sel: LineSelection) => {
+    const t = targetClaudeSession()
+    setTarget('error' in t ? null : t)
+    setComposeError('error' in t ? t.error : '')
+    // Il tasto destro «Revisiona…» fa entrare nella modalità revisione.
+    setReviewMode(true)
+    setComposing(true)
+    setSeed((x) => ({ selection: sel, n: (x?.n ?? 0) + 1 }))
+  }
+  const startReviewRef = useRef(startReview)
+  startReviewRef.current = startReview
   const isMarkdownRef = useRef(isMarkdown)
   isMarkdownRef.current = isMarkdown
   const onDirtyRef = useRef(onDirty)
@@ -110,9 +141,40 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
         renderWhitespace: 'selection',
         tabSize: 4,
         detectIndentation: true,
-        fixedOverflowWidgets: true
+        fixedOverflowWidgets: true,
+        // Margine per i breakpoint (solo file Java).
+        glyphMargin: /\.java$/i.test(filePath)
       })
       editorRef.current = editor
+      if (/\.java$/i.test(filePath)) {
+        // Breakpoint (clic nel margine) e riga in cui il programma è fermo.
+        const marks = editor.createDecorationsCollection()
+        const paint = () => {
+          const st = useJavaDev.getState()
+          const k = normPath(filePath)
+          const live = st.debug.status === 'running' || st.debug.status === 'paused'
+          const verifiedKey = Object.keys(st.debug.verified).find((f) => normPath(f) === k)
+          const ok = verifiedKey ? new Set(st.debug.verified[verifiedKey]) : null
+          const stop = stoppedLineIn(filePath, normPath)
+          marks.set([
+            ...breakpointsOf(st.breakpoints, filePath).list.map((b) => ({
+              range: new monaco.Range(b.line, 1, b.line, 1),
+              options: {
+                glyphMarginClassName: !b.enabled || (live && ok && !ok.has(b.line)) ? 'cct-bp cct-bp-off' : 'cct-bp',
+                glyphMarginHoverMessage: { value: live && ok && !ok.has(b.line) ? 'Breakpoint non verificato dal debugger' : 'Breakpoint' }
+              }
+            })),
+            ...(stop ? [{ range: new monaco.Range(stop, 1, stop, 1), options: { isWholeLine: true, className: 'cct-debug-line', glyphMarginClassName: 'cct-debug-arrow' } }] : [])
+          ])
+        }
+        paint()
+        subs.push({ dispose: useJavaDev.subscribe(paint) })
+        subs.push(
+          editor.onMouseDown((e) => {
+            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position) useJavaDev.getState().toggleBreakpoint(filePath, e.target.position.lineNumber)
+          })
+        )
+      }
       // Tasto destro sulla selezione: spiegazione di Haiku (solo se la funzione è attiva).
       editor.addAction({
         id: 'cct.explain',
@@ -127,6 +189,23 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
           useSnippetExplain.getState().open({ filePath, text: d.model.getValue(), start: sel.startLineNumber, end })
         }
       })
+      const linesOf = (sel: monaco.Selection): LineSelection => {
+        const end = sel.endColumn === 1 && sel.endLineNumber > sel.startLineNumber ? sel.endLineNumber - 1 : sel.endLineNumber
+        const excerpt = d.model.getValueInRange({ startLineNumber: sel.startLineNumber, startColumn: 1, endLineNumber: end, endColumn: d.model.getLineMaxColumn(end) })
+        return { start: sel.startLineNumber, end, excerpt }
+      }
+      editor.addAction({
+        id: 'cct.review',
+        label: 'Revisiona…',
+        contextMenuGroupId: '9_cct',
+        contextMenuOrder: 0,
+        precondition: 'editorHasSelection',
+        run: (ed) => {
+          const sel = ed.getSelection()
+          if (sel && !sel.isEmpty()) startReviewRef.current(linesOf(sel))
+        }
+      })
+      subs.push(editor.onDidChangeCursorSelection((e) => setSelection(e.selection.isEmpty() ? null : linesOf(e.selection))))
       const updateDirty = () => {
         const isDirty = d.model.getAlternativeVersionId() !== d.savedVersion
         setDirty(isDirty)
@@ -220,6 +299,27 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
       api.lsp.open(filePath, d.model.getValue(), d.workspace)
     }
   }, [ready, lang?.id, lang?.monaco, lang?.hasServer, filePath])
+
+  const sendReview = async (notes: ReviewNote[]) => {
+    if (!target) {
+      setComposeError('Nessuna sessione Claude aperta in questo foglio: aprine una con «Terminale».')
+      return
+    }
+    if (dirty) {
+      setComposeError('Il file ha modifiche non salvate: salva (Ctrl+S) prima, Claude legge il file dal disco.')
+      return
+    }
+    setSending(true)
+    setComposeError('')
+    const res = await api.changes.reviewFile(target.id, filePath, notes)
+    setSending(false)
+    if (!res.ok) {
+      setComposeError(res.error ?? 'Impossibile inviare la richiesta')
+      return
+    }
+    setComposing(false)
+    setStatus(`Richiesta inviata a «${target.title}»: ${filePath.split(/[\/]/).pop()}`)
+  }
 
   useEffect(() => {
     editorRef.current?.updateOptions({ fontSize: Math.max(11, fontSize - 1) })
@@ -332,14 +432,48 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
           ))}
         </div>
       )}
-      {isMarkdown && mode === 'preview' && <MarkdownView html={renderMarkdown(mdText, filePath.replace(/[\\/][^\\/]*$/, ''), '').html} className="min-h-0 flex-1" />}
+      {isMarkdown && mode === 'preview' && (
+        <MarkdownView
+          html={mdPreview}
+          findable
+          className="min-h-0 flex-1"
+          actions={{
+            source: mdText,
+            onReview: startReview,
+            onExplain: explainOn ? (sel) => useSnippetExplain.getState().open({ filePath, text: mdText, start: sel.start, end: sel.end }) : undefined
+          }}
+        />
+      )}
       <div ref={hostRef} className={mode === 'preview' && isMarkdown ? 'hidden' : 'min-h-0 flex-1'} />
+      {composing && (
+        <RevisionComposer
+          sessionTitle={target?.title ?? 'nessuna sessione'}
+          selection={selection}
+          seed={seed}
+          sending={sending}
+          error={composeError}
+          onSend={(notes) => void sendReview(notes)}
+          onCancel={() => setComposing(false)}
+        />
+      )}
       <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-surface px-2 font-mono text-[11px] text-text-subtle">
         <span className="truncate" title={filePath}>
           {filePath}
         </span>
         {dirty && <span className="text-warn">● non salvato</span>}
-        <span className="ml-auto shrink-0">
+        <button
+          type="button"
+          aria-pressed={reviewMode}
+          onClick={() => {
+            setReviewMode((v) => !v)
+            if (reviewMode) setComposing(false)
+          }}
+          title="Modalità revisione: seleziona del testo e usa il tasto destro › Revisiona… per chiedere modifiche a Claude (il comando la attiva da solo)"
+          className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded px-1.5 ${reviewMode ? 'bg-info/20 text-info' : 'hover:text-foreground'}`}
+        >
+          <ClipboardCheck size={11} /> Revisione{reviewMode ? ' attiva' : ''}
+        </button>
+        <span className="shrink-0">
           Ln {cursor.line}, Col {cursor.column}
         </span>
         {(errors > 0 || warnings > 0) && (

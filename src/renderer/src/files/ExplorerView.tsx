@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { IDockviewPanelProps } from 'dockview-react'
-import { ChevronDown, ChevronRight, File, FolderClosed, FolderOpen, GitBranch, RefreshCw } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, FolderOpen, GitBranch, RefreshCw } from 'lucide-react'
 import { normPath, type DirEntry, type GitMark, type GitStatus } from '@shared/files'
 import { isOpen } from '@shared/changes'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
-import type { PanelParams } from '@/panels/kinds'
 import { useChanges } from '@/state/changes'
 import { openFile, useEditor } from '@/state/editor'
 import { useSessions } from '@/state/sessions'
 import { workdirForSheet } from '@/state/project'
-import { sheetOfPanel } from '@/workspace/panels'
+import { useSidebar } from '@/state/sidebar'
+import { useWorkspace } from '@/state/workspace'
+import { FileIcon } from '@/lib/fileIcons'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui-kit'
 
 const MARK_COLORS: Record<GitMark, string> = {
@@ -28,11 +28,18 @@ interface Root {
 }
 
 /**
- * Esplora file (F1): albero del workspace e delle cartelle aggiuntive, con i file modificati segnati
- * M, A o D (stato git), quelli toccati da Claude in attesa di revisione e quelli con errori.
+ * Esplora file (F1), nella barra laterale fissa: albero del workspace e delle cartelle aggiuntive, con i file
+ * modificati segnati M, A o D (stato git), quelli toccati da Claude in attesa di revisione e quelli con errori.
+ * Segue il foglio attivo; la cartella scelta a mano si ricorda per foglio.
  */
-export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
-  const [cwd, setCwd] = useState(props.params.cwd ?? '')
+export function ExplorerView() {
+  const sheetId = useWorkspace((s) => s.activeSheetId)
+  const saved = useSidebar((s) => s.cwdBySheet[sheetId] ?? '')
+  const [cwd, setCwdState] = useState(saved)
+  const setCwd = (dir: string) => {
+    setCwdState(dir)
+    useSidebar.getState().setSheetCwd(sheetId, dir)
+  }
   const [children, setChildren] = useState<Record<string, DirEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [git, setGit] = useState<GitStatus | null>(null)
@@ -43,18 +50,23 @@ export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
   expandedRef.current = expanded
 
   // Cartella: quella del pannello, altrimenti un terminale aperto, altrimenti l'ultimo progetto.
+  // Al cambio di foglio si passa alla cartella di quel foglio (quella scelta a mano, se c'è).
+  useEffect(() => {
+    setCwdState(saved)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetId])
   useEffect(() => {
     if (cwd) return
     // Con un progetto aperto: la cartella del contesto del foglio (J7).
-    const workdir = workdirForSheet(sheetOfPanel(props.containerApi))
+    const workdir = workdirForSheet(sheetId)
     if (workdir) {
-      setCwd(workdir)
+      setCwdState(workdir)
       return
     }
     const live = Object.values(sessions).find((s) => s.status !== 'exited')
-    if (live) setCwd(live.cwd)
-    else void api.env.recentProjects().then(async (list) => setCwd(list[0]?.cwd ?? (await api.env.homeDir())))
-  }, [cwd, sessions])
+    if (live) setCwdState(live.cwd)
+    else void api.env.recentProjects().then(async (list) => setCwdState(list[0]?.cwd ?? (await api.env.homeDir())))
+  }, [cwd, sessions, sheetId])
 
   // Cartelle aggiuntive delle sessioni aperte su questo progetto.
   const roots: Root[] = useMemo(() => {
@@ -83,8 +95,7 @@ export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
   // Avvio: radici aperte, stato git, osservazione delle modifiche.
   useEffect(() => {
     if (!cwd) return
-    props.api.updateParameters({ ...props.params, cwd })
-    props.api.setTitle(`Esplora · ${cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd}`)
+    useSidebar.getState().setExplorerCwd(cwd)
     setExpanded(new Set(roots.map((r) => normPath(r.path))))
     for (const r of roots) {
       void loadDir(r.path)
@@ -139,17 +150,19 @@ export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
     const list = children[normPath(dir)]
     if (!list) return <div style={{ paddingLeft: 12 + depth * 14 }} className="py-0.5 text-[12px] text-text-faint">…</div>
     if (!list.length) return <div style={{ paddingLeft: 12 + depth * 14 }} className="py-0.5 text-[12px] text-text-faint">vuota</div>
-    return list.map((e) => <Entry key={e.path} entry={e} depth={depth} />)
+    return list.map((e) => renderEntry(e, depth))
   }
 
-  function Entry({ entry, depth }: { entry: DirEntry; depth: number }) {
+  // Funzione e non componente: se fosse un componente definito qui dentro, a ogni disegno dell'Esplora file
+  // React lo vedrebbe come un tipo nuovo e lo ricreerebbe, chiudendo il menu del tasto destro appena aperto.
+  function renderEntry(entry: DirEntry, depth: number) {
     const key = normPath(entry.path)
     const open = expanded.has(key)
     const mark = markOf(entry.path, entry.dir)
     const claude = !entry.dir && pendingByClaude.has(key)
     const errors = !entry.dir ? errorsByFile.get(key) : undefined
     return (
-      <>
+      <Fragment key={entry.path}>
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <button
@@ -162,12 +175,12 @@ export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
               {entry.dir ? (
                 <>
                   {open ? <ChevronDown size={12} className="shrink-0 text-text-faint" /> : <ChevronRight size={12} className="shrink-0 text-text-faint" />}
-                  {open ? <FolderOpen size={13} className="shrink-0 text-text-subtle" /> : <FolderClosed size={13} className="shrink-0 text-text-subtle" />}
+                  <FileIcon name={entry.name} dir open={open} size={16} />
                 </>
               ) : (
                 <>
                   <span className="w-3 shrink-0" />
-                  <File size={13} className="shrink-0 text-text-faint" />
+                  <FileIcon name={entry.name} size={16} />
                 </>
               )}
               <span className="min-w-0 truncate" style={mark && !entry.dir ? { color: MARK_COLORS[mark] } : undefined}>
@@ -188,7 +201,7 @@ export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
           </ContextMenuContent>
         </ContextMenu>
         {entry.dir && open && renderEntries(entry.path, depth + 1)}
-      </>
+      </Fragment>
     )
   }
 
@@ -200,7 +213,8 @@ export function ExplorerPanel(props: IDockviewPanelProps<PanelParams>) {
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <input
           value={cwd}
-          onChange={(e) => setCwd(e.target.value)}
+          onChange={(e) => setCwdState(e.target.value)}
+          onBlur={() => useSidebar.getState().setSheetCwd(sheetId, cwd)}
           spellCheck={false}
           aria-label="Cartella del progetto"
           className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[11px] text-foreground outline-none focus:border-brand"

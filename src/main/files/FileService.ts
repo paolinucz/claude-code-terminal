@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { DirEntry, FileContent, FileIndex, GitMark, GitStatus, SaveFileResult } from '@shared/files'
 import { normPath } from '@shared/files'
+import { compileMatcher, matchesInclude, parseInclude, searchText, SEARCH_LIMITS, type SearchFileResult, type SearchOptions, type SearchResult } from '@shared/search'
 
 const run = promisify(execFile)
 const MAX_TEXT = 5 * 1024 * 1024
@@ -69,6 +70,56 @@ export class FileService {
     const value = this.buildIndex(root).catch((): FileIndex => ({ root, files: [], truncated: false }))
     this.indexCache.set(key, { at: Date.now(), value })
     return value
+  }
+
+  /** Ricerca del testo: una ricerca nuova ferma la precedente. */
+  private searchSeq = 0
+
+  async search(root: string, query: string, opts: SearchOptions): Promise<SearchResult> {
+    const empty = (error?: string): SearchResult => ({ ok: !error, error, root, files: [], total: 0, truncated: false, searched: 0 })
+    if (!query) return empty()
+    const seq = ++this.searchSeq
+    let re: RegExp
+    try {
+      re = compileMatcher(query, opts)
+    } catch (e) {
+      return empty((e as Error).message)
+    }
+    const include = parseInclude(opts.include)
+    const index = await this.index(root)
+    const files: SearchFileResult[] = []
+    let total = 0
+    let searched = 0
+    let truncated = index.truncated
+    for (const rel of index.files) {
+      if (seq !== this.searchSeq) return empty('cancelled')
+      if (!matchesInclude(rel, include)) continue
+      let data: Buffer
+      try {
+        const full = join(root, rel)
+        const st = await stat(full)
+        if (!st.isFile() || st.size > SEARCH_LIMITS.fileBytes) continue
+        data = await readFile(full)
+      } catch {
+        continue
+      }
+      searched++
+      // Binario: un byte nullo nei primi 8000 (i file UTF-16 contano come binari, come nell'editor).
+      if (data.subarray(0, 8000).includes(0)) continue
+      const matches = searchText(data.toString('utf8'), re)
+      if (matches.length) {
+        files.push({ file: rel, matches })
+        total += matches.length
+        if (total >= SEARCH_LIMITS.matches) {
+          truncated = true
+          break
+        }
+      }
+      // Lascia respirare il processo principale.
+      if (searched % 40 === 0) await new Promise((r) => setImmediate(r))
+    }
+    files.sort((a, b) => a.file.localeCompare(b.file, 'it'))
+    return { ok: true, root, files, total, truncated, searched }
   }
 
   private async buildIndex(root: string): Promise<FileIndex> {

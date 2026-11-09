@@ -7,6 +7,7 @@ import { Terminal as HeadlessTerminal } from '@xterm/headless'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { isSessionRunning } from '@shared/changes'
 import type { CreateSessionRequest, SessionAttention, SessionInfo, SessionSnapshot } from '@shared/sessions'
 import { childPath, detectShells, findClaudeCli, gitBranch, shellCommand } from './environment'
 import type { HookEvent, StatusLinePayload } from './HookServer'
@@ -49,7 +50,8 @@ class Session {
     file: string,
     args: string[],
     private readonly changed: () => void,
-    private readonly ended: (id: string) => void
+    private readonly ended: (id: string) => void,
+    extraEnv: Record<string, string> = {}
   ) {
     this.info = { ...info, status: 'idle', views: 0, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, startedAt: new Date().toISOString() }
     this.screen = new HeadlessTerminal({ cols: DEFAULT_COLS, rows: DEFAULT_ROWS, scrollback: SCROLLBACK, allowProposedApi: true })
@@ -60,7 +62,7 @@ class Session {
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,
       cwd: info.cwd,
-      env: childEnv(),
+      env: mergeEnv(childEnv(), extraEnv),
       useConpty: true
     })
     this.proc.onData((data) => this.onOutput(data))
@@ -205,6 +207,11 @@ class Session {
     }
   }
 
+  /** Rimedio manuale: Claude Code non manda nessun evento quando lo si interrompe con Esc, e lo stato resta «lavora». */
+  forceIdle(): void {
+    if (this.info.status === 'working' || this.info.status === 'waiting') this.setStatus('idle')
+  }
+
   private setStatus(status: SessionInfo['status']): void {
     if (this.info.status === status || this.info.status === 'exited') return
     this.info.status = status
@@ -308,6 +315,16 @@ class Session {
   dropViewsOf(wc: WebContents): void {
     for (const [viewId, v] of [...this.views]) if (v === wc) this.detach(viewId)
   }
+}
+
+/** Aggiunge variabili all'ambiente di un processo. Windows non distingue maiuscole e minuscole: «PATH» rimpiazza «Path». */
+function mergeEnv(base: Record<string, string>, extra: Record<string, string>): Record<string, string> {
+  const out = { ...base }
+  for (const [k, v] of Object.entries(extra)) {
+    for (const existing of Object.keys(out)) if (existing.toLowerCase() === k.toLowerCase()) delete out[existing]
+    out[k] = v
+  }
+  return out
 }
 
 function childEnv(): Record<string, string> {
@@ -452,6 +469,7 @@ export class SessionManager {
 
   /** Scrive un tasto nel terminale della sessione (senza cambiare la vista che comanda la dimensione). */
   sendKeys(id: string, data: string): void {
+    if (this.isLocked(id)) return
     this.sessions.get(id)?.write(data)
   }
 
@@ -524,6 +542,17 @@ export class SessionManager {
       )
       session.onExited = () => this.removeSettingsFile(id)
       this.sessions.set(id, session)
+    } else if (req.kind === 'task') {
+      if (!existsSync(req.cwd)) throw new Error(`La cartella non esiste: ${req.cwd}`)
+      const session = new Session(
+        { id, kind: 'task', title: req.title, cwd: req.cwd, command: [req.file, ...req.args].map(quote).join(' ') },
+        req.file,
+        req.args,
+        this.notify,
+        this.remove,
+        req.env
+      )
+      this.sessions.set(id, session)
     } else {
       if (!existsSync(req.cwd)) throw new Error(`La cartella non esiste: ${req.cwd}`)
       const cmd = await shellCommand(req.shell)
@@ -558,7 +587,27 @@ export class SessionManager {
   }
 
   input(id: string, viewId: string, data: string): void {
+    if (this.isLocked(id)) return
     this.sessions.get(id)?.input(viewId, data)
+  }
+
+  /** Revisione obbligatoria: chi sa se la sessione ha modifiche da rivedere (impostato dal processo principale). */
+  private lockCheck: (info: SessionInfo) => boolean = () => false
+
+  setLockCheck(fn: (info: SessionInfo) => boolean): void {
+    this.lockCheck = fn
+  }
+
+  /** Claude sta eseguendo (lavora o aspetta un permesso)? Finché è così non si può revisionare. */
+  isRunning(id: string): boolean {
+    const s = this.sessions.get(id)
+    return Boolean(s) && isSessionRunning(s!.info.status)
+  }
+
+  /** L'input della sessione è bloccato dalla revisione obbligatoria? */
+  isLocked(id: string): boolean {
+    const s = this.sessions.get(id)
+    return Boolean(s) && this.lockCheck(s!.info)
   }
 
   resize(id: string, viewId: string, cols: number, rows: number, claim: boolean): void {
@@ -582,6 +631,11 @@ export class SessionManager {
       s.info.effort = effort
     }
     this.notify()
+  }
+
+  /** L'utente dice che Claude è fermo: lo stato torna «fermo» (sblocca la revisione). */
+  markIdle(id: string): void {
+    this.sessions.get(id)?.forceIdle()
   }
 
   kill(id: string): void {

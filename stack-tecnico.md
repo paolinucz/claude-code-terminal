@@ -189,4 +189,5 @@ Fase 8, cosa contiene:
 - [x] Shell predefinita per i nuovi terminali: l'ultima usata; la prima volta Git Bash, altrimenti PowerShell (fase 8).
 - [x] Aggiornamenti automatici sin dalla 1.0: sì, con GitHub Releases (fase 8).
 - [ ] Account e nome del repository GitHub che ospita le release (serve per attivare gli aggiornamenti nell'installer).
-- [ ] Icona dell'app (ora l'installer usa quella predefinita di Electron).
+- [x] Icona dell'app: nuova icona in `build/` (exe, installer, finestre) e nella barra in alto (9 novembre 2026).
+- [ ] **Interfaccia dei plugin nel pacchetto** (come le estensioni di VS Code): decisa l'impostazione (iframe isolato con API a messaggi, permessi nel manifest, Java come primo plugin), ma non iniziata. Oggi la vista «Esegui e debug» sta nell'app e il pacchetto `cct.java-dev` porta motore e file (JDK, java-debug, Lombok). Vedi CLAUDE.md.

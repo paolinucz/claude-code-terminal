@@ -8,6 +8,12 @@ import type { PluginDownload } from '@shared/plugins'
 
 const run = promisify(execFile)
 
+/**
+ * `tar` di Windows (bsdtar, legge gli zip). Non si usa quello del PATH: con Git Bash davanti nel PATH sarebbe il tar GNU,
+ * che prende «C:\…» per «macchina:percorso» e non apre né zip né percorsi con la lettera del disco.
+ */
+export const TAR = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'tar.exe') : 'tar'
+
 /** SHA-256 di un file, in esadecimale. */
 export function fileSha256(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -62,7 +68,7 @@ export async function extract(archive: string, type: 'zip' | 'tar.gz', dest: str
   const tmp = `${dest}.extract`
   rmSync(tmp, { recursive: true, force: true })
   mkdirSync(tmp, { recursive: true })
-  await run('tar', [type === 'zip' ? '-xf' : '-xzf', archive, '-C', tmp], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
+  await run(TAR, [type === 'zip' ? '-xf' : '-xzf', archive, '-C', tmp], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
   let source = tmp
   if (strip) {
     const entries = readdirSync(tmp)

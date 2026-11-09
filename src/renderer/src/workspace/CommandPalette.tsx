@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileText, LayoutPanelTop, Search, SquareTerminal, Zap } from 'lucide-react'
-import { joinNative, type FileIndex } from '@shared/files'
+import { joinNative, normPath, type FileIndex } from '@shared/files'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui-kit'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { guessWorkspace, openFile } from '@/state/editor'
+import { useRecent } from '@/state/recent'
+import { rootForSheet } from '@/state/sidebar'
+import { FileIcon } from '@/lib/fileIcons'
 import { revealSession, sessionList, STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/sessions'
 import { useWorkspace } from '@/state/workspace'
 import { dockRegistry } from './registry'
@@ -20,7 +23,19 @@ export interface PaletteCommand {
   run(): void
 }
 
-type Group = 'Comandi' | 'Sessioni' | 'Fogli' | 'File'
+type Group = 'Comandi' | 'Sessioni' | 'Fogli' | 'File' | 'Recenti'
+
+/**
+ * `all` (Ctrl+K): comandi, sessioni, fogli e file. `files` (Ctrl+P): solo file, con i recenti quando non si è scritto nulla.
+ * `recent` (Ctrl+E): solo i file aperti di recente.
+ */
+export type PaletteMode = 'all' | 'files' | 'recent'
+
+const MODE_TEXT: Record<PaletteMode, { placeholder: string; title: string }> = {
+  all: { placeholder: 'Cerca file, sessioni, fogli o comandi…', title: 'Palette comandi' },
+  files: { placeholder: 'Vai al file… (nome o parte del percorso)', title: 'Vai al file' },
+  recent: { placeholder: 'File aperti di recente…', title: 'File recenti' }
+}
 
 interface Item {
   key: string
@@ -32,7 +47,7 @@ interface Item {
   run(): void
 }
 
-const LIMITS: Record<Group, number> = { Comandi: 40, Sessioni: 20, Fogli: 20, File: 60 }
+const LIMITS: Record<Group, number> = { Comandi: 40, Sessioni: 20, Fogli: 20, File: 60, Recenti: 40 }
 const SEPARATORS = /[\\/ ._\-:·«»]/
 
 /**
@@ -88,7 +103,7 @@ function fileScore(rel: string, query: string): number | null {
  * Palette comandi (L7): con Ctrl+K cerca tra comandi, sessioni, fogli e file del progetto del foglio
  * attivo. Frecce per scegliere, Invio per eseguire, Esc per chiudere.
  */
-export function CommandPalette({ open, onClose, commands }: { open: boolean; onClose(): void; commands: PaletteCommand[] }) {
+export function CommandPalette({ open, onClose, commands, mode = 'all' }: { open: boolean; onClose(): void; commands: PaletteCommand[]; mode?: PaletteMode }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [index, setIndex] = useState<FileIndex | null>(null)
@@ -97,6 +112,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
   const sheets = useWorkspace((s) => s.sheets)
   const activeSheetId = useWorkspace((s) => s.activeSheetId)
   const listRef = useRef<HTMLDivElement>(null)
+  const recent = useRecent((s) => s.files)
 
   // La cartella dei file è quella del foglio attivo (esplora file o terminale), letta all'apertura.
   const [root, setRoot] = useState<string | undefined>()
@@ -105,11 +121,11 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
     setQuery('')
     setActive(0)
     const dock = dockRegistry.get(activeSheetId)
-    setRoot(dock ? guessWorkspace(dock) : undefined)
+    setRoot(rootForSheet(activeSheetId) || (dock ? guessWorkspace(dock) : undefined))
   }, [open, activeSheetId])
 
   useEffect(() => {
-    if (!open || !root) {
+    if (!open || !root || mode === 'recent') {
       setIndex(null)
       return
     }
@@ -122,7 +138,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
     return () => {
       alive = false
     }
-  }, [open, root])
+  }, [open, root, mode])
 
   const items = useMemo(() => {
     const q = query.trim()
@@ -130,6 +146,52 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
     const push = (group: Group, list: Item[]) => {
       const sorted = q ? list.sort((a, b) => b.score - a.score) : list
       out.push(...sorted.slice(0, LIMITS[group]))
+    }
+
+    // Recenti: Ctrl+E sempre, Ctrl+P solo finché non si scrive (poi cerca in tutti i file).
+    if (mode === 'recent' || (mode === 'files' && !q)) {
+      const base = root ? normPath(root) + '\\' : ''
+      const recents: Item[] = []
+      for (const path of recent) {
+        const inRoot = base && normPath(path).startsWith(base)
+        const rel = inRoot ? path.slice(base.length) : path
+        const score = q ? fileScore(rel, q) : 0
+        if (score === null) continue
+        const cut = rel.lastIndexOf('\\')
+        const name = rel.slice(cut + 1)
+        recents.push({
+          key: `r:${path}`,
+          group: 'Recenti',
+          title: name,
+          detail: cut > 0 ? rel.slice(0, cut) : undefined,
+          icon: <FileIcon name={name} size={14} />,
+          score,
+          run: () => openFile(path, undefined, root)
+        })
+      }
+      push('Recenti', recents)
+    }
+    if (mode !== 'all') {
+      if (mode === 'files' && q && index) {
+        const files: Item[] = []
+        for (const rel of index.files) {
+          const score = fileScore(rel, q)
+          if (score === null) continue
+          const cut = rel.lastIndexOf('\\')
+          const name = rel.slice(cut + 1)
+          files.push({
+            key: `p:${rel}`,
+            group: 'File',
+            title: name,
+            detail: cut > 0 ? rel.slice(0, cut) : undefined,
+            icon: <FileIcon name={name} size={14} />,
+            score,
+            run: () => openFile(joinNative(index.root, rel), undefined, index.root)
+          })
+        }
+        push('File', files)
+      }
+      return out
     }
 
     push(
@@ -197,7 +259,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
       push('File', files)
     }
     return out
-  }, [query, commands, sessions, sheets, activeSheetId, index])
+  }, [query, commands, sessions, sheets, activeSheetId, index, mode, recent, root])
 
   useEffect(() => setActive(0), [query])
 
@@ -233,13 +295,13 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         className="top-[12vh] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl"
-        aria-label="Palette comandi"
+        aria-label={MODE_TEXT[mode].title}
         onOpenAutoFocus={(e) => {
           e.preventDefault()
           ;(e.currentTarget as HTMLElement | null)?.querySelector('input')?.focus()
         }}
       >
-        <DialogTitle className="sr-only">Palette comandi</DialogTitle>
+        <DialogTitle className="sr-only">{MODE_TEXT[mode].title}</DialogTitle>
         <DialogDescription className="sr-only">Cerca tra comandi, sessioni, fogli e file. Frecce per scegliere, Invio per eseguire.</DialogDescription>
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search size={15} className="shrink-0 text-text-faint" />
@@ -247,15 +309,19 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Cerca file, sessioni, fogli o comandi…"
-            aria-label="Cerca file, sessioni, fogli o comandi"
+            placeholder={MODE_TEXT[mode].placeholder}
+            aria-label={MODE_TEXT[mode].placeholder}
             aria-controls="palette-list"
             aria-activedescendant={items[active] ? `palette-item-${active}` : undefined}
             className="h-11 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-text-faint"
           />
         </div>
         <div ref={listRef} id="palette-list" role="listbox" aria-label="Risultati" className="max-h-[min(60vh,480px)] overflow-y-auto p-1.5">
-          {items.length === 0 && <p className="px-3 py-6 text-center text-text-subtle">Nessun risultato per «{q}».</p>}
+          {items.length === 0 && (
+            <p className="px-3 py-6 text-center text-text-subtle">
+              {q ? `Nessun risultato per «${q}».` : mode === 'recent' ? 'Nessun file aperto di recente.' : mode === 'files' ? 'Scrivi il nome di un file.' : 'Nessun risultato.'}
+            </p>
+          )}
           {items.map((item, i) => {
             const header = item.group !== lastGroup ? item.group : null
             lastGroup = item.group
@@ -283,9 +349,11 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
           })}
         </div>
         <div className="flex items-center gap-3 border-t border-border px-3 py-1.5 text-[11px] text-text-faint">
-          <span className="shrink-0 whitespace-nowrap">↑↓ scegli · Invio esegue · Esc chiude</span>
+          <span className="shrink-0 whitespace-nowrap">↑↓ scegli · Invio {mode === 'all' ? 'esegue' : 'apre'} · Esc chiude</span>
           <span className="ml-auto truncate">
-            {!root
+            {mode === 'recent'
+              ? `${recent.length} file recenti`
+              : !root
               ? 'Nessuna cartella di progetto nel foglio: apri un Esplora file o un terminale'
               : loadingFiles
                 ? 'Lettura dei file…'

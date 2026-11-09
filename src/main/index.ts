@@ -6,11 +6,15 @@ import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SerializedLayout, Sheet } from '@shared/types'
 import type { ClaudeEffort, ClaudeModel, CreateSessionRequest, ProjectPrefs } from '@shared/sessions'
-import type { ReviewNote, RevisionResult } from '@shared/changes'
+import { isOpen, isReviewLocked, REVIEW_LOCK_MESSAGE, REVIEW_RUNNING_MESSAGE, type ReviewNote, type RevisionResult } from '@shared/changes'
 import { AppDb } from './db'
 import { SessionManager } from './sessions/SessionManager'
 import { HookServer } from './sessions/HookServer'
-import { ChangeTracker } from './changes/ChangeTracker'
+import type { SearchOptions } from '@shared/search'
+import { JAVA_PACK_ID, type JavaBreakpoint, type RunConfig } from '@shared/java'
+import { JavaDevService } from './java/JavaDevService'
+import { contextMenuTemplate } from './contextMenuTemplate'
+import { ChangeTracker, fileReviewMessage } from './changes/ChangeTracker'
 import { PermissionsService } from './permissions/PermissionsService'
 import { FileService } from './files/FileService'
 import { PluginHost } from './plugins/PluginHost'
@@ -58,6 +62,7 @@ const files = new FileService((root, paths) => sendToMain('files:changed', root,
 /** Fase 6a: plugin di linguaggio e i loro language server (creati quando il database è pronto). */
 let plugins: PluginManager | null = null
 let lsp: PluginHost | null = null
+let javaDev: JavaDevService | null = null
 
 /** Ferma un plugin e quelli che lo richiedono (es. Java → Maven, Gradle: usano il suo runtime). */
 async function stopWithDependents(id: string): Promise<void> {
@@ -138,9 +143,24 @@ function serveRenderer(): void {
   })
 }
 
+/** Menu contestuale di base (campi di testo e testo selezionato) in ogni finestra, comprese quelle staccate. */
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('context-menu', (_event, params) => {
+    const template = contextMenuTemplate(params)
+    if (template.length) Menu.buildFromTemplate(template).popup()
+  })
+})
+
 /** Opzioni comuni a finestra principale e finestre staccate, per lo stesso aspetto scuro. */
+/** Icona dell'app per le finestre (nell'app installata la dà già l'exe): `build/icon.png`, se c'è. */
+const WINDOW_ICON = (() => {
+  const file = join(__dirname, '../../build/icon.png')
+  return existsSync(file) ? file : undefined
+})()
+
 const darkWindow = {
   backgroundColor: '#09090B',
+  ...(WINDOW_ICON ? { icon: WINDOW_ICON } : {}),
   autoHideMenuBar: true,
   titleBarStyle: 'hidden' as const,
   titleBarOverlay: { color: '#18181B', symbolColor: '#D4D4D8', height: 44 }
@@ -242,14 +262,22 @@ function registerIpc(store: AppDb): void {
   // ---- Modifiche di Claude (F4–F7) ----
   ipcMain.handle('changes:list', () => changes?.list() ?? [])
   ipcMain.handle('changes:contents', (_e, id: string) => changes?.contents(id) ?? null)
-  ipcMain.handle('changes:approve', (_e, id: string) => changes?.approve(id))
-  ipcMain.handle('changes:approveAll', (_e, sessionId?: string) => changes?.approveAll(sessionId) ?? 0)
-  ipcMain.handle('changes:approveMany', (_e, ids: string[]) => changes?.approveMany(ids) ?? 0)
-  ipcMain.handle(
-    'changes:rejectMany',
-    (_e, ids: string[], force?: boolean) => changes?.rejectMany(ids, Boolean(force)) ?? { rejected: 0, needsForce: [], failed: [] }
+  // Revisione solo a Claude fermo: finché una sessione esegue, le sue modifiche non si approvano, rifiutano o rimandano.
+  const runningFor = (opts: { ids?: string[]; sessionId?: string }): boolean =>
+    (changes?.list() ?? []).some(
+      (c) => isOpen(c) && (opts.ids ? opts.ids.includes(c.id) : opts.sessionId ? c.sessionId === opts.sessionId : true) && sessions.isRunning(c.sessionId)
+    )
+  ipcMain.handle('changes:approve', (_e, id: string) => (runningFor({ ids: [id] }) ? undefined : changes?.approve(id)))
+  ipcMain.handle('changes:approveAll', (_e, sessionId?: string) => (runningFor({ sessionId }) ? 0 : (changes?.approveAll(sessionId) ?? 0)))
+  ipcMain.handle('changes:approveMany', (_e, ids: string[]) => (runningFor({ ids }) ? 0 : (changes?.approveMany(ids) ?? 0)))
+  ipcMain.handle('changes:rejectMany', (_e, ids: string[], force?: boolean) =>
+    runningFor({ ids })
+      ? { rejected: 0, needsForce: [], failed: ids.map((id) => ({ id, error: REVIEW_RUNNING_MESSAGE })) }
+      : (changes?.rejectMany(ids, Boolean(force)) ?? { rejected: 0, needsForce: [], failed: [] })
   )
-  ipcMain.handle('changes:reject',(_e, id: string, force?: boolean) => changes?.reject(id, force) ?? { ok: false })
+  ipcMain.handle('changes:reject', (_e, id: string, force?: boolean) =>
+    runningFor({ ids: [id] }) ? { ok: false, error: REVIEW_RUNNING_MESSAGE } : (changes?.reject(id, force) ?? { ok: false })
+  )
   // F8: richiedi modifiche: le indicazioni vanno a Claude come messaggio nella sua sessione.
   ipcMain.handle('changes:requestRevision', (_e, id: string, notes: ReviewNote[]): RevisionResult => {
     const contents = changes?.contents(id)
@@ -259,6 +287,17 @@ function registerIpc(store: AppDb): void {
     const res = changes.requestRevision(id, notes)
     if (!res.ok) return res
     sessions.sendPrompt(res.sessionId, res.message)
+    return { ok: true }
+  })
+
+  // Modalità revisione dell'editor: indicazioni su un file qualsiasi, mandate alla sessione scelta come messaggio.
+  ipcMain.handle('changes:reviewFile', (_e, sessionId: string, filePath: string, notes: ReviewNote[]): RevisionResult => {
+    const clean = Array.isArray(notes) ? notes.filter((n) => n && typeof n.text === 'string' && n.text.trim()) : []
+    if (typeof filePath !== 'string' || !filePath || !clean.length) return { ok: false, error: 'Scrivi almeno una indicazione.' }
+    const can = sessions.canReceivePrompt(sessionId)
+    if (!can.ok) return can
+    if (sessions.isLocked(sessionId)) return { ok: false, error: REVIEW_LOCK_MESSAGE }
+    sessions.sendPrompt(sessionId, fileReviewMessage(filePath, clean.map((n) => ({ ...n, text: n.text.trim() }))))
     return { ok: true }
   })
 
@@ -293,7 +332,41 @@ function registerIpc(store: AppDb): void {
     files.write(path, text, expectedMtime, force)
   )
   ipcMain.handle('files:gitStatus', (_e, dir: string) => files.gitStatus(dir))
+  // ---- Java development pack: servizi, JDK, run configuration, debug ----
+  const java = () => javaDev!
+  ipcMain.handle('java:state', (_e, root: string, fresh?: boolean) => java().state(String(root ?? ''), Boolean(fresh)))
+  ipcMain.handle('java:setDefaultJdk', (_e, id: string | null) => java().setDefaultJdk(id))
+  ipcMain.handle('java:setServiceJdk', (_e, root: string, id: string | null) => java().setServiceJdk(root, id))
+  ipcMain.handle('java:downloadJdk', (_e, major: number) => java().downloadJdk(Number(major)))
+  ipcMain.handle('java:removeJdk', (_e, id: string) => java().removeJdk(String(id)))
+  ipcMain.handle('java:saveConfig', (_e, cfg: RunConfig) => java().saveConfig(cfg))
+  ipcMain.handle('java:deleteConfig', (_e, id: string) => java().deleteConfig(String(id)))
+  ipcMain.handle('java:importIdea', (_e, root: string) => java().importIdea(String(root)))
+  ipcMain.handle('java:run', (_e, id: string, workspace: string) => java().run(String(id), String(workspace ?? '')))
+  ipcMain.handle('java:debug', (_e, id: string, workspace: string) => java().debug(String(id), String(workspace ?? '')))
+  ipcMain.handle('java:debugState', () => java().debugState())
+  ipcMain.handle('java:control', async (_e, action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut') => {
+    try {
+      await java().control(action)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+  ipcMain.handle('java:stop', () => java().stop())
+  ipcMain.handle('java:restart', () => java().restart())
+  ipcMain.handle('java:scopes', (_e, frameId: number) => java().scopes(Number(frameId)).catch(() => []))
+  ipcMain.handle('java:variables', (_e, ref: number) => java().variables(Number(ref)).catch(() => []))
+  ipcMain.handle('java:evaluate', (_e, expression: string, frameId?: number) => java().evaluate(String(expression), frameId === undefined ? undefined : Number(frameId)))
+  ipcMain.handle('java:breakpoints', () => java().breakpoints())
+  ipcMain.handle('java:setBreakpoints', (_e, file: string, list: JavaBreakpoint[]) => java().setBreakpoints(String(file), Array.isArray(list) ? list : []))
+
   ipcMain.handle('files:index', (_e, root: string) => files.index(root))
+  ipcMain.handle('files:search', (_e, root: string, query: string, opts: SearchOptions) =>
+    typeof root === 'string' && typeof query === 'string' && opts
+      ? files.search(root, query, opts)
+      : { ok: false, error: 'Richiesta non valida', root: '', files: [], total: 0, truncated: false, searched: 0 }
+  )
   ipcMain.handle('updates:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }))
   ipcMain.handle('updates:status', () => updater.current)
   ipcMain.handle('updates:check', () => updater.check())
@@ -431,6 +504,7 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('sessions:setModel', (_e, id: string, model: ClaudeModel, effort: ClaudeEffort) =>
     sessions.setModel(id, model, effort)
   )
+  ipcMain.handle('sessions:markIdle', (_e, id: string) => sessions.markIdle(id))
   ipcMain.handle('sessions:kill', (_e, id: string) => sessions.kill(id))
   // Casella di input dell'app (B1–B3): il messaggio va a Claude come se lo digitasse l'utente.
   ipcMain.handle('sessions:sendPrompt', (_e, id: string, text: string): RevisionResult => {
@@ -439,6 +513,7 @@ function registerIpc(store: AppDb): void {
     if (clean.length > 100_000) return { ok: false, error: 'Il messaggio è troppo lungo.' }
     const can = sessions.canReceivePrompt(id)
     if (!can.ok) return can
+    if (sessions.isLocked(id)) return { ok: false, error: REVIEW_LOCK_MESSAGE }
     sessions.sendPrompt(id, clean)
     return { ok: true }
   })
@@ -533,9 +608,11 @@ app.whenReady().then(async () => {
     if (win && !win.isDestroyed() && changes) win.webContents.send('changes:changed', changes.list())
   })
   changes.cleanup()
+  sessions.setLockCheck((info) => info.status === 'idle' && isReviewLocked(info, changes?.list() ?? []))
   explain = new ExplainService(db, join(app.getPath('userData'), 'explain-work'))
   plugins = new PluginManager(db, join(app.getPath('userData'), 'plugins'), join(app.getPath('userData'), 'plugin-data'), () => {
     sendToMain('plugins:changed', plugins?.list() ?? [], plugins?.languages() ?? [])
+    sendToMain('java:changed')
   })
   void plugins.verifyAll()
   lsp = new PluginHost(
@@ -543,6 +620,25 @@ app.whenReady().then(async () => {
     (d) => sendToMain('lsp:diagnostics', d),
     (s) => sendToMain('lsp:status', s)
   )
+  const packDataDir = join(app.getPath('userData'), 'plugin-data', JAVA_PACK_ID)
+  javaDev = new JavaDevService({
+    getSetting: (k) => db?.getSetting(k),
+    setSetting: (k, v) => db?.setSetting(k, v),
+    userDataDir: app.getPath('userData'),
+    packDataDir: () => packDataDir,
+    packActive: () => (plugins?.list() ?? []).some((p) => p.manifest.id === JAVA_PACK_ID && p.enabled && p.state === 'ok'),
+    lsp: (method, params) => {
+      if (!lsp) throw new Error('Plugin non pronti.')
+      return lsp.call('cct.java', method, params)
+    },
+    createTask: (req) => sessions.create(req),
+    killSession: (id) => sessions.kill(id),
+    sessionStatus: (id) => sessions.list().find((x) => x.id === id)?.status,
+    emitDebug: (st) => sendToMain('java:debug', st),
+    emitOutput: (o) => sendToMain('java:output', o),
+    emitProgress: (p) => sendToMain('java:progress', p),
+    emitState: () => sendToMain('java:changed')
+  })
   permissions = new PermissionsService(
     db,
     (cwd) => sessions.list().some((s) => s.kind === 'claude' && s.status !== 'exited' && s.cwd.toLowerCase() === cwd.toLowerCase()),
@@ -562,6 +658,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   sessions.killAll()
+  javaDev?.shutdown()
   hookServer.stop()
   lsp?.stopAll()
   files.dispose()

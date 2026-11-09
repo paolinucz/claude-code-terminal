@@ -113,6 +113,8 @@ export function removeHiddenPanels(api: DockviewApi): void {
   for (const p of [...api.panels]) {
     const kind = (p.params as PanelParams | undefined)?.kind
     if (kind && PANEL_KINDS[kind]?.hidden) api.removePanel(p)
+    // I terminali dei programmi lanciati da una run configuration non sopravvivono al riavvio: il pannello resterebbe vuoto.
+    else if (kind === 'terminal' && (p.params as PanelParams | undefined)?.hint?.kind === 'task') api.removePanel(p)
   }
 }
 
@@ -133,7 +135,7 @@ export function stripSessions(layout: SerializedLayout): SerializedLayout {
 
 /**
  * Layout iniziali dei fogli predefiniti (L1). Il foglio Sviluppo ricalca il mockup:
- * esplora file a sinistra, terminali e modifiche al centro (i widget arriveranno dopo la 1.0).
+ * terminali e modifiche al centro (l'Esplora file sta nella barra laterale fissa) (i widget arriveranno dopo la 1.0).
  */
 export function buildDefaultLayout(api: DockviewApi, sheetId: string): void {
   api.clear()
@@ -143,9 +145,7 @@ export function buildDefaultLayout(api: DockviewApi, sheetId: string): void {
   switch (sheetId.split(':')[0]) {
     case 'sviluppo': {
       const term = addPanel(api, 'terminal')
-      const explorer = addPanel(api, 'explorer', { position: { referencePanel: term, direction: 'left' } })
       const changes = addPanel(api, 'changes', { position: { referencePanel: term, direction: 'below' } })
-      size(explorer, { width: 260 })
       size(changes, { height: 300 })
       api.getPanel(term)?.api.setActive()
       break
@@ -153,8 +153,6 @@ export function buildDefaultLayout(api: DockviewApi, sheetId: string): void {
     case 'revisione': {
       const changes = addPanel(api, 'changes')
       const term = addPanel(api, 'terminal', { position: { referencePanel: changes, direction: 'right' } })
-      const explorer = addPanel(api, 'explorer', { position: { referencePanel: changes, direction: 'left' } })
-      size(explorer, { width: 260 })
       size(term, { width: 620 })
       api.getPanel(changes)?.api.setActive()
       break
@@ -163,8 +161,6 @@ export function buildDefaultLayout(api: DockviewApi, sheetId: string): void {
       const term = addPanel(api, 'terminal')
       const editor = addPanel(api, 'editor', { position: { referencePanel: term, direction: 'above' } })
       const problems = addPanel(api, 'problems', { position: { referencePanel: term, direction: 'right' } })
-      const explorer = addPanel(api, 'explorer', { position: { direction: 'left' } })
-      size(explorer, { width: 260 })
       size(problems, { width: 380 })
       size(editor, { height: 280 })
       api.getPanel(term)?.api.setActive()

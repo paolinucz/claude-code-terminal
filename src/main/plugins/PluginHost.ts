@@ -276,6 +276,18 @@ export class PluginHost {
     return (await this.ask<ApiLocation[]>(path, 'definition', 'definition', position)).flat()
   }
 
+  /**
+   * Richiesta propria di un plugin (oltre alla API di base): per esempio i comandi del language server Java usati dal debug.
+   * Avvia l'adapter se serve; fallisce con un messaggio chiaro se il plugin non è attivo.
+   */
+  async call<T = unknown>(pluginId: string, method: string, params: Record<string, unknown>, timeoutMs = 90000): Promise<T> {
+    const spec = this.plugins.adapter(pluginId)
+    if (!spec) throw new Error(`Il plugin «${pluginId}» non è installato o attivo.`)
+    const host = this.ensure(spec)
+    if (!(await host.ready) || !host.alive) throw new Error(`Il plugin «${pluginId}» non si è avviato${host.lastError ? `: ${host.lastError}` : '.'}`)
+    return withTimeout(host.conn.sendRequest<T>('call', { method, params }), timeoutMs, method)
+  }
+
   statuses(): LspStatus[] {
     return [...this.hosts.values()].flatMap((h) => [...h.statuses.values()])
   }

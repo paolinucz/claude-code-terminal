@@ -332,6 +332,23 @@ function isBinary(buf: Buffer): boolean {
  * messaggio dell'utente: Claude deve correggere il file e la nuova versione torna in revisione.
  */
 function revisionMessage(filePath: string, created: boolean, notes: ReviewNote[]): string {
+  return notesMessage(
+    `Revisione di ${filePath}${created ? ' (file creato da te)' : ''}: ho guardato la tua modifica nel pannello di revisione e chiedo dei cambiamenti.`,
+    notes,
+    ' La nuova versione tornerà in revisione.'
+  )
+}
+
+/** Revisione di un file qualsiasi aperto nell'editor (modalità revisione), anche se non è una modifica di Claude. */
+export function fileReviewMessage(filePath: string, notes: ReviewNote[]): string {
+  return notesMessage(
+    `Revisione di ${filePath}: ho riletto il file nell'editor e chiedo dei cambiamenti.`,
+    notes,
+    ' Le tue modifiche compariranno nel pannello di revisione.'
+  )
+}
+
+function notesMessage(header: string, notes: ReviewNote[], tail: string): string {
   const lines = notes.map((n) => {
     const where = n.lines ? (n.lines.start === n.lines.end ? `riga ${n.lines.start}` : `righe ${n.lines.start}–${n.lines.end}`) : ''
     const label = (n.label ?? (n.kind === 'forbid' ? 'Divieto' : 'Accortezza')).toUpperCase()
@@ -340,9 +357,9 @@ function revisionMessage(filePath: string, created: boolean, notes: ReviewNote[]
     return `- ${label}${hint ? ` (${hint})` : ''}: ${n.text}${excerpt}`
   })
   return [
-    `Revisione di ${filePath}${created ? ' (file creato da te)' : ''}: ho guardato la tua modifica nel pannello di revisione e chiedo dei cambiamenti.`,
+    header,
     ...lines,
-    'Correggi questo file seguendo le indicazioni: accanto a ogni voce, tra parentesi, c\'è come trattarla. Non toccare altri file se non serve. La nuova versione tornerà in revisione.'
+    `Correggi questo file seguendo le indicazioni: accanto a ogni voce, tra parentesi, c'è come trattarla. Non toccare altri file se non serve.${tail}`
   ].join('\n')
 }
 

@@ -5,6 +5,8 @@ import type { InstalledPlugin, PluginInstallProgress, PluginLanguageInfo } from 
 import { api } from '@/lib/api'
 import type { PanelParams } from '@/panels/kinds'
 import { useSessions } from '@/state/sessions'
+import { useRecent } from '@/state/recent'
+import { useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
 import { addPanel } from '@/workspace/panels'
 import { dockRegistry } from '@/workspace/registry'
@@ -108,6 +110,7 @@ export function openFile(path: string, position?: RevealPosition, workspace?: st
   const sheetId = useWorkspace.getState().activeSheetId
   const dock = dockRegistry.get(sheetId)
   if (!dock) return
+  useRecent.getState().push(path)
   const key = normPath(path)
   const existing = dock.panels.find((p) => {
     const params = p.params as PanelParams | undefined
@@ -136,10 +139,9 @@ export function openFile(path: string, position?: RevealPosition, workspace?: st
     addPanel(dock, 'editor', { title: name, params: { filePath: path, cwd: ws }, position: { referencePanel: anotherEditor.id, direction: 'within' } })
     return
   }
-  // Primo file del foglio: l'editor ha un gruppo tutto suo, a destra dell'Esplora file (come negli IDE).
-  // Senza posizione Dockview lo metterebbe come scheda nel gruppo attivo, cioè dentro l'Esplora file.
-  const explorer = dock.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'explorer')
-  const reference = explorer ?? dock.activePanel
+  // Primo file del foglio: l'editor ha un gruppo tutto suo, a destra del pannello attivo (l'Esplora file
+  // sta nella barra laterale fissa). Senza posizione Dockview lo metterebbe come scheda nel gruppo attivo.
+  const reference = dock.activePanel
   // Dockview ridistribuisce la larghezza fra tutte le colonne: si ricordano quelle di prima, così le
   // colonne laterali (Esplora, Widget…) restano com'erano e l'editor divide lo spazio della più larga.
   const before = dock.groups.map((g) => ({ group: g, width: g.api.width }))
@@ -163,17 +165,13 @@ export function openPluginsPanel(): void {
   else addPanel(dock, 'plugins')
 }
 
-/** Cartella di progetto di un foglio: quella dell'esplora file o del terminale attivo. */
+/** Cartella di progetto di un foglio: quella dell'Esplora file (barra laterale) o del terminale attivo. */
 export function guessWorkspace(dock: DockviewApi): string | undefined {
-  for (const p of dock.panels) {
-    const params = p.params as PanelParams | undefined
-    if (params?.kind === 'explorer' && params.cwd) return params.cwd
-  }
   const sessions = useSessions.getState().sessions
   const terminals = dock.panels.filter((p) => (p.params as PanelParams | undefined)?.kind === 'terminal')
   const active = terminals.find((p) => p.api.isActive) ?? terminals[0]
   const params = active?.params as PanelParams | undefined
-  return (params?.sessionId && sessions[params.sessionId]?.cwd) || params?.hint?.cwd || undefined
+  return (params?.sessionId && sessions[params.sessionId]?.cwd) || params?.hint?.cwd || useSidebar.getState().explorerCwd || undefined
 }
 
 export const SEVERITY_LABELS: Record<1 | 2 | 3 | 4, string> = { 1: 'errore', 2: 'avviso', 3: 'informazione', 4: 'suggerimento' }

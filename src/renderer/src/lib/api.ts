@@ -1,3 +1,4 @@
+import { compileMatcher, searchText } from '@shared/search'
 import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
 import type { SessionAttention, SessionInfo } from '@shared/sessions'
 import { emptyProjectFile } from '@shared/project'
@@ -119,6 +120,59 @@ function createLocalStorageApi(): AppApi {
       async install() {},
       onStatus: () => () => {}
     },
+    java: {
+      async state() {
+        return { enabled: false, services: [], jdks: [], configs: [], serviceJdk: {} }
+      },
+      async setDefaultJdk() {},
+      async setServiceJdk() {},
+      async downloadJdk() {
+        return { ok: false, error: 'Solo nell\'app desktop.' }
+      },
+      async removeJdk() {
+        return false
+      },
+      async saveConfig(cfg) {
+        return cfg
+      },
+      async deleteConfig() {},
+      async importIdea() {
+        return { configs: [], warnings: ['Solo nell\'app desktop.'] }
+      },
+      async run() {
+        return { ok: false, error: 'Solo nell\'app desktop.' }
+      },
+      async debug() {
+        return { ok: false, error: 'Solo nell\'app desktop.' }
+      },
+      async debugState() {
+        return { status: 'idle', frames: [], verified: {} }
+      },
+      async control() {
+        return { ok: false }
+      },
+      async stop() {},
+      async restart() {
+        return { ok: false }
+      },
+      async scopes() {
+        return []
+      },
+      async variables() {
+        return []
+      },
+      async evaluate() {
+        return { ok: false, error: 'Nessun debug.' }
+      },
+      async breakpoints() {
+        return {}
+      },
+      async setBreakpoints() {},
+      onChanged: () => () => {},
+      onDebug: () => () => {},
+      onOutput: () => () => {},
+      onProgress: () => () => {}
+    },
     settings: {
       async get(key) {
         return read<unknown>(`cct.setting.${key}`, undefined)
@@ -172,6 +226,22 @@ function createDemoFiles(): Pick<AppApi, 'files' | 'lsp' | 'plugins'> {
         const prefix = root.toLowerCase() + '\\'
         const files = Object.keys(contents).filter((f) => f.toLowerCase().startsWith(prefix)).map((f) => f.slice(prefix.length))
         return { root, truncated: false, files }
+      },
+      async search(root, query, opts) {
+        const prefix = root.toLowerCase() + '\\'
+        let re: RegExp
+        try {
+          re = compileMatcher(query, opts)
+        } catch (e) {
+          return { ok: false, error: (e as Error).message, root, files: [], total: 0, truncated: false, searched: 0 }
+        }
+        const files = Object.keys(contents)
+          .filter((f) => f.toLowerCase().startsWith(prefix))
+          .flatMap((f) => {
+            const matches = searchText(contents[f], re)
+            return matches.length ? [{ file: f.slice(prefix.length), matches }] : []
+          })
+        return { ok: true, root, files, total: files.reduce((n, f) => n + f.matches.length, 0), truncated: false, searched: Object.keys(contents).length }
       },
       watch() {},
       unwatch() {},
@@ -404,6 +474,9 @@ public class OrderService {
         binary: false
       }
     },
+    async reviewFile() {
+      return { ok: true }
+    },
     async requestRevision(id, notes) {
       const current = afters.get(id) ?? after
       bases.set(id, current)
@@ -483,11 +556,11 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
         const info: SessionInfo = {
           id,
           kind: req.kind,
-          title: req.kind === 'claude' ? req.claude.title || req.claude.name || cwd.split(/[\\/]/).pop() || cwd : req.shell === 'git-bash' ? 'Git Bash' : 'PowerShell',
+          title: req.kind === 'claude' ? req.claude.title || req.claude.name || cwd.split(/[\\/]/).pop() || cwd : req.kind === 'task' ? req.title : req.shell === 'git-bash' ? 'Git Bash' : 'PowerShell',
           cwd,
           status: 'idle',
           startedAt: new Date().toISOString(),
-          command: req.kind === 'claude' ? `claude --model ${req.claude.model}` : req.shell,
+          command: req.kind === 'claude' ? `claude --model ${req.claude.model}` : req.kind === 'task' ? req.file : req.shell,
           shell: req.kind === 'shell' ? req.shell : undefined,
           claudeSessionId: req.kind === 'claude' ? (req.claude.resumeId ?? crypto.randomUUID()) : undefined,
           model: req.kind === 'claude' ? req.claude.model : undefined,
@@ -557,6 +630,10 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
       key() {},
       async sendPrompt() {
         return { ok: true }
+      },
+      async markIdle(id) {
+        const s = sessions.get(id)
+        if (s && (s.info.status === 'working' || s.info.status === 'waiting')) s.info.status = 'idle'
       },
       async kill(id) {
         const s = sessions.get(id)

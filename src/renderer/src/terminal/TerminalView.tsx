@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { ClipboardPaste, Copy, Eraser, TextSelect } from 'lucide-react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -6,6 +7,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { api } from '@/lib/api'
 import { TERMINAL_FONT_FAMILY, useTerminalSettings } from '@/state/terminalSettings'
+import { useContextPopup, type PopupItem } from '@/components/ContextPopup'
 import { sessionHub } from './hub'
 
 /** Colori del terminale, dal tema dell'app (mockup). */
@@ -64,6 +66,9 @@ export function TerminalView({ sessionId, viewId, onMissing, onExit, active }: P
   const termRef = useRef<Terminal | null>(null)
   const callbacks = useRef({ onMissing, onExit })
   callbacks.current = { onMissing, onExit }
+  const { show, popup } = useContextPopup()
+  const showRef = useRef(show)
+  showRef.current = show
 
   /** Crea il terminale nel contenitore e lo collega alla sessione. Restituisce la funzione di chiusura. */
   function start(host: HTMLDivElement): () => void {
@@ -160,6 +165,25 @@ export function TerminalView({ sessionId, viewId, onMissing, onExit, active }: P
     }
     host.addEventListener('wheel', onWheel, { passive: false, capture: true })
 
+    // Tasto destro: menu con Copia / Incolla / Seleziona tutto / Pulisci (xterm di suo non ne ha).
+    const onContext = (e: MouseEvent) => {
+      e.stopPropagation()
+      const text = term.getSelection()
+      const items: PopupItem[] = [
+        { label: 'Copia', icon: <Copy size={13} />, disabled: !text, onSelect: () => void navigator.clipboard.writeText(text) },
+        {
+          label: 'Incolla',
+          icon: <ClipboardPaste size={13} />,
+          onSelect: () => void navigator.clipboard.readText().then((t) => t && term.paste(t)).catch(() => undefined)
+        },
+        { separator: true },
+        { label: 'Seleziona tutto', icon: <TextSelect size={13} />, onSelect: () => term.selectAll() },
+        { label: 'Pulisci lo schermo', icon: <Eraser size={13} />, onSelect: () => term.clear() }
+      ]
+      showRef.current(e, items)
+    }
+    host.addEventListener('contextmenu', onContext)
+
     const applyFont = () => {
       term.clearTextureAtlas()
       sendSize(isFocused())
@@ -173,6 +197,7 @@ export function TerminalView({ sessionId, viewId, onMissing, onExit, active }: P
       disposed = true
       offSettings()
       host.removeEventListener('wheel', onWheel, { capture: true })
+      host.removeEventListener('contextmenu', onContext)
       cancelAnimationFrame(raf)
       observer.disconnect()
       term.textarea?.removeEventListener('focus', onFocus)
@@ -211,6 +236,7 @@ export function TerminalView({ sessionId, viewId, onMissing, onExit, active }: P
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden bg-background">
       <div ref={hostRef} className="absolute inset-0 py-1 pl-2" />
+      {popup}
     </div>
   )
 }

@@ -3,7 +3,6 @@ import { PortalScope } from '@/components/ui-kit'
 import { ChangesPanel } from '@/changes/ChangesPanel'
 import { DocsPanel } from '@/docs/DocsPanel'
 import { EditorPanel } from '@/files/EditorPanel'
-import { ExplorerPanel } from '@/files/ExplorerPanel'
 import { ProblemsPanel } from '@/files/ProblemsPanel'
 import { PermissionsPanel } from '@/permissions/PermissionsPanel'
 import { PluginsPanel } from '@/plugins/PluginsPanel'
@@ -22,8 +21,6 @@ export function PanelHost(props: IDockviewPanelProps<PanelParams>) {
         return <ChangesPanel {...props} />
       case 'permissions':
         return <PermissionsPanel {...props} />
-      case 'explorer':
-        return <ExplorerPanel {...props} />
       case 'editor':
         return <EditorPanel {...props} />
       case 'problems':

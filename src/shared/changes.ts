@@ -129,3 +129,23 @@ export interface RevisionResult {
 
 /** La modifica aspetta ancora qualcosa (da te o da Claude). */
 export const isOpen = (c: Pick<FileChange, 'status'>): boolean => c.status === 'pending' || c.status === 'revision'
+
+/** Messaggio mostrato quando l'input è bloccato dalla revisione obbligatoria. */
+export const REVIEW_LOCK_MESSAGE =
+  'Prima di scrivere a Claude devi revisionare le sue modifiche: approva o rifiuta ogni file nel pannello Modifiche.'
+
+/**
+ * Revisione obbligatoria: a Claude fermo (stato «idle») con modifiche ancora aperte della sessione,
+ * l'input (casella grafica, terminale, prompt predefiniti) è disabilitato. Mentre Claude lavora o aspetta
+ * un permesso l'input resta libero, altrimenti non si potrebbe rispondere né interrompere.
+ */
+export const isReviewLocked = (
+  session: { id: string; kind: string; status: string },
+  changes: Pick<FileChange, 'sessionId' | 'status'>[]
+): boolean => session.kind === 'claude' && session.status === 'idle' && changes.some((c) => c.sessionId === session.id && isOpen(c))
+
+/** Claude sta ancora eseguendo (lavora o aspetta un permesso). */
+export const isSessionRunning = (status: string): boolean => status === 'working' || status === 'waiting'
+
+/** Messaggio mostrato quando si prova a revisionare mentre Claude sta ancora eseguendo. */
+export const REVIEW_RUNNING_MESSAGE = 'Claude sta ancora eseguendo: approvare o rifiutare si potrà quando ha finito tutti i prompt.'

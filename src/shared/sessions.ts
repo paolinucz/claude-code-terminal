@@ -1,6 +1,6 @@
 // Tipi delle sessioni di terminale (requisiti §3 e §4), condivisi tra processo principale e interfaccia.
 
-export type SessionKind = 'claude' | 'shell'
+export type SessionKind = 'claude' | 'shell' | 'task'
 
 /** Stato mostrato su ogni scheda (S6). 'waiting' arriva con gli hook nella fase 3. */
 export type SessionStatus = 'working' | 'waiting' | 'idle' | 'exited'
@@ -48,6 +48,8 @@ export interface ClaudeLaunchOptions {
 export type CreateSessionRequest =
   | { kind: 'claude'; claude: ClaudeLaunchOptions }
   | { kind: 'shell'; shell: ShellId; cwd: string }
+  /** Un comando qualsiasi (Maven, Gradle, java…) in un terminale: lo avvia l'app per le run configuration. */
+  | { kind: 'task'; title: string; cwd: string; file: string; args: string[]; env: Record<string, string> }
 
 export interface SessionInfo {
   id: string

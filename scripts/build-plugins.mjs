@@ -78,9 +78,14 @@ function javaHome() {
  * .ccplugin (zip) con il tar di Windows.
  */
 function pack(staging, source, manifest) {
-  cpSync(join(ROOT, 'plugins', source, 'adapter.mjs'), join(staging, 'adapter.mjs'))
-  cpSync(join(ROOT, 'plugins', 'sdk', 'cct-plugin-sdk.mjs'), join(staging, 'cct-plugin-sdk.mjs'))
-  manifest = { ...manifest, apiVersion: 1, main: 'adapter.mjs' }
+  // `source` null = pacchetto senza adapter (per esempio il Java development pack: porta file e abilita funzioni dell'app).
+  if (source) {
+    cpSync(join(ROOT, 'plugins', source, 'adapter.mjs'), join(staging, 'adapter.mjs'))
+    cpSync(join(ROOT, 'plugins', 'sdk', 'cct-plugin-sdk.mjs'), join(staging, 'cct-plugin-sdk.mjs'))
+    manifest = { ...manifest, apiVersion: 1, main: 'adapter.mjs' }
+  } else {
+    manifest = { ...manifest, apiVersion: 1 }
+  }
   writeFileSync(join(staging, 'plugin.json'), JSON.stringify(manifest, null, 2) + '\n')
   mkdirSync(OUT, { recursive: true })
   const zip = join(OUT, `${manifest.id}-${manifest.version}.zip`)
@@ -171,7 +176,7 @@ const PLUGINS = {
     pack(dir, 'java', {
       id: 'cct.java',
       name: 'Java',
-      version: '1.0.0',
+      version: '1.1.0',
       publisher: PUBLISHER,
       license: 'EPL-2.0 (jdtls), GPLv2 con Classpath Exception (Temurin)',
       description: `Eclipse JDT Language Server ${version} con un JRE ${jre.version.semver} (Eclipse Temurin). Importa i progetti Maven e Gradle. Fornisce Java ai plugin Maven e Gradle.`,
@@ -190,6 +195,44 @@ const PLUGINS = {
         `Avvia Eclipse JDT Language Server ${version} con il JRE del plugin, uno per progetto (il più esterno con pom.xml o build.gradle)`,
         'Importa i progetti Maven e Gradle: può scaricare le loro dipendenze da Maven Central',
         'Tiene le sue cache nella cartella dati dell\'app'
+      ]
+    })
+  },
+
+  /**
+   * Java development pack: debugger Java (java-debug dentro jdtls), run configuration per Maven, Gradle e Quarkus,
+   * importazione da IntelliJ e Lombok. Porta un JDK Temurin completo per jdtls (il JRE di cct.java non ha jdk.jdi).
+   */
+  async javadev() {
+    const jdk = (await json('https://api.adoptium.net/v3/assets/latest/25/hotspot?os=windows&architecture=x64&image_type=jdk&vendor=eclipse'))[0]
+    const latest = async (path) => (await text(`https://repo1.maven.org/maven2/${path}/maven-metadata.xml`)).match(/<release>([^<]+)<\/release>/)?.[1] ?? (await text(`https://repo1.maven.org/maven2/${path}/maven-metadata.xml`)).match(/<latest>([^<]+)<\/latest>/)[1]
+    const debugVersion = await latest('com/microsoft/java/com.microsoft.java.debug.plugin')
+    const lombokVersion = await latest('org/projectlombok/lombok')
+    const debugUrl = `https://repo1.maven.org/maven2/com/microsoft/java/com.microsoft.java.debug.plugin/${debugVersion}/com.microsoft.java.debug.plugin-${debugVersion}.jar`
+    const lombokUrl = `https://repo1.maven.org/maven2/org/projectlombok/lombok/${lombokVersion}/lombok-${lombokVersion}.jar`
+    const debugJar = await download(debugUrl, join(WORK, 'cache', `java-debug-${debugVersion}.jar`))
+    const lombokJar = await download(lombokUrl, join(WORK, 'cache', `lombok-${lombokVersion}.jar`))
+    const dir = staging('cct.java-dev')
+    pack(dir, null, {
+      id: 'cct.java-dev',
+      name: 'Java Development Pack',
+      version: '1.0.0',
+      publisher: PUBLISHER,
+      license: 'EPL-1.0 (java-debug), MIT (Lombok), GPLv2 con Classpath Exception (Temurin)',
+      description: `Debugger Java (java-debug ${debugVersion}) con run configuration per Maven, Gradle e Quarkus, importazione delle run configuration di IntelliJ IDEA e supporto a Lombok ${lombokVersion}. Porta un JDK Eclipse Temurin ${jdk.version.semver} per il language server.`,
+      requires: ['cct.java'],
+      languages: [],
+      downloads: [
+        { id: 'jdk', url: jdk.binary.package.link, sha256: jdk.binary.package.checksum, size: jdk.binary.package.size, type: 'zip', to: 'jdk', strip: true },
+        { id: 'debug', url: debugUrl, sha256: sha256(debugJar), size: readFileSync(debugJar).length, type: 'file', to: 'debug/java-debug.jar' },
+        { id: 'lombok', url: lombokUrl, sha256: sha256(lombokJar), size: readFileSync(lombokJar).length, type: 'file', to: 'lombok/lombok.jar' }
+      ],
+      activities: [
+        `Fa partire il language server Java con il JDK Temurin ${jdk.version.semver} del pack (completo, serve al debug) e con Lombok ${lombokVersion} come agente`,
+        `Carica java-debug ${debugVersion} nel language server per il debug (breakpoint, passo-passo, variabili)`,
+        'Aggiunge la vista «Esegui e debug»: avvia Maven, Gradle, Quarkus e applicazioni Java in un terminale, anche in debug',
+        'Legge le run configuration di IntelliJ IDEA dalle cartelle .idea e .run del progetto (solo lettura)',
+        'Scarica Eclipse Temurin (JDK) da api.adoptium.net quando lo chiedi dal pannello, verificando il checksum'
       ]
     })
   },

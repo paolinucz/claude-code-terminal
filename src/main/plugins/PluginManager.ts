@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import type { InstalledPlugin, PluginInstallProgress, PluginLanguageInfo, PluginManifest, PluginPreview } from '@shared/plugins'
 import { PLUGIN_API_VERSION } from '@shared/pluginApi'
 import type { AppDb } from '../db'
-import { dirSize, downloadVerified, extract, fileSha256, treeHash } from './download'
+import { dirSize, downloadVerified, extract, fileSha256, TAR, treeHash } from './download'
 
 const run = promisify(execFile)
 
@@ -190,7 +190,7 @@ export class PluginManager {
     const dir = join(this.dir, '.staging', token)
     mkdirSync(dir, { recursive: true })
     try {
-      await run('tar', ['-xf', file, '-C', dir], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
+      await run(TAR, ['-xf', file, '-C', dir], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
     } catch {
       rmSync(dir, { recursive: true, force: true })
       throw new Error('Il file non è un pacchetto valido (zip).')
@@ -220,7 +220,7 @@ export class PluginManager {
     if (manifest.main && manifest.apiVersion !== PLUGIN_API_VERSION) {
       warnings.push(`Il plugin usa la versione ${manifest.apiVersion ?? '?'} della Plugin API, l'app la ${PLUGIN_API_VERSION}: potrebbe non funzionare.`)
     }
-    if (!manifest.main) warnings.push('Il plugin non ha un adapter: dà solo la colorazione della sintassi.')
+    if (!manifest.main && (manifest.languages ?? []).length) warnings.push('Il plugin non ha un adapter: dà solo la colorazione della sintassi.')
     const preview: PluginPreview = {
       token,
       file,

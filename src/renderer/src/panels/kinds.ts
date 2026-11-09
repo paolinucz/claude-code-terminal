@@ -36,7 +36,9 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     title: 'Esplora file',
     description: 'Albero del workspace e delle cartelle aggiuntive, con i file modificati segnati M, A o D.',
     phase: 0,
-    requirements: 'F1'
+    requirements: 'F1',
+    // Ora sta nella barra laterale fissa: si toglie dai layout salvati e non compare nei menu.
+    hidden: true
   },
   editor: {
     kind: 'editor',

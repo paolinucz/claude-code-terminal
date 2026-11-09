@@ -150,6 +150,7 @@ export class Connection {
  * - initialize(ctx, app) → capabilities parziali (le altre si deducono dalle funzioni presenti)
  * - open({path, languageId, text, workspace}), change({path, text}), save({path, text}), close({path})
  * - completion({path, position}), hover(...), definition(...)
+ * - call(method, params): richieste proprie del plugin (l'app le manda con `PluginHost.call`)
  * - shutdown()
  *
  * `app` serve per mandare all'app: app.diagnostics(path, source, items), app.status(s), app.log(level, message).
@@ -186,6 +187,11 @@ export function runAdapter(handlers) {
   conn.onRequest('completion', async (p) => (handlers.completion ? ((await handlers.completion(p)) ?? { items: [], incomplete: false }) : { items: [], incomplete: false }))
   conn.onRequest('hover', async (p) => (handlers.hover ? ((await handlers.hover(p)) ?? null) : null))
   conn.onRequest('definition', async (p) => (handlers.definition ? ((await handlers.definition(p)) ?? []) : []))
+  // Richieste proprie del plugin oltre alla Plugin API di base (es. comandi del server per il debug): `handlers.call(method, params)`.
+  conn.onRequest('call', async (p) => {
+    if (!handlers.call) throw new Error(`Il plugin non gestisce «${p?.method}».`)
+    return (await handlers.call(p.method, p.params ?? {})) ?? null
+  })
   conn.onRequest('shutdown', async () => {
     await stop()
     setTimeout(() => process.exit(0), 50)
@@ -625,6 +631,28 @@ export function lspAdapter(options) {
     hover: (p) => withDoc(p.path, async (s, doc) => lsp.toHover(await s.conn.request('textDocument/hover', { textDocument: { uri: doc.uri }, position: lsp.position(p.position) }, 15000)), null),
 
     definition: (p) => withDoc(p.path, async (s, doc) => lsp.toLocations(await s.conn.request('textDocument/definition', { textDocument: { uri: doc.uri }, position: lsp.position(p.position) }, 15000)), []),
+
+    /**
+     * Richieste dell'app che attraversano l'adapter verso il language server:
+     * - `lsp/executeCommand` {workspace, root, command, arguments, timeout}: comando del server (per esempio quelli di java-debug);
+     * - `lsp/state` {workspace, root}: stato del server di quel progetto.
+     * Si usa il server già avviato che contiene la cartella; se non c'è, si avvia quello della radice del progetto.
+     */
+    async call(method, p) {
+      if (method !== 'lsp/executeCommand' && method !== 'lsp/state') throw new Error(`Metodo non gestito: ${method}`)
+      const root = p.root ? resolve(p.root) : null
+      if (!root) throw new Error('Manca la cartella del progetto.')
+      const under = [...servers.values()].filter((x) => x.alive && (normPath(root) === normPath(x.root) || normPath(root).startsWith(normPath(x.root) + '\\')))
+      let s = under.sort((a, b) => a.root.length - b.root.length)[0]
+      if (method === 'lsp/state') return s ? { state: s.state, root: s.root } : { state: 'stopped', root }
+      if (!s) {
+        const start = findRoot(join(root, 'pom.xml'), p.workspace, options.rootMarkers, options.rootStrategy)
+        s = ensure(start)
+      }
+      await s.ready
+      if (!s.alive) throw new Error('Il language server non è attivo.')
+      return await s.conn.request('workspace/executeCommand', { command: p.command, arguments: p.arguments ?? [] }, p.timeout ?? 60000)
+    },
 
     async shutdown() {
       await Promise.all(

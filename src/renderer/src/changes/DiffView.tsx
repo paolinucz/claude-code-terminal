@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { languageOf } from '@/lib/monaco'
@@ -34,8 +34,26 @@ export default function DiffView({
   const fileRef = useRef({ filePath, after })
   fileRef.current = { filePath, after }
   const fontSize = useTerminalSettings((s) => s.fontSize)
+  const diffRef = useRef<editor.IStandaloneDiffEditor | null>(null)
+
+  // Alla chiusura il wrapper di Monaco distruggeva i modelli prima di scollegarli dal diff e lanciava
+  // «TextModel got disposed before DiffEditorWidget model got reset» a ogni cambio di file. Qui si scollegano
+  // prima e si distruggono a mano (il wrapper ha `keepCurrent…Model`, quindi non lo fa più lui).
+  useEffect(
+    () => () => {
+      const diff = diffRef.current
+      diffRef.current = null
+      if (!diff) return
+      const models = diff.getModel()
+      diff.setModel(null)
+      models?.original.dispose()
+      models?.modified.dispose()
+    },
+    []
+  )
 
   const onMount = (diff: editor.IStandaloneDiffEditor) => {
+    diffRef.current = diff
     const modified = diff.getModifiedEditor()
     const current = (): LineSelection | null => {
       const s = modified.getSelection()
@@ -90,6 +108,8 @@ export default function DiffView({
       language={languageOf(filePath)}
       theme="cct-dark"
       onMount={onMount}
+      keepCurrentOriginalModel
+      keepCurrentModifiedModel
       loading={<div className="p-4 text-text-faint">Caricamento del diff…</div>}
       options={{
         readOnly: true,

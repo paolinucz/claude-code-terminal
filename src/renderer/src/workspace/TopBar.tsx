@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SerializedDockview } from 'dockview-react'
-import { ArrowDownToLine, ChevronDown, LayoutGrid, Plus, Puzzle, Search, ShieldCheck, SquareTerminal } from 'lucide-react'
+import { ArrowDownToLine, ChevronDown, LayoutGrid, Plus, Puzzle, Search, ShieldCheck } from 'lucide-react'
 import { openPluginsPanel } from '@/state/editor'
 import type { PanelParams } from '@/panels/kinds'
 import { useSessions } from '@/state/sessions'
@@ -26,7 +26,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { NewTerminalDialog } from '@/terminal/NewTerminalDialog'
 import { addPanel, buildDefaultLayout, removeHiddenPanels, stripSessions } from './panels'
 import { dockRegistry } from './registry'
-import { CommandPalette, type PaletteCommand } from './CommandPalette'
+import { CommandPalette, type PaletteCommand, type PaletteMode } from './CommandPalette'
 import { SaveLayoutDialog } from './SaveLayoutDialog'
 import { ProjectMenu } from './ProjectMenu'
 import { ContextSwitcher } from './ContextSwitcher'
@@ -40,6 +40,7 @@ import { AccentDialog } from './AccentDialog'
 import { useAccent } from '@/state/accent'
 import { sendPreset } from './presets'
 import { openDocsPanel } from '@/docs/DocsPanel'
+import appLogo from '@/assets/icon-small.svg'
 
 /** In Electron i pulsanti della finestra (riduci, ingrandisci, chiudi) stanno sopra la barra, a destra. */
 const WINDOW_CONTROLS_WIDTH = window.api ? 140 : 0
@@ -56,6 +57,7 @@ export function TopBar() {
   const [resetting, setResetting] = useState(false)
   const [newTerminal, setNewTerminal] = useState(false)
   const [palette, setPalette] = useState(false)
+  const [paletteMode, setPaletteMode] = useState<PaletteMode>('all')
   const [installing, setInstalling] = useState(false)
   const update = useUpdates((s) => s.status)
   const appInfo = useUpdates((s) => s.info)
@@ -79,10 +81,17 @@ export function TopBar() {
     const onKey = (e: KeyboardEvent) => {
       // Dentro un terminale Ctrl+K resta al terminale (in bash e in Claude Code cancella la riga).
       const inTerminal = (e.target as Element | null)?.closest?.('.xterm')
-      if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'k' && !inTerminal) {
-        e.preventDefault()
-        refreshLayouts()
-        setPalette(true)
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && !inTerminal) {
+        const k = e.key.toLowerCase()
+        // Ctrl+K comandi, Ctrl+P vai al file, Ctrl+E file recenti (in un terminale restano alla shell).
+        const mode: PaletteMode | null = k === 'k' ? 'all' : k === 'p' ? 'files' : k === 'e' ? 'recent' : null
+        if (mode) {
+          e.preventDefault()
+          e.stopPropagation()
+          if (mode === 'all') refreshLayouts()
+          setPaletteMode(mode)
+          setPalette(true)
+        }
       }
       // F1–F9: foglio 1–9 del contesto attivo, anche con il focus dentro un terminale.
       // Sulla scheda di un foglio F2 resta «rinomina»; nei campi di testo non si intercetta.
@@ -217,12 +226,7 @@ export function TopBar() {
       style={{ paddingRight: WINDOW_CONTROLS_WIDTH + 12 }}
     >
       <div className="flex items-center gap-2">
-        <div
-          aria-hidden="true"
-          className="flex size-6 items-center justify-center rounded-md bg-brand font-mono text-[11px] font-bold text-on-brand"
-        >
-          &gt;_
-        </div>
+        <img src={appLogo} alt="" aria-hidden="true" draggable={false} className="size-7 shrink-0" />
         <span className="whitespace-nowrap text-[13px] font-semibold max-lg:hidden">Claude Code Terminal</span>
       </div>
 
@@ -248,11 +252,11 @@ export function TopBar() {
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className={buttonClass}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-[13px] font-semibold text-on-brand transition-opacity hover:opacity-90"
           onClick={() => setNewTerminal(true)}
           title="Nuovo terminale (Ctrl+Maiusc+T)"
         >
-          <SquareTerminal size={14} /> Terminale
+          <Plus size={14} /> Terminale
         </button>
 
         <DropdownMenu>
@@ -341,7 +345,7 @@ export function TopBar() {
       <AccentDialog />
 
       <SnippetExplain />
-      <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} />
+      <CommandPalette open={palette} mode={paletteMode} onClose={() => setPalette(false)} commands={commands} />
 
       <SaveLayoutDialog
         open={saving}

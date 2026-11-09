@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Check, CheckCheck, ChevronDown, ChevronRight, FilePlus2, FileText, MessageSquarePlus, RotateCcw, Undo2 } from 'lucide-react'
-import { isOpen, type ChangeContents, type FileChange, type ReviewNote } from '@shared/changes'
+import { isOpen, isSessionRunning, REVIEW_RUNNING_MESSAGE, type ChangeContents, type FileChange, type ReviewNote } from '@shared/changes'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { Segmented } from '@/components/ui-kit'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { CHANGE_STATUS_COLORS, CHANGE_STATUS_LABELS, pendingCount, splitPath, useChanges } from '@/state/changes'
+import { useSessions } from '@/state/sessions'
 import { useWorkspace } from '@/state/workspace'
 import { useProject } from '@/state/project'
 import { sheetOfPanel } from '@/workspace/panels'
@@ -20,6 +21,7 @@ import { MarkdownView } from '@/docs/MarkdownView'
 import { renderMarkdownDiff } from '@/docs/markdown'
 import { SmartExplain } from './SmartExplain'
 import { useExplainSettings } from '@/state/explain'
+import { useSnippetExplain } from '@/state/snippetExplain'
 
 const DiffView = lazy(() => import('./DiffView'))
 
@@ -50,6 +52,9 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
   const setStatus = useWorkspace((s) => s.setStatus)
   const project = useProject((s) => s.active)
   const sheets = useWorkspace((s) => s.sheets)
+  // Si revisiona solo a Claude fermo: le sessioni che stanno ancora eseguendo bloccano approva, rifiuta e richiedi modifiche.
+  const sessionMap = useSessions((s) => s.sessions)
+  const running = useMemo(() => new Set(Object.values(sessionMap).filter((x) => isSessionRunning(x.status)).map((x) => x.id)), [sessionMap])
   const [onlyContext, setOnlyContext] = useState(true)
   const explainOn = useExplainSettings((s) => s.enabled)
   const [view, setView] = useState<View>('diff')
@@ -102,6 +107,8 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
   const toReview = pendingCount(changes)
   const waitingClaude = changes.filter((c) => c.status === 'revision').length
   const selected = changes.find((c) => c.id === selectedId) ?? null
+  const selectedRunning = Boolean(selected && running.has(selected.sessionId))
+  const anyPendingRunning = changes.some((c) => c.status === 'pending' && running.has(c.sessionId))
 
   // Selezione: resta sulla modifica scelta finché esiste nell'elenco visibile, altrimenti passa alla prima.
   useEffect(() => {
@@ -249,15 +256,19 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                     <span className="ml-auto flex shrink-0 items-center gap-2">
                       <button
                         type="button"
+                        disabled={running.has(sessionId)}
+                        title={running.has(sessionId) ? REVIEW_RUNNING_MESSAGE : undefined}
                         onClick={() => void approveIds(g.items.filter((c) => c.status === 'pending').map((c) => c.id), `della sessione «${g.title}»`)}
-                        className="text-[11px] text-text-subtle hover:text-foreground"
+                        className="text-[11px] text-text-subtle hover:text-foreground disabled:opacity-40"
                       >
                         Approva sessione
                       </button>
                       <button
                         type="button"
+                        disabled={running.has(sessionId)}
+                        title={running.has(sessionId) ? REVIEW_RUNNING_MESSAGE : undefined}
                         onClick={() => startRejectMany(g.items.filter((c) => c.status === 'pending').map((c) => c.id), `della sessione «${g.title}»`)}
-                        className="text-[11px] text-text-subtle hover:text-danger"
+                        className="text-[11px] text-text-subtle hover:text-danger disabled:opacity-40"
                       >
                         Respingi sessione
                       </button>
@@ -308,15 +319,19 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
             <div className="flex gap-2 border-t border-border p-2">
               <button
                 type="button"
+                disabled={anyPendingRunning}
+                title={anyPendingRunning ? REVIEW_RUNNING_MESSAGE : undefined}
                 onClick={() => void approveIds(pendingIds, 'tutte quelle visibili')}
-                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-ok/50 text-ok transition-colors hover:bg-ok/10"
+                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-ok/50 text-ok transition-colors hover:bg-ok/10 disabled:opacity-40"
               >
                 <CheckCheck size={14} /> Approva tutte ({toReview})
               </button>
               <button
                 type="button"
+                disabled={anyPendingRunning}
+                title={anyPendingRunning ? REVIEW_RUNNING_MESSAGE : undefined}
                 onClick={() => startRejectMany(pendingIds, '')}
-                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-danger/50 text-danger transition-colors hover:bg-danger/10"
+                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-danger/50 text-danger transition-colors hover:bg-danger/10 disabled:opacity-40"
               >
                 <Undo2 size={14} /> Respingi tutte ({toReview})
               </button>
@@ -357,7 +372,8 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                     <>
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || selectedRunning}
+                        title={selectedRunning ? REVIEW_RUNNING_MESSAGE : undefined}
                         onClick={() => setRejecting({ change: selected, force: false })}
                         className="inline-flex h-7 items-center gap-1.5 rounded-md border border-danger/50 px-2.5 text-[12px] text-danger transition-colors hover:bg-danger/10 disabled:opacity-40"
                       >
@@ -378,7 +394,8 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                       </button>
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || selectedRunning}
+                        title={selectedRunning ? REVIEW_RUNNING_MESSAGE : undefined}
                         onClick={() => void approve(selected)}
                         className="inline-flex h-7 items-center gap-1.5 rounded-md bg-ok px-2.5 text-[12px] font-semibold text-on-brand transition-opacity hover:opacity-90 disabled:opacity-40"
                       >
@@ -393,6 +410,20 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                   )}
                 </div>
               </div>
+
+              {selectedRunning && isOpen(selected) && (
+                <p className="shrink-0 border-b border-warn/40 bg-warn/10 px-3 py-1.5 text-[12px] text-warn" role="status">
+                  {REVIEW_RUNNING_MESSAGE} Intanto puoi preparare le richieste di modifica: vanno in coda a Claude.{' '}
+                  <button
+                    type="button"
+                    onClick={() => void api.sessions.markIdle(selected.sessionId)}
+                    title="Claude Code non avvisa quando lo si interrompe con Esc: se è fermo davvero, sblocca la revisione"
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    Claude è fermo? Sblocca
+                  </button>
+                </p>
+              )}
 
               {/* Stato della richiesta, confronto e storico */}
               {(selected.status === 'revision' || canCompareLast || (contents?.requests.length ?? 0) > 0) && (
@@ -451,7 +482,18 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                     <p className="shrink-0 border-b border-border px-4 py-1.5 text-[11px] text-text-faint">
                       {mdDiff.added + mdDiff.removed === 0 ? 'Nessuna differenza nei contenuti.' : `${mdDiff.added} blocchi aggiunti o cambiati (verde), ${mdDiff.removed} tolti (rosso).`}
                     </p>
-                    <MarkdownView html={mdDiff.html} className="min-h-0 flex-1" />
+                    <MarkdownView
+                      html={mdDiff.html}
+                      findable
+                      className="min-h-0 flex-1"
+                      actions={{
+                        source: contents!.after!,
+                        onReview: isOpen(selected) && selected.status !== 'revision' ? startReview : undefined,
+                        onExplain: explainOn
+                          ? (sel) => useSnippetExplain.getState().open({ filePath: selected.filePath, text: contents!.after!, start: sel.start, end: sel.end })
+                          : undefined
+                      }}
+                    />
                   </div>
                 ) : (
                   <Suspense fallback={<p className="p-4 text-text-faint">Caricamento del diff…</p>}>

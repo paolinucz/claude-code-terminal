@@ -27,6 +27,8 @@ import type {
 import type { AppInfo, UpdateStatus } from './updates'
 import type { ProjectFile, ProjectInfo, ProjectRef, ProjectResult } from './project'
 import type { ExplainResult, SnippetRequest } from './explain'
+import type { SearchOptions, SearchResult } from './search'
+import type { DebugOutput, DebugScope, DebugState, DebugVariable, IdeaImportResult, JavaBreakpoint, JavaProgress, JavaState, RunConfig } from './java'
 import type { ChatItem, TranscriptUpdate } from './transcript'
 
 /** Layout serializzato di Dockview (risultato di `api.toJSON()`). Lo trattiamo come dato opaco. */
@@ -85,6 +87,8 @@ export interface AppApi {
     reject(id: string, force?: boolean): Promise<RejectResult>
     /** F8: invia accortezze e divieti a Claude; la modifica torna in revisione quando Claude riscrive il file. */
     requestRevision(id: string, notes: ReviewNote[]): Promise<RevisionResult>
+    /** Modalità revisione dell'editor: indicazioni su un file qualsiasi, mandate alla sessione come messaggio. */
+    reviewFile(sessionId: string, filePath: string, notes: ReviewNote[]): Promise<RevisionResult>
     onChanged(cb: (changes: FileChange[]) => void): () => void
   }
   /** File del workspace (F1, F2). */
@@ -95,6 +99,8 @@ export interface AppApi {
     gitStatus(dir: string): Promise<GitStatus>
     /** L7: tutti i file della cartella, con percorsi relativi (per la palette comandi). Rispetta .gitignore. */
     index(root: string): Promise<FileIndex>
+    /** Ctrl+Maiusc+F: cerca un testo nei file della cartella. Una ricerca nuova annulla la precedente (errore «cancelled»). */
+    search(root: string, query: string, opts: SearchOptions): Promise<SearchResult>
     watch(root: string): void
     unwatch(root: string): void
     reveal(path: string): Promise<void>
@@ -145,6 +151,34 @@ export interface AppApi {
     onStatus(cb: (s: UpdateStatus) => void): () => void
   }
   /** Impostazioni dell'app, salvate come JSON. */
+  /** Java development pack: servizi, JDK, run configuration e debug. */
+  java: {
+    state(root: string, fresh?: boolean): Promise<JavaState>
+    setDefaultJdk(id: string | null): Promise<void>
+    setServiceJdk(serviceRoot: string, id: string | null): Promise<void>
+    downloadJdk(major: number): Promise<{ ok: boolean; error?: string }>
+    removeJdk(id: string): Promise<boolean>
+    saveConfig(cfg: RunConfig): Promise<RunConfig>
+    deleteConfig(id: string): Promise<void>
+    /** Legge le run configuration di IntelliJ (non le salva: lo fa l'utente scegliendo). */
+    importIdea(root: string): Promise<IdeaImportResult>
+    run(configId: string, workspace: string): Promise<{ ok: boolean; error?: string; sessionId?: string }>
+    debug(configId: string, workspace: string): Promise<{ ok: boolean; error?: string }>
+    debugState(): Promise<DebugState>
+    control(action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut'): Promise<{ ok: boolean; error?: string }>
+    stop(): Promise<void>
+    restart(): Promise<{ ok: boolean; error?: string }>
+    scopes(frameId: number): Promise<DebugScope[]>
+    variables(ref: number): Promise<DebugVariable[]>
+    evaluate(expression: string, frameId?: number): Promise<{ ok: boolean; result?: string; type?: string; ref?: number; error?: string }>
+    breakpoints(): Promise<Record<string, JavaBreakpoint[]>>
+    setBreakpoints(file: string, list: JavaBreakpoint[]): Promise<void>
+    /** Cambiano configurazioni, JDK o il pack: si rilegge lo stato. */
+    onChanged(cb: () => void): () => void
+    onDebug(cb: (s: DebugState) => void): () => void
+    onOutput(cb: (o: DebugOutput) => void): () => void
+    onProgress(cb: (p: JavaProgress) => void): () => void
+  }
   settings: {
     get(key: string): Promise<unknown>
     set(key: string, value: unknown): Promise<void>
@@ -160,6 +194,8 @@ export interface AppApi {
     resize(sessionId: string, viewId: string, cols: number, rows: number, claim: boolean): void
     setModel(sessionId: string, model: ClaudeModel, effort: ClaudeEffort): Promise<void>
     kill(sessionId: string): Promise<void>
+    /** Segna la sessione come ferma (Claude interrotto con Esc non lo comunica): sblocca la revisione. */
+    markIdle(sessionId: string): Promise<void>
     /** Casella di input dell'app (B1–B3): manda un messaggio a una sessione Claude Code (incolla + Invio). Rifiuta se Claude aspetta una risposta. */
     /** Un tasto al terminale: esc, enter, up, down o una cifra 1–9 (risposte ai permessi, interruzione). */
     key(sessionId: string, key: string): void
