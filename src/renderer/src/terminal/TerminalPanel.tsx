@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview-react'
-import { AArrowDown, AArrowUp, ChevronDown, GitBranch, Layers, MoreHorizontal, Power, RotateCcw } from 'lucide-react'
+import { AArrowDown, AArrowUp, ChevronDown, GitBranch, Layers, MessagesSquare, MoreHorizontal, Power, RotateCcw, SquareTerminal } from 'lucide-react'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, useTerminalSettings } from '@/state/terminalSettings'
 import { CLAUDE_EFFORTS, CLAUDE_MODELS, type SessionInfo } from '@shared/sessions'
 import { api } from '@/lib/api'
+import { cn } from '@/lib/cn'
 import type { PanelParams } from '@/panels/kinds'
 import { useSessions } from '@/state/sessions'
 import { useWorkspace } from '@/state/workspace'
@@ -18,6 +19,7 @@ import {
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { bindPanelToSession, hintOf, sheetOfPanel } from '@/workspace/panels'
 import { NewSessionForm } from './NewSessionForm'
+import { ConversationView } from './ConversationView'
 import { PromptBox } from './PromptBox'
 import { TerminalView } from './TerminalView'
 
@@ -31,6 +33,18 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
   const [active, setActive] = useState(props.api.isActive)
   // Spostato in una finestra staccata o fluttuante: si ricrea la vista nel nuovo documento.
   const [generation, setGeneration] = useState(0)
+  // Vista grafica della conversazione: sovrapposta al terminale, che resta in esecuzione (e delle sue dimensioni) sotto.
+  const [graphic, setGraphicState] = useState(false)
+  // La scelta si ricorda: chi preferisce la vista grafica la ritrova nei terminali nuovi.
+  useEffect(() => {
+    void api.settings.get('ui.graphicView').then((v) => v === true && setGraphicState(true))
+  }, [])
+  const setGraphic = (value: boolean | ((g: boolean) => boolean)) =>
+    setGraphicState((g) => {
+      const next = typeof value === 'function' ? value(g) : value
+      void api.settings.set('ui.graphicView', next)
+      return next
+    })
 
   useEffect(() => {
     const a = props.api.onDidActiveChange((e) => setActive(e.isActive))
@@ -92,14 +106,17 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col bg-background">
-      <TerminalView
-        key={viewId}
-        sessionId={sessionId}
-        viewId={viewId}
-        active={active}
-        onMissing={() => setMissing(true)}
-        onExit={(code) => setExitCode(code)}
-      />
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <TerminalView
+          key={viewId}
+          sessionId={sessionId}
+          viewId={viewId}
+          active={active}
+          onMissing={() => setMissing(true)}
+          onExit={(code) => setExitCode(code)}
+        />
+        {graphic && session?.kind === 'claude' && <ConversationView session={session} onShowTerminal={() => setGraphic(false)} />}
+      </div>
       {session?.kind === 'claude' && !exited && (
         <PromptBox
           session={session}
@@ -132,7 +149,7 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
           onClose={() => props.api.close()}
         />
       )}
-      {session && <StatusBar session={session} />}
+      {session && <StatusBar session={session} graphic={graphic} onToggleGraphic={() => setGraphic((g) => !g)} />}
     </div>
   )
 }
@@ -160,13 +177,60 @@ function ContextMeter({ session }: { session: SessionInfo }) {
   )
 }
 
+/** Colore della barra secondo quanto è piena: giallo oltre il 70%, rosso oltre l'85%. */
+const meterColor = (p: number) => (p >= 85 ? 'var(--cct-danger)' : p >= 70 ? 'var(--cct-warn)' : 'var(--cct-ok)')
+
+/** «tra 2 h 10 min» / «tra 3 g 4 h» dal momento in cui si azzera la finestra. */
+function resetIn(resetsAt?: number): string {
+  if (!resetsAt) return ''
+  const min = Math.round((resetsAt * 1000 - Date.now()) / 60000)
+  if (min <= 0) return 'si azzera a breve'
+  if (min < 60) return `si azzera tra ${min} min`
+  if (min < 48 * 60) return `si azzera tra ${Math.floor(min / 60)} h ${min % 60} min`
+  return `si azzera tra ${Math.floor(min / 1440)} g ${Math.floor((min % 1440) / 60)} h`
+}
+
+/**
+ * Utilizzo dell'abbonamento: finestra di 5 ore («sessione») e settimana. I limiti sono dell'account, non della singola
+ * sessione: si mostrano gli ultimi dati arrivati da qualsiasi sessione. Compaiono solo per Pro, Max e Ultra, dopo la
+ * prima risposta di Claude.
+ */
+function UsageMeters({ session }: { session: SessionInfo }) {
+  const all = useSessions((s) => s.sessions)
+  const usage = useMemo(() => {
+    let best = session.usage
+    for (const s of Object.values(all)) if (s.usage && (!best || s.usage.at > best.at)) best = s.usage
+    return best
+  }, [all, session.usage])
+  const now = Date.now() / 1000
+  // Una finestra già scaduta non vale più: Claude Code la toglie al prossimo aggiornamento.
+  const items = [
+    { label: 'Sessione', title: 'Limite di 5 ore', w: usage?.fiveHour },
+    { label: 'Settimana', title: 'Limite settimanale', w: usage?.sevenDay }
+  ].filter((x): x is { label: string; title: string; w: NonNullable<typeof x.w> } => Boolean(x.w) && !(x.w!.resetsAt && x.w!.resetsAt < now))
+  if (!items.length) return null
+  return (
+    <>
+      {items.map(({ label, title, w }) => (
+        <span key={label} className="inline-flex shrink-0 items-center gap-1.5" title={`${title}: ${w.percent}% usato${w.resetsAt ? ` · ${resetIn(w.resetsAt)}` : ''}`}>
+          {label}
+          <span className="relative h-1.5 w-12 overflow-hidden rounded-full bg-border" role="progressbar" aria-valuenow={w.percent} aria-valuemin={0} aria-valuemax={100} aria-label={title}>
+            <span className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, w.percent)}%`, background: meterColor(w.percent) }} />
+          </span>
+          <span style={{ color: w.percent >= 70 ? meterColor(w.percent) : undefined }}>{w.percent}%</span>
+        </span>
+      ))}
+    </>
+  )
+}
+
 /** Dimensione del carattere dei terminali (vale per tutti). Anche con Ctrl +, Ctrl −, Ctrl 0 e Ctrl + rotellina. */
 function FontSizeControl() {
   const { fontSize, bigger, smaller, reset } = useTerminalSettings()
   const btn =
     'inline-flex h-5 min-w-5 items-center justify-center rounded px-1 hover:bg-border hover:text-foreground disabled:opacity-40'
   return (
-    <div className="ml-auto flex shrink-0 items-center gap-0.5" role="group" aria-label="Dimensione del carattere">
+    <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Dimensione del carattere">
       <button type="button" className={btn} onClick={smaller} disabled={fontSize <= MIN_FONT_SIZE} title="Riduci il carattere (Ctrl −)" aria-label="Riduci il carattere">
         <AArrowDown size={13} />
       </button>
@@ -199,7 +263,7 @@ function ExitedBar({ code, onRestart, onClose }: { code: number | null | undefin
 }
 
 /** Barra di stato del terminale (W5): modello, effort, contesto, branch git. */
-function StatusBar({ session }: { session: SessionInfo }) {
+function StatusBar({ session, graphic, onToggleGraphic }: { session: SessionInfo; graphic: boolean; onToggleGraphic(): void }) {
   const setStatus = useWorkspace((s) => s.setStatus)
   const [confirmKill, setConfirmKill] = useState(false)
   const isClaude = session.kind === 'claude'
@@ -256,6 +320,7 @@ function StatusBar({ session }: { session: SessionInfo }) {
       )}
 
       {isClaude && <ContextMeter session={session} />}
+      {isClaude && <UsageMeters session={session} />}
 
       {session.gitBranch && (
         <span className="inline-flex items-center gap-1" title="Branch git">
@@ -274,6 +339,18 @@ function StatusBar({ session }: { session: SessionInfo }) {
         </span>
       )}
 
+      {!isClaude && <span className="ml-auto" />}
+      {isClaude && (
+        <button
+          type="button"
+          onClick={onToggleGraphic}
+          aria-pressed={graphic}
+          title={graphic ? 'Torna al terminale' : 'Mostra la conversazione impaginata (il terminale resta attivo sotto)'}
+          className={cn('ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-border hover:text-foreground', graphic ? 'bg-border text-foreground' : 'text-text-muted')}
+        >
+          {graphic ? <SquareTerminal size={12} /> : <MessagesSquare size={12} />} {graphic ? 'Terminale' : 'Vista grafica'}
+        </button>
+      )}
       <FontSizeControl />
 
       <DropdownMenu>

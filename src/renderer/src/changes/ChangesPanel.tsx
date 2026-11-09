@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Ban, Check, CheckCheck, ChevronDown, ChevronRight, FilePlus2, FileText, Lightbulb, MessageSquarePlus, RotateCcw, Undo2 } from 'lucide-react'
+import { Check, CheckCheck, ChevronDown, ChevronRight, FilePlus2, FileText, MessageSquarePlus, RotateCcw, Undo2 } from 'lucide-react'
 import { isOpen, type ChangeContents, type FileChange, type ReviewNote } from '@shared/changes'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
@@ -15,6 +15,9 @@ import { contextRoots } from '@shared/project'
 import { normPath } from '@shared/files'
 import type { LineSelection } from './DiffView'
 import { RevisionComposer } from './RevisionComposer'
+import { ToneIcon } from './tone'
+import { MarkdownView } from '@/docs/MarkdownView'
+import { renderMarkdownDiff } from '@/docs/markdown'
 import { SmartExplain } from './SmartExplain'
 import { useExplainSettings } from '@/state/explain'
 
@@ -77,6 +80,12 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
   const [composing, setComposing] = useState(false)
   const [composeError, setComposeError] = useState('')
   const [selection, setSelection] = useState<LineSelection | null>(null)
+  /** Revisione partita dal tasto destro: ancora una nota alle righe selezionate. */
+  const [seed, setSeed] = useState<{ selection: LineSelection; n: number } | null>(null)
+  const startReview = (sel: LineSelection) => {
+    setComposing(true)
+    setSeed((s) => ({ selection: sel, n: (s?.n ?? 0) + 1 }))
+  }
   const [base, setBase] = useState<Base>('lastRequest')
   const [historyOpen, setHistoryOpen] = useState(false)
 
@@ -104,6 +113,7 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
     setComposing(false)
     setComposeError('')
     setSelection(null)
+    setSeed(null)
     setHistoryOpen(false)
   }, [selectedId])
 
@@ -193,6 +203,14 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
   // Confronto: dopo una richiesta conviene vedere solo cosa ha cambiato Claude da allora.
   const canCompareLast = Boolean(contents?.lastRequestBase !== null && contents?.lastRequestBase !== undefined && selected?.status === 'pending')
   const diffBefore = canCompareLast && base === 'lastRequest' ? contents!.lastRequestBase! : contents?.before
+
+  // Markdown: il diff si può vedere impaginato (blocchi aggiunti in verde, tolti in rosso) o come sorgente.
+  const isMd = selected ? /\.(md|markdown)$/i.test(selected.filePath) : false
+  const [mdMode, setMdMode] = useState<'layout' | 'source'>('layout')
+  const mdDiff = useMemo(
+    () => (isMd && mdMode === 'layout' && selected && diffBefore != null && contents?.after != null ? renderMarkdownDiff(diffBefore, contents.after, selected.filePath.replace(/[\\/][^\\/]*$/, '')) : null),
+    [isMd, mdMode, selected, diffBefore, contents?.after]
+  )
 
   return (
     <div className="@container h-full bg-surface">
@@ -316,6 +334,19 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                   <span className="text-text-faint"> · prima ↔ dopo</span>
                 </span>
                 {explainOn && <Segmented label="Vista" size="sm" value={view} onChange={setView} options={VIEWS} className="w-44" />}
+                {isMd && view === 'diff' && (
+                  <Segmented
+                    label="Aspetto del Markdown"
+                    size="sm"
+                    value={mdMode}
+                    onChange={setMdMode}
+                    options={[
+                      { id: 'layout', label: 'Impaginato' },
+                      { id: 'source', label: 'Sorgente' }
+                    ]}
+                    className="w-44"
+                  />
+                )}
                 {contents?.modifiedSince && (
                   <span className="shrink-0 rounded border border-warn/40 px-1.5 text-[11px] text-warn" title="Il file su disco è diverso dall'ultima versione scritta da Claude">
                     cambiato dopo
@@ -393,10 +424,10 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                       <ul className="mt-0.5 space-y-0.5">
                         {r.notes.map((n, j) => (
                           <li key={j} className="flex items-start gap-1.5 text-text-muted">
-                            {n.kind === 'forbid' ? <Ban size={12} className="mt-0.5 shrink-0 text-danger" /> : <Lightbulb size={12} className="mt-0.5 shrink-0 text-warn" />}
+                            <ToneIcon tone={n.tone ?? (n.kind === 'forbid' ? 'danger' : 'warn')} size={12} className="mt-0.5" />
                             <span>
                               {n.lines && <span className="font-mono text-text-faint">{n.lines.start === n.lines.end ? `r. ${n.lines.start}` : `r. ${n.lines.start}–${n.lines.end}`} · </span>}
-                              {n.text}
+                              {n.label && <span className="font-semibold">{n.label}: </span>}{n.text}
                             </span>
                           </li>
                         ))}
@@ -415,6 +446,13 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                   <p className="p-4 text-text-subtle">File binario: il diff non è disponibile.</p>
                 ) : diffBefore === null || diffBefore === undefined || contents.after === null ? (
                   <p className="p-4 text-text-subtle">Il contenuto non è disponibile (file troppo grande o archivio degli snapshot mancante).</p>
+                ) : mdDiff ? (
+                  <div className="flex h-full flex-col">
+                    <p className="shrink-0 border-b border-border px-4 py-1.5 text-[11px] text-text-faint">
+                      {mdDiff.added + mdDiff.removed === 0 ? 'Nessuna differenza nei contenuti.' : `${mdDiff.added} blocchi aggiunti o cambiati (verde), ${mdDiff.removed} tolti (rosso).`}
+                    </p>
+                    <MarkdownView html={mdDiff.html} className="min-h-0 flex-1" />
+                  </div>
                 ) : (
                   <Suspense fallback={<p className="p-4 text-text-faint">Caricamento del diff…</p>}>
                     <DiffView
@@ -423,6 +461,7 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                       before={diffBefore}
                       after={contents.after}
                       onSelection={setSelection}
+                      onReview={isOpen(selected) && selected.status !== 'revision' ? startReview : undefined}
                     />
                   </Suspense>
                 )}
@@ -432,6 +471,7 @@ export function ChangesPanel(props: IDockviewPanelProps<PanelParams>) {
                 <RevisionComposer
                   sessionTitle={selected.sessionTitle}
                   selection={selection}
+                  seed={seed}
                   sending={busy}
                   error={composeError}
                   onSend={(notes) => void requestRevision(selected, notes)}

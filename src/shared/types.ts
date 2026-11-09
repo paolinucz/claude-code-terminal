@@ -26,7 +26,8 @@ import type {
 } from './sessions'
 import type { AppInfo, UpdateStatus } from './updates'
 import type { ProjectFile, ProjectInfo, ProjectRef, ProjectResult } from './project'
-import type { ExplainResult } from './explain'
+import type { ExplainResult, SnippetRequest } from './explain'
+import type { ChatItem, TranscriptUpdate } from './transcript'
 
 /** Layout serializzato di Dockview (risultato di `api.toJSON()`). Lo trattiamo come dato opaco. */
 export type SerializedLayout = Record<string, unknown>
@@ -160,6 +161,8 @@ export interface AppApi {
     setModel(sessionId: string, model: ClaudeModel, effort: ClaudeEffort): Promise<void>
     kill(sessionId: string): Promise<void>
     /** Casella di input dell'app (B1–B3): manda un messaggio a una sessione Claude Code (incolla + Invio). Rifiuta se Claude aspetta una risposta. */
+    /** Un tasto al terminale: esc, enter, up, down o una cifra 1–9 (risposte ai permessi, interruzione). */
+    key(sessionId: string, key: string): void
     sendPrompt(sessionId: string, text: string): Promise<{ ok: boolean; error?: string }>
     onChanged(cb: (sessions: SessionInfo[]) => void): () => void
     onData(cb: (sessionId: string, seq: number, data: string) => void): () => void
@@ -170,12 +173,21 @@ export interface AppApi {
     /** Clic su una notifica di Windows: mostrare la sessione. */
     onReveal(cb: (sessionId: string) => void): () => void
   }
+  /** Vista grafica della conversazione («bridge»): messaggi ricavati dalla trascrizione di Claude Code. */
+  transcript: {
+    /** Inizia a seguire la sessione e restituisce la conversazione fin qui. */
+    open(sessionId: string): Promise<ChatItem[]>
+    close(sessionId: string): void
+    onUpdate(cb: (update: TranscriptUpdate) => void): () => void
+  }
   /** Output smart (release 2, fase 14): spiegazione HTML di una modifica, scritta da Haiku, solo a richiesta. */
   explain: {
     /** La spiegazione già generata, senza chiamare il modello. */
     peek(changeId: string): Promise<ExplainResult | null>
     /** Genera la spiegazione (consuma token del login dell'utente). `force` la rigenera. `requestId` serve per annullare. */
     run(requestId: string, changeId: string, force?: boolean): Promise<ExplainResult>
+    /** «Spiega con Haiku» su righe selezionate e il loro ruolo nel file. Consuma token. */
+    snippet(requestId: string, req: SnippetRequest, force?: boolean): Promise<ExplainResult>
     cancel(requestId: string): Promise<void>
   }
   /** Progetti `.cctproj` (release 2, fase 9). */

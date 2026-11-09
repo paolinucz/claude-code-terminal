@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import type { InstalledPlugin, PluginInstallProgress, PluginLanguageInfo, PluginManifest, PluginPreview } from '@shared/plugins'
 import { PLUGIN_API_VERSION } from '@shared/pluginApi'
@@ -174,7 +174,7 @@ export class PluginManager {
     const out: Record<string, { command: string; args: string[] }> = {}
     for (const p of this.active()) {
       const dir = this.pluginDir(p.manifest.id)
-      const expand = (v: string) => v.replace(/\$\{plugin\}/g, dir).replace(/\$\{downloads\}/g, join(dir, 'downloads')).replace(/\//g, '\\')
+      const expand = (v: string) => v.replace(/\$\{plugin\}/g, dir).replace(/\$\{downloads\}/g, join(dir, 'downloads')).replace(/[\\/]/g, sep)
       for (const [name, rt] of Object.entries(p.manifest.provides?.runtimes ?? {})) {
         out[name] = { command: expand(rt.command), args: (rt.args ?? []).map((a) => a.replace(/\$\{plugin\}/g, dir).replace(/\$\{downloads\}/g, join(dir, 'downloads'))) }
       }

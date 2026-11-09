@@ -182,6 +182,18 @@ class Session {
       costUsd: typeof p.cost?.total_cost_usd === 'number' ? p.cost.total_cost_usd : this.info.costUsd
     }
     if (p.session_id) this.info.claudeSessionId = p.session_id
+    const win = (w?: { used_percentage?: number; resets_at?: number }) =>
+      typeof w?.used_percentage === 'number' ? { percent: Math.round(w.used_percentage), ...(typeof w.resets_at === 'number' ? { resetsAt: w.resets_at } : {}) } : undefined
+    const fiveHour = win(p.rate_limits?.five_hour)
+    const sevenDay = win(p.rate_limits?.seven_day)
+    if (fiveHour || sevenDay) {
+      const old = this.info.usage
+      const same = JSON.stringify([old?.fiveHour, old?.sevenDay]) === JSON.stringify([fiveHour, sevenDay])
+      if (!same) {
+        this.info.usage = { ...(fiveHour ? { fiveHour } : {}), ...(sevenDay ? { sevenDay } : {}), at: Date.now() }
+        this.changed()
+      }
+    }
     if (
       next.contextPercent !== this.info.contextPercent ||
       next.modelLabel !== this.info.modelLabel ||
@@ -374,7 +386,9 @@ export class SessionManager {
    */
   constructor(
     private readonly hookSettings: (appSessionId: string) => Record<string, unknown> = () => ({}),
-    private readonly settingsDir: string | null = null
+    private readonly settingsDir: string | null = null,
+    /** Strumenti di Claude Code da togliere alle sessioni dell'app (vedi `--disallowedTools`). */
+    private readonly blockedTools: () => string[] = () => []
   ) {}
 
   /**
@@ -436,6 +450,11 @@ export class SessionManager {
     setTimeout(() => s.write('\r'), 250)
   }
 
+  /** Scrive un tasto nel terminale della sessione (senza cambiare la vista che comanda la dimensione). */
+  sendKeys(id: string, data: string): void {
+    this.sessions.get(id)?.write(data)
+  }
+
   /** Titolo e cartella di una sessione (per registrare le modifiche ai file). */
   ref(id: string): { title: string; cwd: string } | undefined {
     const s = this.sessions.get(id)
@@ -479,6 +498,9 @@ export class SessionManager {
       // Fase 3: hook e status line dell'app, solo per questa sessione (non tocca i settings.json dell'utente).
       const settingsFile = this.writeSettingsFile(id)
       if (settingsFile) args.push('--settings', settingsFile)
+      const blocked = this.blockedTools()
+      // Forma con «=»: il flag accetta più valori e senza «=» inghiotte gli argomenti seguenti.
+      if (blocked.length) args.push(`--disallowedTools=${blocked.join(',')}`)
       if (o.model !== 'default') args.push('--model', o.model)
       if (o.effort !== 'default') args.push('--effort', o.effort)
       for (const dir of o.addDirs) args.push('--add-dir', dir)

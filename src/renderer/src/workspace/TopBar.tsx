@@ -9,7 +9,8 @@ import { describeUpdate, useUpdates } from '@/state/updates'
 import type { NamedLayout } from '@shared/types'
 import { api } from '@/lib/api'
 import { PANEL_KIND_LIST } from '@/panels/kinds'
-import { useWorkspace } from '@/state/workspace'
+import { SnippetExplain } from '@/changes/SnippetExplain'
+import { sheetsOf, useWorkspace } from '@/state/workspace'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +36,8 @@ import { useExplainSettings } from '@/state/explain'
 import { usePresets } from '@/state/presets'
 import { previewOf } from '@shared/prompts'
 import { PresetsDialog } from './PresetsDialog'
+import { AccentDialog } from './AccentDialog'
+import { useAccent } from '@/state/accent'
 import { sendPreset } from './presets'
 import { openDocsPanel } from '@/docs/DocsPanel'
 
@@ -60,6 +63,7 @@ export function TopBar() {
   const explainOn = useExplainSettings((s) => s.enabled)
   const presets = usePresets((s) => s.presets)
   useEffect(() => void usePresets.getState().load(), [])
+  useEffect(() => void useAccent.getState().load(), [])
   useEffect(() => void useExplainSettings.getState().load(), [])
   useEffect(() => useUpdates.getState().init(), [])
   useEffect(() => {
@@ -79,6 +83,16 @@ export function TopBar() {
         e.preventDefault()
         refreshLayouts()
         setPalette(true)
+      }
+      // F1–F9: foglio 1–9 del contesto attivo, anche con il focus dentro un terminale.
+      // Sulla scheda di un foglio F2 resta «rinomina»; nei campi di testo non si intercetta.
+      const fn = /^F([1-9])$/.exec(e.key)
+      const target = e.target as Element | null
+      if (fn && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && !target?.closest?.('[role="tab"], input, textarea:not(.xterm-helper-textarea)')) {
+        const { sheets, contextId, setActive } = useWorkspace.getState()
+        const sheet = sheetsOf(sheets, contextId)[Number(fn[1]) - 1]
+        e.preventDefault()
+        if (sheet) setActive(sheet.id)
       }
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 't') {
         e.preventDefault()
@@ -154,6 +168,17 @@ export function TopBar() {
         keywords: `prompt predefinito invia messaggio ${p.text.slice(0, 300)}`,
         run: () => void sendPreset(p)
       })),
+      {
+        id: 'artifacts',
+        title: 'Artifact di claude.ai nelle nuove sessioni: attiva/disattiva',
+        keywords: 'artifact claude.ai pubblica pagine online file cartella',
+        run: async () => {
+          const on = (await api.settings.get('claude.allowArtifacts')) === true
+          await api.settings.set('claude.allowArtifacts', !on)
+          setStatus(!on ? 'Artifact di claude.ai consentiti nelle nuove sessioni' : 'Artifact di claude.ai disattivati nelle nuove sessioni: Claude scrive i file nella cartella')
+        }
+      },
+      { id: 'accent', title: "Colore d'accento…", keywords: 'tema colore accento aspetto personalizza', run: () => useAccent.getState().openDialog() },
       { id: 'presets-manage', title: 'Gestisci prompt predefiniti…', keywords: 'prompt messaggi salvati aggiungi modifica', run: () => usePresets.getState().openDialog() },
       {
         id: 'explain-toggle',
@@ -313,7 +338,9 @@ export function TopBar() {
 
       <NewTerminalDialog open={newTerminal} onClose={() => setNewTerminal(false)} />
       <PresetsDialog />
+      <AccentDialog />
 
+      <SnippetExplain />
       <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} />
 
       <SaveLayoutDialog

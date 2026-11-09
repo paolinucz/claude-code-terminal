@@ -28,9 +28,19 @@ export const CLAUDE_MD = 'CLAUDE.md'
 
 /**
  * Unisce la radice e un percorso relativo del file di progetto (con `/` o `\`, anche con `..`).
- * Il risultato usa le barre di Windows.
+ * Il risultato usa le barre della radice: `\` per Windows, `/` per Linux e macOS.
  */
 export function joinRel(root: string, rel: string): string {
+  // Radice in stile Linux/macOS (/home/…): il risultato usa `/`.
+  if (root.startsWith('/')) {
+    const parts = root.split('/').filter(Boolean)
+    for (const seg of rel.split(/[\\/]+/)) {
+      if (!seg || seg === '.') continue
+      if (seg === '..') parts.pop()
+      else parts.push(seg)
+    }
+    return '/' + parts.join('/')
+  }
   const drive = /^[a-zA-Z]:/.test(root) ? root.slice(0, 2) : ''
   const parts = (drive ? root.slice(2) : root).split(/[\\/]+/).filter(Boolean)
   for (const seg of rel.split(/[\\/]+/)) {

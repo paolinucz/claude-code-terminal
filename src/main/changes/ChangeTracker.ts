@@ -334,14 +334,15 @@ function isBinary(buf: Buffer): boolean {
 function revisionMessage(filePath: string, created: boolean, notes: ReviewNote[]): string {
   const lines = notes.map((n) => {
     const where = n.lines ? (n.lines.start === n.lines.end ? `riga ${n.lines.start}` : `righe ${n.lines.start}–${n.lines.end}`) : ''
-    const label = n.kind === 'forbid' ? 'DIVIETO' : 'ACCORTEZZA'
+    const label = (n.label ?? (n.kind === 'forbid' ? 'Divieto' : 'Accortezza')).toUpperCase()
+    const hint = n.hint ?? (n.kind === 'forbid' ? 'da non violare' : n.kind === 'care' ? 'da rispettare' : '')
     const excerpt = n.excerpt ? `\n    (${where}: ${n.excerpt.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 3).join(' ⏎ ').slice(0, 160)})` : where ? ` (${where})` : ''
-    return `- ${label}: ${n.text}${excerpt}`
+    return `- ${label}${hint ? ` (${hint})` : ''}: ${n.text}${excerpt}`
   })
   return [
     `Revisione di ${filePath}${created ? ' (file creato da te)' : ''}: ho guardato la tua modifica nel pannello di revisione e chiedo dei cambiamenti.`,
     ...lines,
-    'Correggi questo file seguendo le indicazioni (le ACCORTEZZE vanno rispettate, i DIVIETI non vanno violati). Non toccare altri file se non serve. La nuova versione tornerà in revisione.'
+    'Correggi questo file seguendo le indicazioni: accanto a ogni voce, tra parentesi, c\'è come trattarla. Non toccare altri file se non serve. La nuova versione tornerà in revisione.'
   ].join('\n')
 }
 

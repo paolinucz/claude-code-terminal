@@ -48,6 +48,15 @@ function createLocalStorageApi(): AppApi {
         write(KEY, { ...current, sheets: current.sheets.map((s) => (s.id === sheetId ? { ...s, layout } : s)) })
       }
     },
+    transcript: {
+      async open() {
+        return []
+      },
+      close() {},
+      onUpdate() {
+        return () => {}
+      }
+    },
     explain: {
       async peek() {
         return null
@@ -55,6 +64,9 @@ function createLocalStorageApi(): AppApi {
       async run() {
         // Nel browser non c'è Claude Code: si mostra il riepilogo in testo.
         return { ok: true, kind: 'text', text: 'Anteprima nel browser: la spiegazione smart è disponibile solo nell’app.', warning: 'Claude Code non disponibile nel browser' }
+      },
+      async snippet() {
+        return { ok: false, error: 'La spiegazione con Haiku è disponibile solo nell’app (serve Claude Code).' }
       },
       async cancel() {}
     },
@@ -542,6 +554,7 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
         emit(id, `/model ${model}\r\n/effort ${effort}` + prompt(s.info))
         notify()
       },
+      key() {},
       async sendPrompt() {
         return { ok: true }
       },

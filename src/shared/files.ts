@@ -76,4 +76,21 @@ export interface FileIndex {
   truncated: boolean
 }
 
-export const normPath = (p: string): string => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+/** Windows ignora maiuscole e minuscole nei percorsi, Linux e macOS (di solito) no. Vale nel processo principale e nell'interfaccia. */
+export const IS_WIN =
+  (globalThis as { process?: { platform?: string } }).process?.platform === 'win32' || (typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent))
+
+/**
+ * Forma canonica di un percorso per confronti e chiavi: separatore `\`, niente `\` finale; minuscolo solo su Windows.
+ * Non è un percorso da aprire: per quello si usa quello originale.
+ */
+export const normPath = (p: string): string => {
+  const n = p.replace(/\//g, '\\').replace(/\\+$/, '')
+  return IS_WIN ? n.toLowerCase() : n
+}
+
+/** Unisce una cartella e un nome con il separatore che la cartella già usa (`/` se non ha `\`). */
+export const joinNative = (dir: string, name: string): string => {
+  const sep = dir.includes('\\') && !dir.startsWith('/') ? '\\' : '/'
+  return `${dir.replace(/[\\/]+$/, '')}${sep}${name.replace(/[\\/]/g, sep)}`
+}

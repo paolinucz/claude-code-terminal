@@ -12,3 +12,14 @@ export const explainUrl = (token: string) => `app://${EXPLAIN_HOST}/${token}`
 
 /** Modello economico usato per le spiegazioni (O8): è un alias di Claude Code. */
 export const EXPLAIN_MODEL = 'haiku'
+
+/** «Spiega con Haiku» su righe selezionate: il file così come si vede e l'intervallo scelto (righe da 1). */
+export interface SnippetRequest {
+  filePath: string
+  /** Cartella di lavoro per mostrare il percorso relativo (facoltativa). */
+  cwd?: string
+  /** Testo intero del file. */
+  text: string
+  start: number
+  end: number
+}

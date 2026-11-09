@@ -22,7 +22,9 @@ import { listResumable } from './sessions/history'
 import { Updater } from './updater'
 import { ProjectService } from './projects/ProjectService'
 import { EXPLAIN_CSP, ExplainService } from './changes/ExplainService'
-import { EXPLAIN_HOST, type ExplainResult } from '@shared/explain'
+import { TranscriptService } from './sessions/TranscriptService'
+import type { ChatItem, TranscriptUpdate } from '@shared/transcript'
+import { EXPLAIN_HOST, type ExplainResult, type SnippetRequest } from '@shared/explain'
 import type { ProjectFile } from '@shared/project'
 
 const isDev = !app.isPackaged
@@ -40,6 +42,8 @@ const hookServer = new HookServer({
   },
   onStatusLine: (id, payload) => sessions.handleStatusLine(id, payload)
 })
+/** Vista grafica della conversazione. */
+const transcripts = new TranscriptService((u) => sendToMain('transcript:update', u))
 /** Fase 4: modifiche di Claude ai file (creato quando il database è pronto). */
 let changes: ChangeTracker | null = null
 /** Fase 5: file dei permessi di Claude Code. */
@@ -65,7 +69,10 @@ const updater = new Updater((s) => sendToMain('updates:status', s))
 
 const sessions = new SessionManager(
   (id) => hookServer.claudeSettings(id),
-  join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`)
+  join(tmpdir(), 'claude-code-terminal', `settings-${process.pid}`),
+  // Claude Code «puro»: gli Artifact di claude.ai (pagine pubblicate online) sono tolti, così i file si scrivono
+  // nella cartella della sessione. Chi li vuole li riattiva dalla palette (impostazione `claude.allowArtifacts`).
+  () => (db?.getSetting('claude.allowArtifacts') === true ? [] : ['Artifact', 'ArtifactComments', 'ArtifactData'])
 )
 
 /** S7: notifica quando una sessione finisce o chiede un permesso, anche se il suo foglio non è aperto. */
@@ -196,9 +203,14 @@ function createMainWindow(): BrowserWindow {
   return win
 }
 
-/** Percorso assoluto di Windows (C:\… o \\server\…) senza caratteri non ammessi nei nomi. */
+/**
+ * Percorso assoluto di una cartella da creare. Windows: C:\… o \\server\… senza caratteri non ammessi nei nomi.
+ * Linux e macOS: /… senza NUL né «..».
+ */
 function isValidFolderPath(path: string): boolean {
-  if (typeof path !== 'string' || path.length > 240) return false
+  if (typeof path !== 'string') return false
+  if (path.startsWith('/')) return path.length <= 4096 && !path.includes('\0') && path.split('/').every((part) => part !== '..')
+  if (path.length > 240) return false
   const m = /^([a-zA-Z]:\\|\\\\[^\\]+\\[^\\]+\\?)(.*)$/.exec(path.replace(/\//g, '\\'))
   if (!m) return false
   return m[2].split('\\').every((part) => !/[<>:"|?*\x00-\x1f]/.test(part) && !/[ .]$/.test(part) && part !== '..')
@@ -257,6 +269,21 @@ function registerIpc(store: AppDb): void {
     (_e, requestId: string, changeId: string, force?: boolean): Promise<ExplainResult> | ExplainResult =>
       explain ? explain.run(requestId, changes?.contents(changeId) ?? null, Boolean(force)) : { ok: false, error: 'Servizio non pronto' }
   )
+  ipcMain.handle(
+    'explain:snippet',
+    (_e, requestId: string, req: SnippetRequest, force?: boolean): Promise<ExplainResult> | ExplainResult =>
+      explain && req && typeof req.text === 'string' && typeof req.filePath === 'string'
+        ? explain.runSnippet(requestId, req, Boolean(force))
+        : { ok: false, error: 'Servizio non pronto' }
+  )
+  // ---- Vista grafica della conversazione («bridge») ----
+  ipcMain.handle('transcript:open', (_e, sessionId: string): ChatItem[] => {
+    return transcripts.open(sessionId, () => {
+      const info = sessions.list().find((x) => x.id === sessionId)
+      return info && info.kind === 'claude' ? TranscriptService.pathOf(info.cwd, info.claudeSessionId) : null
+    })
+  })
+  ipcMain.on('transcript:close', (_e, sessionId: string) => transcripts.close(sessionId))
   ipcMain.handle('explain:cancel', (_e, requestId: string) => explain?.cancel(requestId))
 
   // ---- File (F1, F2) ----
@@ -392,6 +419,12 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('sessions:attach', (e, id: string, viewId: string) => sessions.attach(id, viewId, e.sender))
   ipcMain.on('sessions:detach', (_e, id: string, viewId: string) => sessions.detach(id, viewId))
   ipcMain.on('sessions:input', (_e, id: string, viewId: string, data: string) => sessions.input(id, viewId, data))
+  // Tasti dalla vista grafica: solo Esc, Invio, frecce e cifre (risposte ai permessi, interruzione), mai testo libero.
+  ipcMain.on('sessions:key', (_e, id: string, key: string) => {
+    const keys: Record<string, string> = { esc: '\x1b', enter: '\r', up: '\x1b[A', down: '\x1b[B' }
+    const data = keys[key] ?? (/^[1-9]$/.test(key) ? key : null)
+    if (data) sessions.sendKeys(id, data)
+  })
   ipcMain.on('sessions:resize', (_e, id: string, viewId: string, cols: number, rows: number, claim: boolean) =>
     sessions.resize(id, viewId, cols, rows, claim)
   )
@@ -437,7 +470,7 @@ function registerIpc(store: AppDb): void {
     }
   })
   ipcMain.handle('env:createFolder', async (_e, path: string) => {
-    if (!isValidFolderPath(path)) return { ok: false, error: 'Scrivi un percorso completo, per esempio D:\\PROGETTI\\nuovo-progetto.' }
+    if (!isValidFolderPath(path)) return { ok: false, error: 'Scrivi un percorso completo, per esempio D:\\PROGETTI\\nuovo-progetto oppure /home/utente/nuovo-progetto.' }
     try {
       await mkdir(path, { recursive: true })
       return { ok: true }
@@ -532,6 +565,7 @@ app.on('before-quit', () => {
   hookServer.stop()
   lsp?.stopAll()
   files.dispose()
+  transcripts.dispose()
   updater.dispose()
 })
 

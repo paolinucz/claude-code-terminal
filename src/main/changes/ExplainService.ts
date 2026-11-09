@@ -4,12 +4,16 @@ import { mkdirSync } from 'node:fs'
 import { relative } from 'node:path'
 import { createTwoFilesPatch, structuredPatch } from 'diff'
 import type { ChangeContents } from '@shared/changes'
-import { EXPLAIN_MODEL, type ExplainResult } from '@shared/explain'
+import { EXPLAIN_MODEL, type ExplainResult, type SnippetRequest } from '@shared/explain'
 import type { AppDb } from '../db'
 import { findClaudeCli } from '../sessions/environment'
 
 /** Sale quando cambiano le istruzioni: le spiegazioni già salvate con quelle vecchie non valgono più. */
 const PROMPT_VERSION = 1
+/** Come sopra, per le spiegazioni di righe selezionate. */
+const SNIPPET_PROMPT_VERSION = 1
+/** Oltre questa dimensione il file intero non si manda: si tiene la zona attorno alla selezione. */
+const MAX_FILE_CHARS = 40_000
 /** Oltre questa dimensione il diff si taglia: la spiegazione resta economica. */
 const MAX_DIFF_CHARS = 30_000
 const MAX_OUTPUT_BYTES = 500_000
@@ -26,6 +30,19 @@ Regole:
 - Lingua: italiano. Pagina breve (circa 6 KB al massimo): cosa cambia in 2-4 frasi, perché conta, cosa controllare. Evidenzia le righe chiave del diff.
 - Animazioni leggere in CSS solo se aiutano a capire. JavaScript solo per interazioni semplici, per esempio mostrare o nascondere il dettaglio di un blocco.
 - Tema scuro con questi colori: sfondo #09090b, pannelli #18181b, bordi #27272a, testo #fafafa, testo secondario #a1a1aa, accento #e8875f, aggiunte #6fd39b, rimozioni #ff8a8a, avvisi #f5c46b. Font di sistema, e monospazio per il codice.`
+
+/** Istruzioni per «Spiega con Haiku» su righe selezionate: cosa fanno e che ruolo hanno nel file. */
+const SNIPPET_SYSTEM_PROMPT = `Spieghi a uno sviluppatore, in modo chiaro e visivo, alcune righe di codice che ha selezionato in un file.
+Ricevi il file (o la zona attorno alla selezione) e l'intervallo di righe scelto. Rispondi con UN SOLO documento HTML completo (da <!doctype html> a </html>).
+Contenuto, in quest'ordine:
+1. «Cosa fa»: le righe selezionate, spiegate in 2-4 frasi semplici (non ripetere il codice riga per riga se è banale).
+2. «Che ruolo ha nel file»: a cosa serve nel resto del file, chi la usa o cosa usa, cosa succederebbe senza.
+3. «Da tenere d'occhio»: solo se c'è davvero qualcosa (effetti collaterali, casi limite, rischi); altrimenti omettila.
+Regole:
+- Solo il documento HTML: nessun testo fuori, nessun blocco markdown.
+- CSS e JavaScript nello stesso file. Nessuna risorsa esterna: niente librerie, font, immagini, rete.
+- Lingua: italiano. Pagina breve (circa 4 KB al massimo). Il codice citato in monospazio.
+- Tema scuro con questi colori: sfondo #09090b, pannelli #18181b, bordi #27272a, testo #fafafa, testo secondario #a1a1aa, accento #e8875f, aggiunte #6fd39b, rimozioni #ff8a8a, avvisi #f5c46b. Font di sistema.`
 
 /** Politica dell'iframe (O4): niente rete, niente frame, niente moduli; solo il suo stesso codice incorporato. */
 export const EXPLAIN_CSP =
@@ -137,6 +154,50 @@ export class ExplainService {
     const html = extractHtml(typeof parsed.result === 'string' ? parsed.result : '')
     if (!html) return this.fallback(contents, 'Il modello non ha restituito una pagina HTML valida.')
 
+    const cost = typeof parsed.total_cost_usd === 'number' ? parsed.total_cost_usd : null
+    this.db.putExplanation(key, html, cost)
+    return { ok: true, kind: 'html', token: this.serve(html), cached: false, ...(cost !== null ? { costUsd: cost } : {}) }
+  }
+
+  /** Spiega alcune righe selezionate e il loro ruolo nel file (solo a richiesta). Stessa pipeline e stessa isolamento di `run`. */
+  async runSnippet(requestId: string, req: SnippetRequest, force: boolean): Promise<ExplainResult> {
+    const lines = req.text.split('\n')
+    const start = Math.max(1, Math.min(req.start, lines.length))
+    const end = Math.max(start, Math.min(req.end, lines.length))
+    // File grande: si tiene una finestra di righe attorno alla selezione, con i numeri originali.
+    let from = 1
+    let to = lines.length
+    while (lines.slice(from - 1, to).join('\n').length > MAX_FILE_CHARS && (from < start || to > end)) {
+      if (from < start) from = Math.min(start, from + 50)
+      if (to > end) to = Math.max(end, to - 50)
+    }
+    const body = lines
+      .slice(from - 1, to)
+      .map((l, i) => `${from + i}: ${l}`)
+      .join('\n')
+    const name = req.cwd ? relative(req.cwd, req.filePath) || req.filePath : req.filePath
+    const prompt = `File: ${name}${from > 1 || to < lines.length ? ` (righe ${from}–${to} di ${lines.length})` : ''}\nRighe selezionate: ${start}–${end}\n\n${body}`
+    const key = createHash('sha256').update(`snippet${SNIPPET_PROMPT_VERSION}\n${EXPLAIN_MODEL}\n${prompt}`).digest('hex')
+    if (!force) {
+      const hit = this.db.getExplanation(key)
+      if (hit) return { ok: true, kind: 'html', token: this.serve(hit.html), cached: true, ...(hit.costUsd !== null ? { costUsd: hit.costUsd } : {}) }
+    }
+    const cli = await findClaudeCli()
+    if (!cli.path) return { ok: false, error: 'Claude Code non trovato: installalo o aggiungilo al PATH.' }
+    mkdirSync(this.workDir, { recursive: true })
+    const args = ['-p', '--model', EXPLAIN_MODEL, '--tools', '', '--no-session-persistence', '--disable-slash-commands', '--strict-mcp-config', '--setting-sources', 'project', '--output-format', 'json', '--system-prompt', SNIPPET_SYSTEM_PROMPT]
+    const out = await this.exec(requestId, cli.path, args, prompt)
+    if (out.cancelled) return { ok: false, error: 'Generazione annullata.', cancelled: true }
+    if (out.error) return { ok: false, error: out.error }
+    let parsed: { result?: unknown; is_error?: unknown; total_cost_usd?: unknown }
+    try {
+      parsed = JSON.parse(out.stdout) as typeof parsed
+    } catch {
+      return { ok: false, error: 'Risposta di Claude Code non leggibile.' }
+    }
+    if (parsed.is_error === true) return { ok: false, error: typeof parsed.result === 'string' && parsed.result ? parsed.result : 'Claude Code ha restituito un errore.' }
+    const html = extractHtml(typeof parsed.result === 'string' ? parsed.result : '')
+    if (!html) return { ok: false, error: 'Il modello non ha restituito una pagina HTML valida.' }
     const cost = typeof parsed.total_cost_usd === 'number' ? parsed.total_cost_usd : null
     this.db.putExplanation(key, html, cost)
     return { ok: true, kind: 'html', token: this.serve(html), cached: false, ...(cost !== null ? { costUsd: cost } : {}) }

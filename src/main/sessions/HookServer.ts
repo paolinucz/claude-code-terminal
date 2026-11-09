@@ -22,6 +22,7 @@ export interface StatusLinePayload {
   effort?: { level?: string }
   context_window?: { used_percentage?: number; context_window_size?: number; total_input_tokens?: number }
   cost?: { total_cost_usd?: number }
+  rate_limits?: { five_hour?: { used_percentage?: number; resets_at?: number }; seven_day?: { used_percentage?: number; resets_at?: number } }
   [key: string]: unknown
 }
 
@@ -123,10 +124,11 @@ export class HookServer {
     for (const e of events) hooks[e] = [{ hooks: http() }]
     return {
       hooks,
-      // La status line inoltra a noi i dati di sessione (modello, effort, contesto) con curl.exe, incluso in Windows.
+      // La status line inoltra a noi i dati di sessione (modello, effort, contesto, limiti) con curl: `curl.exe` è incluso
+      // in Windows, su Linux e macOS è `curl`.
       statusLine: {
         type: 'command',
-        command: `curl.exe -s -m 3 -X POST -H "Content-Type: application/json" --data-binary @- "${this.url('status', appSessionId)}"`
+        command: `${process.platform === 'win32' ? 'curl.exe' : 'curl'} -s -m 3 -X POST -H "Content-Type: application/json" --data-binary @- "${this.url('status', appSessionId)}"`
       }
     }
   }

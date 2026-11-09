@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -7,9 +7,11 @@ import type { ClaudeCliInfo, ShellId, ShellInfo } from '@shared/sessions'
 
 const run = promisify(execFile)
 
-/** Cerca un eseguibile nel PATH (solo Windows: prova le estensioni di PATHEXT). */
+const IS_WINDOWS = process.platform === 'win32'
+
+/** Cerca un eseguibile nel PATH (su Windows prova anche le estensioni di PATHEXT). */
 function whichSync(name: string): string | null {
-  const exts = (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').map((e) => e.toLowerCase())
+  const exts = IS_WINDOWS ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').map((e) => e.toLowerCase()) : []
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     if (!dir) continue
     for (const ext of ['', ...exts]) {
@@ -35,6 +37,7 @@ function compareVersions(a: string, b: string): number {
 
 /** La copia di Claude Code inclusa nell'app desktop di Claude: …\Claude-Data\<pkg>\claude-code\<versione>\<hash>\claude.exe */
 function findDesktopAppClaude(): string | null {
+  if (!IS_WINDOWS) return null
   const base = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Claude-Data')
   if (!existsSync(base)) return null
   let best: { version: string; path: string } | null = null
@@ -65,7 +68,7 @@ export async function findClaudeCli(refresh = false): Promise<ClaudeCliInfo> {
   if (claudeCache && !refresh) return claudeCache
   const candidates: [ClaudeCliInfo['source'], string | null][] = [
     ['path', whichSync('claude')],
-    ['local-bin', join(homedir(), '.local', 'bin', 'claude.exe')],
+    ['local-bin', join(homedir(), '.local', 'bin', IS_WINDOWS ? 'claude.exe' : 'claude')],
     ['desktop-app', findDesktopAppClaude()]
   ]
   for (const [source, path] of candidates) {
@@ -96,6 +99,11 @@ let shellCache: { info: ShellInfo; command: ShellCommand }[] | null = null
 export async function detectShells(): Promise<{ info: ShellInfo; command: ShellCommand }[]> {
   if (shellCache) return shellCache
   const out: { info: ShellInfo; command: ShellCommand }[] = []
+  if (!IS_WINDOWS) {
+    out.push(...detectUnixShells())
+    shellCache = out
+    return out
+  }
   const pf = process.env.ProgramFiles ?? 'C:\\Program Files'
 
   const gitBash = [join(pf, 'Git', 'bin', 'bash.exe'), join(homedir(), 'AppData', 'Local', 'Programs', 'Git', 'bin', 'bash.exe')].find(
@@ -119,6 +127,30 @@ export async function detectShells(): Promise<{ info: ShellInfo; command: ShellC
     }
   }
   shellCache = out
+  return out
+}
+
+/** Shell di Linux e macOS: quella di login ($SHELL) per prima, poi le altre in /etc/shells. */
+function detectUnixShells(): { info: ShellInfo; command: ShellCommand }[] {
+  const paths: string[] = []
+  if (process.env.SHELL) paths.push(process.env.SHELL)
+  try {
+    for (const line of readFileSync('/etc/shells', 'utf8').split('\n')) {
+      const p = line.trim()
+      if (p.startsWith('/') && !/nologin|false$/.test(p)) paths.push(p)
+    }
+  } catch {
+    // niente /etc/shells: restano $SHELL e sh
+  }
+  paths.push('/bin/sh')
+  const seen = new Set<string>()
+  const out: { info: ShellInfo; command: ShellCommand }[] = []
+  for (const p of paths) {
+    const name = p.split('/').pop() ?? p
+    if (seen.has(name) || !existsSync(p)) continue
+    seen.add(name)
+    out.push({ info: { id: `unix:${p}`, label: name }, command: { file: p, args: ['-l'] } })
+  }
   return out
 }
 

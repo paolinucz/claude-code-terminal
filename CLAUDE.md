@@ -61,6 +61,7 @@ src/
     plugins/       PluginManager (installazione, hash) e PluginHost (adapter JSON-RPC)
     projects/      ProjectService: file .cctproj (leggi, crea, salva, recenti)
     changes/ExplainService.ts  output smart: claude -p con Haiku, cache nel database, pagina servita da app://explain
+    sessions/TranscriptService.ts  vista grafica: legge la trascrizione JSONL di Claude Code (parser in shared/transcript.ts)
     updater.ts     aggiornamenti automatici (electron-updater)
   preload/       window.api (tipizzata da AppApi)
   shared/        tipi condivisi tra main, preload e interfaccia

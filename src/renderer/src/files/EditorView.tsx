@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Puzzle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, BookOpen, Code2, Puzzle, RefreshCw } from 'lucide-react'
+import { MarkdownView } from '@/docs/MarkdownView'
+import { renderMarkdown } from '@/docs/markdown'
+import { useExplainSettings } from '@/state/explain'
+import { useSnippetExplain } from '@/state/snippetExplain'
 import { normPath } from '@shared/files'
 import { api } from '@/lib/api'
 import { languageOf, monaco } from '@/lib/monaco'
@@ -50,6 +54,12 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
     [allServers, lang?.id, filePath]
   )
   const diagnostics = useEditor((s) => s.diagnostics[normPath(filePath)])
+  // Markdown: anteprima impaginata (predefinita) o sorgente. L'editor resta montato, nascosto, così non perde stato.
+  const isMarkdown = /\.(md|markdown)$/i.test(filePath)
+  const [mode, setMode] = useState<'preview' | 'source'>(isMarkdown ? 'preview' : 'source')
+  const [mdText, setMdText] = useState('')
+  const isMarkdownRef = useRef(isMarkdown)
+  isMarkdownRef.current = isMarkdown
   const onDirtyRef = useRef(onDirty)
   onDirtyRef.current = onDirty
 
@@ -103,6 +113,20 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
         fixedOverflowWidgets: true
       })
       editorRef.current = editor
+      // Tasto destro sulla selezione: spiegazione di Haiku (solo se la funzione è attiva).
+      editor.addAction({
+        id: 'cct.explain',
+        label: 'Spiega con Haiku',
+        contextMenuGroupId: '9_cct',
+        contextMenuOrder: 1,
+        precondition: 'editorHasSelection',
+        run: (ed) => {
+          const sel = ed.getSelection()
+          if (!sel || sel.isEmpty() || !useExplainSettings.getState().enabled) return
+          const end = sel.endColumn === 1 && sel.endLineNumber > sel.startLineNumber ? sel.endLineNumber - 1 : sel.endLineNumber
+          useSnippetExplain.getState().open({ filePath, text: d.model.getValue(), start: sel.startLineNumber, end })
+        }
+      })
       const updateDirty = () => {
         const isDirty = d.model.getAlternativeVersionId() !== d.savedVersion
         setDirty(isDirty)
@@ -111,9 +135,15 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
       updateDirty()
 
       let changeTimer: number | undefined
+      let mdTimer: number | undefined
+      setMdText(d.model.getValue())
       subs.push(
         d.model.onDidChangeContent(() => {
           updateDirty()
+          if (isMarkdownRef.current) {
+            window.clearTimeout(mdTimer)
+            mdTimer = window.setTimeout(() => setMdText(d.model.getValue()), 200)
+          }
           if (!d.lspOpen) return
           window.clearTimeout(changeTimer)
           changeTimer = window.setTimeout(() => api.lsp.change(filePath, d.model.getValue(), d.workspace), 250)
@@ -279,7 +309,31 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
           </button>
         </div>
       )}
-      <div ref={hostRef} className="min-h-0 flex-1" />
+      {isMarkdown && (
+        <div className="flex shrink-0 items-center gap-1 border-b border-border bg-surface px-2 py-1">
+          {(
+            [
+              ['preview', 'Anteprima', BookOpen],
+              ['source', 'Sorgente', Code2]
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={mode === id}
+              onClick={() => {
+                setMode(id)
+                if (id === 'source') window.setTimeout(() => editorRef.current?.layout(), 0)
+              }}
+              className={`inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px] ${mode === id ? 'bg-border text-foreground' : 'text-text-subtle hover:text-foreground'}`}
+            >
+              <Icon size={12} /> {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {isMarkdown && mode === 'preview' && <MarkdownView html={renderMarkdown(mdText, filePath.replace(/[\\/][^\\/]*$/, ''), '').html} className="min-h-0 flex-1" />}
+      <div ref={hostRef} className={mode === 'preview' && isMarkdown ? 'hidden' : 'min-h-0 flex-1'} />
       <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-surface px-2 font-mono text-[11px] text-text-subtle">
         <span className="truncate" title={filePath}>
           {filePath}

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview-react'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { AlertTriangle, FilePlus, FileText, Pencil, Plus, Search, X } from 'lucide-react'
 import { CLAUDE_MD, joinRel } from '@shared/project'
+import { renderMarkdown } from './markdown'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import type { PanelParams } from '@/panels/kinds'
@@ -32,58 +31,6 @@ interface Loaded {
 const MAX_DOC_BYTES = 1_000_000
 
 const dirOf = (path: string) => path.replace(/[\\/][^\\/]*$/, '')
-
-/** Trasforma il Markdown in HTML sicuro, con id sulle intestazioni, link relativi gestibili e ricerca evidenziata. */
-function renderMarkdown(text: string, baseDir: string, query: string): { html: string; outline: { id: string; level: number; text: string }[] } {
-  const raw = marked.parse(text, { async: false, gfm: true }) as string
-  // Niente script, stili o frame dal Markdown: DOMPurify toglie tutto ciò che esegue codice.
-  const clean = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'form', 'input', 'button'], FORBID_ATTR: ['style'] })
-  const doc = new DOMParser().parseFromString(`<div>${clean}</div>`, 'text/html')
-  const root = doc.body.firstElementChild as HTMLElement
-  const outline: { id: string; level: number; text: string }[] = []
-  root.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((h, i) => {
-    h.id = `sec-${i}`
-    outline.push({ id: h.id, level: Number(h.tagName.slice(1)), text: h.textContent ?? '' })
-  })
-  root.querySelectorAll('a[href]').forEach((a) => {
-    const href = a.getAttribute('href') ?? ''
-    if (/^(https?:|mailto:)/i.test(href)) {
-      a.setAttribute('data-external', href)
-      a.removeAttribute('href')
-    } else if (href.startsWith('#')) {
-      a.setAttribute('data-anchor', href.slice(1))
-      a.removeAttribute('href')
-    } else if (href) {
-      a.setAttribute('data-file', joinRel(baseDir, decodeURIComponent(href.split('#')[0])))
-      a.removeAttribute('href')
-    }
-  })
-  root.querySelectorAll('img').forEach((img) => img.remove())
-  const q = query.trim()
-  if (q) {
-    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
-    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    const nodes: Text[] = []
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text)
-    for (const node of nodes) {
-      const value = node.nodeValue ?? ''
-      if (!re.test(value)) continue
-      re.lastIndex = 0
-      const frag = doc.createDocumentFragment()
-      let last = 0
-      for (const m of value.matchAll(re)) {
-        frag.append(value.slice(last, m.index))
-        const mark = doc.createElement('mark')
-        mark.textContent = m[0]
-        frag.append(mark)
-        last = (m.index ?? 0) + m[0].length
-      }
-      frag.append(value.slice(last))
-      node.replaceWith(frag)
-    }
-  }
-  return { html: root.innerHTML, outline }
-}
 
 /** Porta in primo piano il pannello Documentazione del foglio attivo, o lo aggiunge (J8). */
 export function openDocsPanel(): void {

@@ -122,7 +122,7 @@ export function PluginsPanel() {
                     running.map((r) => (
                       <span key={r.key} title={`${r.root}${r.message ? `\n${r.message}` : ''}`} className={r.state === 'error' ? 'text-danger' : undefined}>
                         {r.name}
-                        {r.root ? ` · ${r.root.split('\\').pop()}` : ''}: {STATE_LABEL[r.state]}
+                        {r.root ? ` · ${r.root.split(/[\\/]/).pop()}` : ''}: {STATE_LABEL[r.state]}
                       </span>
                     ))
                   ) : (

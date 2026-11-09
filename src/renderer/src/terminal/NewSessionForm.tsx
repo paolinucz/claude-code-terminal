@@ -12,6 +12,7 @@ import {
   type ShellId,
   type ShellInfo
 } from '@shared/sessions'
+import { joinNative } from '@shared/files'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import type { SessionHint } from '@/panels/kinds'
@@ -158,7 +159,7 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
     const parent = base ? base.replace(/[\\/][^\\/]+[\\/]?$/, '') || base : await api.env.homeDir()
     setNewProject({ parent, name: '' })
   }
-  const newProjectPath = newProject && newProject.name.trim() ? `${newProject.parent.replace(/[\\/]+$/, '')}\\${newProject.name.trim()}` : ''
+  const newProjectPath = newProject && newProject.name.trim() ? joinNative(newProject.parent, newProject.name.trim()) : ''
 
   const cliMissing = kind === 'claude' && mode !== 'attach' && cli !== null && !cli.path
   const canSubmit =
@@ -562,7 +563,7 @@ function FolderNote({ status }: { status: FolderStatus }) {
   const text: Record<FolderStatus, { cls: string; msg: string }> = {
     dir: { cls: 'text-text-faint', msg: 'Il terminale partirà in questa cartella: i file nuovi verranno creati qui.' },
     missing: { cls: 'text-warn', msg: 'La cartella non esiste ancora: verrà creata all\'avvio.' },
-    invalid: { cls: 'text-danger', msg: 'Scrivi un percorso completo, per esempio D:\\PROGETTI\\nuovo-progetto.' },
+    invalid: { cls: 'text-danger', msg: 'Scrivi un percorso completo, per esempio D:\\PROGETTI\\nuovo-progetto oppure /home/utente/nuovo-progetto.' },
     file: { cls: 'text-danger', msg: 'Questo percorso è un file, non una cartella.' }
   }
   return <p className={cn('text-[11px]', text[status].cls)}>{text[status].msg}</p>

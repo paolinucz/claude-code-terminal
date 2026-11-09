@@ -5,7 +5,7 @@ export type SessionKind = 'claude' | 'shell'
 /** Stato mostrato su ogni scheda (S6). 'waiting' arriva con gli hook nella fase 3. */
 export type SessionStatus = 'working' | 'waiting' | 'idle' | 'exited'
 
-export type ShellId = 'git-bash' | 'pwsh' | 'powershell' | 'cmd' | `wsl:${string}`
+export type ShellId = 'git-bash' | 'pwsh' | 'powershell' | 'cmd' | `wsl:${string}` | `unix:${string}`
 
 export interface ShellInfo {
   id: ShellId
@@ -75,10 +75,25 @@ export interface SessionInfo {
   /** Effort attuale riportato da Claude Code. */
   effortLevel?: string
   costUsd?: number
+  /** Limiti di utilizzo dell'abbonamento (solo Pro, Max, Ultra), dalla status line: sessione di 5 ore e settimana. */
+  usage?: SessionUsage
   /** Gli hook di Claude Code stanno inviando eventi: lo stato viene da lì e non dall'attività del terminale. */
   hooks?: boolean
   cols: number
   rows: number
+}
+
+/** Una finestra dei limiti di utilizzo: quanta se ne è usata e quando si azzera (secondi Unix). */
+export interface UsageWindow {
+  percent: number
+  resetsAt?: number
+}
+
+export interface SessionUsage {
+  fiveHour?: UsageWindow
+  sevenDay?: UsageWindow
+  /** Quando Claude Code ha mandato questi dati (ms): serve a scegliere i più recenti tra più sessioni. */
+  at: number
 }
 
 /** Una sessione chiede attenzione (S7): ha finito, chiede un permesso, aspetta input o si è fermata per un errore. */

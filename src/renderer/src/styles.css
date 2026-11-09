@@ -223,3 +223,13 @@
 .cct-md th { background: var(--cct-surface-2); color: var(--cct-text); }
 .cct-md hr { border: 0; border-top: 1px solid var(--cct-border); margin: 1.2em 0; }
 .cct-md mark { background: color-mix(in srgb, var(--cct-warn) 40%, transparent); color: var(--cct-text); border-radius: 2px; }
+.cct-md-add { background: color-mix(in srgb, var(--cct-ok, #3fb950) 14%, transparent); border-left: 3px solid var(--cct-ok, #3fb950); padding: 0 0.8em; margin: 0.4em 0; border-radius: 4px; }
+.cct-md-del { background: color-mix(in srgb, var(--cct-danger, #f85149) 14%, transparent); border-left: 3px solid var(--cct-danger, #f85149); padding: 0 0.8em; margin: 0.4em 0; border-radius: 4px; opacity: 0.75; text-decoration: line-through; }
+
+.cct-code-bar { display: flex; justify-content: space-between; align-items: center; margin: -0.8em -1em 0.6em; padding: 0.25em 1em; border-bottom: 1px solid var(--cct-border); font-size: 0.75rem; color: var(--cct-text-faint, var(--cct-text-muted)); user-select: none; }
+.cct-copy { cursor: pointer; border-radius: 4px; padding: 0 0.4em; } .cct-copy:hover { background: var(--cct-border); color: var(--cct-text); }
+/* Vista grafica della conversazione: i blocchi di codice staccano dal fondo, che qui è meno scuro del terminale. */
+.cct-chat .cct-md pre { background: var(--cct-bg); }
+.cct-chat .cct-md > :first-child { margin-top: 0; }
+.cct-chat .cct-md > :last-child { margin-bottom: 0; }
+.cct-chat .cct-md h1, .cct-chat .cct-md h2, .cct-chat .cct-md h3 { font-size: 1rem; border: 0; padding: 0; margin: 1em 0 0.4em; }

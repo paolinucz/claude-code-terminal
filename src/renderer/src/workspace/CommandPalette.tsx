@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileText, LayoutPanelTop, Search, SquareTerminal, Zap } from 'lucide-react'
-import type { FileIndex } from '@shared/files'
+import { joinNative, type FileIndex } from '@shared/files'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui-kit'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
@@ -191,7 +191,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
           detail: cut > 0 ? rel.slice(0, cut) : undefined,
           icon: <FileText size={14} />,
           score,
-          run: () => openFile(`${index.root.replace(/[\\/]+$/, '')}\\${rel}`, undefined, index.root)
+          run: () => openFile(joinNative(index.root, rel), undefined, index.root)
         })
       }
       push('File', files)

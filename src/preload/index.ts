@@ -87,6 +87,7 @@ const api: AppApi = {
     attach: (sessionId, viewId) => ipcRenderer.invoke('sessions:attach', sessionId, viewId),
     detach: (sessionId, viewId) => ipcRenderer.send('sessions:detach', sessionId, viewId),
     input: (sessionId, viewId, data) => ipcRenderer.send('sessions:input', sessionId, viewId, data),
+    key: (sessionId, key) => ipcRenderer.send('sessions:key', sessionId, key),
     resize: (sessionId, viewId, cols, rows, claim) => ipcRenderer.send('sessions:resize', sessionId, viewId, cols, rows, claim),
     setModel: (sessionId, model, effort) => ipcRenderer.invoke('sessions:setModel', sessionId, model, effort),
     kill: (sessionId) => ipcRenderer.invoke('sessions:kill', sessionId),
@@ -98,9 +99,15 @@ const api: AppApi = {
     onAttention: (cb) => on('session:attention', cb),
     onReveal: (cb) => on('session:reveal', cb)
   },
+  transcript: {
+    open: (sessionId) => ipcRenderer.invoke('transcript:open', sessionId),
+    close: (sessionId) => ipcRenderer.send('transcript:close', sessionId),
+    onUpdate: (cb) => on('transcript:update', cb)
+  },
   explain: {
     peek: (changeId) => ipcRenderer.invoke('explain:peek', changeId),
     run: (requestId, changeId, force) => ipcRenderer.invoke('explain:run', requestId, changeId, force),
+    snippet: (requestId, req, force) => ipcRenderer.invoke('explain:snippet', requestId, req, force),
     cancel: (requestId) => ipcRenderer.invoke('explain:cancel', requestId)
   },
   project: {

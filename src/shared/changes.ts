@@ -8,8 +8,52 @@
 export type ChangeStatus = 'pending' | 'revision' | 'approved' | 'rejected'
 
 /** Una indicazione per Claude (F8): un'accortezza da seguire o un divieto, eventualmente su righe precise. */
+/** Tipo di nota della revisione (configurabile dall'utente): `hint` dice a Claude come trattarla. */
+export interface ReviewKind {
+  id: string
+  label: string
+  /** Istruzione per Claude, per esempio «da rispettare» o «da non violare». */
+  hint: string
+  tone: 'warn' | 'danger' | 'info' | 'ok'
+  /** Frase d'esempio nel campo di testo. */
+  placeholder?: string
+}
+
+export const REVIEW_TONES: ReviewKind['tone'][] = ['warn', 'danger', 'info', 'ok']
+export const REVIEW_KIND_LIMITS = { count: 12, label: 30, hint: 120 }
+
+export const DEFAULT_REVIEW_KINDS: ReviewKind[] = [
+  { id: 'care', label: 'Accortezza', hint: 'da rispettare', tone: 'warn', placeholder: 'Cosa deve fare o a cosa stare attento, es. «gestisci anche il caso null»' },
+  { id: 'forbid', label: 'Divieto', hint: 'da non violare', tone: 'danger', placeholder: 'Cosa NON deve fare, es. «non cambiare la firma del metodo»' },
+  { id: 'question', label: 'Domanda', hint: 'rispondi nel messaggio senza modificare il codice se non serve', tone: 'info', placeholder: 'Cosa vuoi capire, es. «perché hai scelto una Map?»' }
+]
+
+/** Valida la lista salvata: null se non è una lista valida (si usano i predefiniti). */
+export function sanitizeReviewKinds(v: unknown): ReviewKind[] | null {
+  if (!Array.isArray(v)) return null
+  const out: ReviewKind[] = []
+  for (const x of v) {
+    if (!x || typeof x !== 'object') continue
+    const k = x as Record<string, unknown>
+    if (typeof k.id !== 'string' || typeof k.label !== 'string' || !k.label.trim()) continue
+    out.push({
+      id: k.id,
+      label: k.label.trim().slice(0, REVIEW_KIND_LIMITS.label),
+      hint: typeof k.hint === 'string' ? k.hint.trim().slice(0, REVIEW_KIND_LIMITS.hint) : '',
+      tone: REVIEW_TONES.includes(k.tone as ReviewKind['tone']) ? (k.tone as ReviewKind['tone']) : 'info',
+      placeholder: typeof k.placeholder === 'string' ? k.placeholder : undefined
+    })
+  }
+  return out.slice(0, REVIEW_KIND_LIMITS.count)
+}
+
 export interface ReviewNote {
-  kind: 'care' | 'forbid'
+  /** Id del tipo di nota (vedi ReviewKind). */
+  kind: string
+  /** Nome e istruzione del tipo al momento dell'invio: restano giusti anche se i tipi cambiano dopo. */
+  label?: string
+  hint?: string
+  tone?: ReviewKind['tone']
   text: string
   /** Righe del file nella versione «dopo» a cui si riferisce la nota. */
   lines?: { start: number; end: number }
