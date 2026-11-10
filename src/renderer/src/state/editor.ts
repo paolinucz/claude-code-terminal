@@ -26,7 +26,8 @@ interface EditorStore {
   plugins: InstalledPlugin[]
   languages: PluginLanguageInfo[]
   installProgress: PluginInstallProgress | null
-  init(): void
+  /** Si risolve quando l'elenco dei plugin è stato letto. */
+  init(): Promise<void>
 }
 
 let initialized = false
@@ -40,7 +41,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
   languages: [],
   installProgress: null,
   init() {
-    if (initialized) return
+    if (initialized) return Promise.resolve()
     initialized = true
     api.lsp.onDiagnostics((d) => {
       const key = normPath(d.path)
@@ -61,7 +62,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
     api.plugins.onChanged((plugins, languages) => set({ plugins, languages }))
     api.plugins.onProgress((p) => set({ installProgress: p }))
     void api.lsp.statuses().then((list) => set({ servers: Object.fromEntries(list.map((s) => [s.key, s])) }))
-    void Promise.all([api.plugins.list(), api.plugins.languages()]).then(([plugins, languages]) => set({ plugins, languages }))
+    return Promise.all([api.plugins.list(), api.plugins.languages()]).then(([plugins, languages]) => set({ plugins, languages }))
   }
 }))
 

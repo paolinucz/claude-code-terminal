@@ -10,6 +10,8 @@ import { useSessions } from '@/state/sessions'
 import { workdirForSheet } from '@/state/project'
 import { useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
+import { isInside } from '@shared/textEdits'
+import { moveInto, parentOf, relativeTo, requestMove, requestRename, topLevel } from '@/state/fileOps'
 import { FileIcon } from '@/lib/fileIcons'
 import { PluginFrame, type ExplorerDecor } from '@/plugins/PluginFrame'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui-kit'
@@ -137,6 +139,60 @@ export function ExplorerView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roots.map((r) => r.path).join('|')])
 
+  // ---- Selezione, trascinamento e operazioni sui file (rinomina, sposta, copia) ----
+  const [selected, setSelected] = useState<string[]>([])
+  const isSelected = (path: string) => selected.some((p) => normPath(p) === normPath(path))
+  const rootOf = (path: string) => roots.find((r) => isInside(path, r.path))?.path ?? cwd
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const dragging = useRef<string[]>([])
+  const hoverTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), [])
+
+  const select = (e: React.MouseEvent, path: string) => {
+    if (e.ctrlKey || e.metaKey) setSelected((s) => (s.some((p) => normPath(p) === normPath(path)) ? s.filter((p) => normPath(p) !== normPath(path)) : [...s, path]))
+    else setSelected([path])
+  }
+  /** Gli elementi su cui agiscono i comandi: la selezione, senza quelli dentro un'altra cartella selezionata. */
+  const targets = (entry?: DirEntry) => topLevel(entry && !isSelected(entry.path) ? [entry.path] : selected)
+  const afterOp = (p: Promise<boolean>) => void p.then((ok) => ok && setSelected([]))
+  const rename = (entry: DirEntry) => requestRename(entry.path, rootOf(entry.path), entry.dir)
+  const entryAt = (path: string): DirEntry | undefined => Object.values(children).flat().find((e) => normPath(e.path) === normPath(path))
+
+  const onTreeKey = (e: React.KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || !selected.length) return
+    if (e.key === 'F2' && selected.length === 1) {
+      const entry = entryAt(selected[0])
+      if (entry) rename(entry)
+    } else if (e.key === 'F6' || e.key === 'F5') {
+      requestMove(topLevel(selected), rootOf(selected[0]), e.key === 'F5')
+    } else return
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  /** Cartella che riceve il rilascio: l'elemento stesso se è una cartella, altrimenti quella che lo contiene. */
+  const dropDirFor = (entry: DirEntry) => (entry.dir ? entry.path : parentOf(entry.path))
+  const dragOverDir = (e: React.DragEvent, dir: string, autoOpen: boolean) => {
+    if (!dragging.current.length) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move'
+    if (dropTarget !== dir) {
+      setDropTarget(dir)
+      window.clearTimeout(hoverTimer.current)
+      // Una cartella chiusa si apre dopo un po', per arrivare alle sottocartelle.
+      if (autoOpen && !expandedRef.current.has(normPath(dir))) hoverTimer.current = window.setTimeout(() => toggle(dir), 700)
+    }
+  }
+  const dropOnDir = (e: React.DragEvent, dir: string) => {
+    if (!dragging.current.length) return
+    e.preventDefault()
+    window.clearTimeout(hoverTimer.current)
+    setDropTarget(null)
+    const paths = dragging.current
+    dragging.current = []
+    afterOp(moveInto(paths, dir, rootOf(dir), e.ctrlKey))
+  }
+
   const toggle = (path: string) => {
     const key = normPath(path)
     const next = new Set(expanded)
@@ -188,9 +244,34 @@ export function ExplorerView() {
           <ContextMenuTrigger asChild>
             <button
               type="button"
-              onClick={() => (entry.dir ? toggle(entry.path) : openFile(entry.path, undefined, cwd))}
+              draggable
+              onClick={(e) => {
+                select(e, entry.path)
+                if (e.ctrlKey || e.metaKey) return
+                if (entry.dir) toggle(entry.path)
+                else openFile(entry.path, undefined, cwd)
+              }}
+              onContextMenu={() => !isSelected(entry.path) && setSelected([entry.path])}
+              onDragStart={(e) => {
+                const paths = topLevel(isSelected(entry.path) ? selected : [entry.path])
+                if (!isSelected(entry.path)) setSelected([entry.path])
+                dragging.current = paths
+                e.dataTransfer.effectAllowed = 'copyMove'
+                e.dataTransfer.setData('text/plain', paths.join('\n'))
+              }}
+              onDragEnd={() => {
+                dragging.current = []
+                window.clearTimeout(hoverTimer.current)
+                setDropTarget(null)
+              }}
+              onDragOver={(e) => dragOverDir(e, dropDirFor(entry), entry.dir)}
+              onDrop={(e) => dropOnDir(e, dropDirFor(entry))}
               title={entry.path}
-              className="flex h-[22px] w-full items-center gap-1 rounded pr-2 text-left text-[12px] text-text-muted hover:bg-surface-2 hover:text-foreground"
+              className={cn(
+                'flex h-[22px] w-full items-center gap-1 rounded pr-2 text-left text-[12px] text-text-muted hover:bg-surface-2 hover:text-foreground',
+                isSelected(entry.path) && 'bg-border text-foreground',
+                dropTarget && normPath(dropTarget) === normPath(dropDirFor(entry)) && entry.dir && 'bg-brand/25 ring-1 ring-brand'
+              )}
               style={{ paddingLeft: 6 + depth * 14 }}
             >
               {entry.dir ? (
@@ -218,7 +299,21 @@ export function ExplorerView() {
             {!entry.dir && <ContextMenuItem onSelect={() => openFile(entry.path, undefined, cwd)}>Apri</ContextMenuItem>}
             <ContextMenuItem onSelect={() => void api.files.reveal(entry.path)}>Mostra in Esplora risorse</ContextMenuItem>
             <ContextMenuSeparator />
+            <ContextMenuItem disabled={selected.length > 1 && isSelected(entry.path)} onSelect={() => rename(entry)}>
+              Rinomina…
+              <span className="ml-auto pl-6 font-mono text-[10px] text-text-faint">F2</span>
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => requestMove(targets(entry), rootOf(entry.path), false)}>
+              Sposta in…
+              <span className="ml-auto pl-6 font-mono text-[10px] text-text-faint">F6</span>
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => requestMove(targets(entry), rootOf(entry.path), true)}>
+              Copia in…
+              <span className="ml-auto pl-6 font-mono text-[10px] text-text-faint">F5</span>
+            </ContextMenuItem>
+            <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => void navigator.clipboard.writeText(entry.path)}>Copia percorso</ContextMenuItem>
+            <ContextMenuItem onSelect={() => void navigator.clipboard.writeText(relativeTo(rootOf(entry.path), entry.path))}>Copia percorso relativo</ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
         {entry.dir && open && renderEntries(entry.path, depth + 1)}
@@ -291,7 +386,7 @@ export function ExplorerView() {
           <PluginFrame pluginId={active.pluginId} entry={active.entry} cwd={cwd} decor={decorForPlugin} />
         </div>
       ) : (
-      <div className="min-h-0 flex-1 overflow-auto py-1" role="tree" aria-label="File del progetto">
+      <div className="min-h-0 flex-1 overflow-auto py-1 outline-none" role="tree" aria-label="File del progetto" tabIndex={0} onKeyDown={onTreeKey}>
         {roots.map((r) => {
           const key = normPath(r.path)
           const open = expanded.has(key)
@@ -300,7 +395,12 @@ export function ExplorerView() {
               <button
                 type="button"
                 onClick={() => toggle(r.path)}
-                className="flex h-6 w-full items-center gap-1 px-1.5 text-left text-[12px] font-semibold text-foreground hover:bg-surface-2"
+                onDragOver={(e) => dragOverDir(e, r.path, true)}
+                onDrop={(e) => dropOnDir(e, r.path)}
+                className={cn(
+                  'flex h-6 w-full items-center gap-1 px-1.5 text-left text-[12px] font-semibold text-foreground hover:bg-surface-2',
+                  dropTarget && normPath(dropTarget) === key && 'bg-brand/25 ring-1 ring-brand'
+                )}
                 title={r.path}
               >
                 {open ? <ChevronDown size={12} className="text-text-faint" /> : <ChevronRight size={12} className="text-text-faint" />}

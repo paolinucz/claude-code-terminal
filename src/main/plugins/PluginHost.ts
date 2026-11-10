@@ -2,11 +2,15 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter, type MessageConnection } from 'vscode-jsonrpc/node'
 import type { Diagnostic, FileDiagnostics, LspStatus } from '@shared/files'
 import { normPath } from '@shared/files'
+import { renamedPath } from '@shared/textEdits'
 import {
   PLUGIN_API_VERSION,
   type ApiCapabilities,
   type ApiCompletionList,
   type ApiDiagnostic,
+  type ApiFileEdit,
+  type ApiRename,
+  type WillRenameResult,
   type ApiHover,
   type ApiLocation,
   type ApiPosition,
@@ -353,6 +357,44 @@ export class PluginHost {
     return (await this.ask<ApiLocation[]>(path, 'definition', 'definition', position)).flat()
   }
 
+  /** Adapter già avviati (hanno aperto un file del progetto) che sanno fare il refactoring allo spostamento. */
+  private refactorHosts(): Host[] {
+    return [...this.hosts.values()].filter((h) => h.alive && h.caps?.willRename)
+  }
+
+  /**
+   * Prima di spostare o rinominare: chiede agli adapter le modifiche che tengono coerente il codice (package, import, nome
+   * della classe…). I percorsi delle modifiche sono quelli di prima della rinomina. Un adapter che fallisce è ignorato.
+   */
+  async willRename(renames: ApiRename[]): Promise<ApiFileEdit[]> {
+    const results = await Promise.all(
+      this.refactorHosts().map((h) =>
+        withTimeout(h.conn.sendRequest<WillRenameResult>('refactor/willRename', { renames }), 60000, 'refactor/willRename').catch(() => null)
+      )
+    )
+    const byPath = new Map<string, ApiFileEdit>()
+    for (const r of results) {
+      for (const f of r?.files ?? []) {
+        if (!f || typeof f.path !== 'string' || !Array.isArray(f.edits)) continue
+        const k = normPath(f.path)
+        const cur = byPath.get(k)
+        if (cur) cur.edits.push(...f.edits)
+        else byPath.set(k, { path: f.path, edits: [...f.edits] })
+      }
+    }
+    return [...byPath.values()].filter((f) => f.edits.length)
+  }
+
+  /** Dopo lo spostamento: gli adapter aggiornano i loro indici (e i documenti aperti seguono i nuovi percorsi). */
+  didRename(renames: ApiRename[]): void {
+    for (const h of this.refactorHosts()) void h.conn.sendNotification('refactor/didRename', { renames })
+    for (const doc of [...this.docs.values()]) {
+      const moved = renamedPath(doc.path, renames)
+      if (moved === doc.path) continue
+      void this.close(doc.path)
+    }
+  }
+
   /**
    * Richiesta propria di un plugin (oltre alla API di base): per esempio i comandi del language server Java usati dal debug.
    * Avvia l'adapter se serve; fallisce con un messaggio chiaro se il plugin non è attivo.
@@ -363,6 +405,17 @@ export class PluginHost {
     const host = this.ensure(spec)
     if (!(await host.ready) || !host.alive) throw new Error(`Il plugin «${pluginId}» non si è avviato${host.lastError ? `: ${host.lastError}` : '.'}`)
     return withTimeout(host.conn.sendRequest<T>('call', { method, params }), timeoutMs, method)
+  }
+
+  /**
+   * Avvia in anticipo l'adapter di un plugin (senza chiedergli niente), così la prima richiesta non aspetta l'avvio del
+   * processo. Restituisce `true` se è pronto.
+   */
+  async warm(pluginId: string): Promise<boolean> {
+    const spec = this.plugins.adapter(pluginId)
+    if (!spec) return false
+    const host = this.ensure(spec)
+    return (await host.ready) && host.alive
   }
 
   statuses(): LspStatus[] {

@@ -193,6 +193,12 @@ function createDemoFiles(): Pick<AppApi, 'files' | 'lsp' | 'plugins'> {
       watch() {},
       unwatch() {},
       async reveal() {},
+      async prepareMove() {
+        return { ok: false, error: 'Disponibile solo nell\'app.', conflicts: [], edits: [] }
+      },
+      async move() {
+        return { ok: false, error: 'Disponibile solo nell\'app.', edited: 0 }
+      },
       onChanged: () => () => {}
     },
     lsp: {
@@ -289,6 +295,9 @@ function createDemoPlugins(): AppApi['plugins'] {
       return { ok: true }
     },
     onChanged: (cb) => (listeners.add(cb), () => listeners.delete(cb)),
+    async warm() {
+      return 0
+    },
     onProgress: () => () => {},
     async call() {
       throw new Error('Gli adapter dei plugin girano solo nell’app')

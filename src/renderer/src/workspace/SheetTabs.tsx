@@ -13,6 +13,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { getPanelData } from 'dockview-react'
 import type { PanelParams } from '@/panels/kinds'
 import { ATTENTION_LABELS, useSessions } from '@/state/sessions'
+import { SHEET_COLORS, sheetColor, useSheetColors } from '@/state/sheetColors'
 import { moveTerminalToSheet } from './panels'
 import { dockRegistry } from './registry'
 
@@ -41,6 +42,15 @@ export function SheetTabs() {
   const [closing, setClosing] = useState<Sheet | null>(null)
   const [panelDropSheet, setPanelDropSheet] = useState<string | null>(null)
   const setStatus = useWorkspace((s) => s.setStatus)
+  const colors = useSheetColors((s) => s.colors)
+  const colorsLoaded = useSheetColors((s) => s.loaded)
+  // Ogni foglio ha il suo colore: ai nuovi se ne assegna uno libero e lo si ricorda.
+  useEffect(() => {
+    void useSheetColors.getState().load()
+  }, [])
+  useEffect(() => {
+    if (colorsLoaded) useSheetColors.getState().ensure(allSheets.map((x) => x.id))
+  }, [colorsLoaded, allSheets])
 
   const panelCounts = useWorkspace((s) => s.panelCounts)
   const requestClose = (sheet: Sheet) => {
@@ -51,10 +61,13 @@ export function SheetTabs() {
   }
 
   return (
-    <footer className="mx-(--cct-gap) mb-(--cct-gap) flex min-h-10 items-stretch gap-0.5 overflow-hidden rounded-[10px] border border-border bg-surface px-2" aria-label="Fogli">
-      <div role="tablist" aria-label="Fogli" className="flex items-stretch gap-0.5" onDragLeave={() => setDropIndex(null)}>
+    // Barra dei fogli: una pillola centrata, larga quanto serve, che segue il linguaggio della sidebar (tessere morbide, un colore per foglio).
+    <footer className="relative flex shrink-0 justify-center px-(--cct-gap) pb-(--cct-gap)" aria-label="Fogli">
+      <div className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[20px] border border-white/10 bg-surface/80 p-1.5 shadow-[0_10px_28px_-10px_rgb(0_0_0/0.7),inset_0_1px_0_rgb(255_255_255/0.06)] backdrop-blur-xl">
+      <div role="tablist" aria-label="Fogli" className="flex items-center gap-1" onDragLeave={() => setDropIndex(null)}>
         {sheets.map((sheet, index) => {
           const isActive = sheet.id === activeSheetId
+          const color = sheetColor(sheet.id, colors)
           return (
             <ContextMenu key={sheet.id}>
               <ContextMenuTrigger asChild>
@@ -112,10 +125,18 @@ export function SheetTabs() {
                     setDragId(null)
                     setDropIndex(null)
                   }}
-                  className={[
-                    'group relative flex min-h-10 cursor-pointer items-center gap-2 px-4 text-[13px] transition-colors',
+                  style={
                     isActive
-                      ? 'bg-background font-semibold text-foreground shadow-[inset_0_-2px_0_var(--cct-accent)]'
+                      ? {
+                          backgroundColor: color,
+                          backgroundImage: `linear-gradient(180deg, color-mix(in srgb, ${color} 74%, white), ${color} 60%, color-mix(in srgb, ${color} 88%, black))`
+                        }
+                      : undefined
+                  }
+                  className={[
+                    'group relative flex h-9 cursor-pointer items-center gap-2 rounded-[13px] px-3.5 text-[13px] transition-[background,color,box-shadow,transform] duration-150',
+                    isActive
+                      ? 'font-semibold text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.4),0_1px_2px_rgb(0_0_0/0.45),0_6px_12px_-6px_rgb(0_0_0/0.6)]'
                       : 'font-medium text-text-muted hover:bg-surface-2 hover:text-foreground',
                     dragId === sheet.id ? 'opacity-50' : '',
                     panelDropSheet === sheet.id ? 'bg-brand/15 text-foreground outline outline-1 outline-brand' : '',
@@ -123,6 +144,11 @@ export function SheetTabs() {
                     dropIndex === index + 1 && index === sheets.length - 1 ? 'shadow-[inset_-2px_0_0_var(--cct-accent)]' : ''
                   ].join(' ')}
                 >
+                  <span
+                    aria-hidden="true"
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={isActive ? { background: 'rgb(255 255 255 / 0.9)' } : { background: color, boxShadow: `0 0 8px color-mix(in srgb, ${color} 55%, transparent)` }}
+                  />
                   {editing === sheet.id ? (
                     <RenameInput
                       initial={sheet.name}
@@ -145,7 +171,7 @@ export function SheetTabs() {
                         e.stopPropagation()
                         requestClose(sheet)
                       }}
-                      className="-mr-2 inline-flex size-5 items-center justify-center rounded text-text-faint opacity-0 transition hover:bg-border hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                      className="-mr-1.5 inline-flex size-5 items-center justify-center rounded-md opacity-0 transition hover:bg-black/20 group-hover:opacity-100 focus-visible:opacity-100"
                     >
                       <X size={12} />
                     </button>
@@ -160,6 +186,23 @@ export function SheetTabs() {
                 <ContextMenuItem disabled={index === sheets.length - 1} onSelect={() => moveSheet(sheet.id, index + 1)}>
                   Sposta a destra
                 </ContextMenuItem>
+                <ContextMenuSeparator />
+                <div className="px-2 pt-1 pb-1.5" role="group" aria-label="Colore del foglio">
+                  <p className="mb-1.5 text-[11px] font-medium text-text-faint">Colore</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SHEET_COLORS.map((c, i) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={`Colore ${i + 1}`}
+                        aria-pressed={c === color}
+                        onClick={() => useSheetColors.getState().set(sheet.id, i)}
+                        style={{ background: c }}
+                        className={`size-5 rounded-full shadow-[inset_0_1px_0_rgb(255_255_255/0.4)] transition-transform hover:scale-110 ${c === color ? 'ring-2 ring-white/70 ring-offset-1 ring-offset-surface' : ''}`}
+                      />
+                    ))}
+                  </div>
+                </div>
                 <ContextMenuSeparator />
                 <ContextMenuItem disabled={sheets.length <= 1} onSelect={() => requestClose(sheet)}>
                   Chiudi foglio
@@ -178,12 +221,14 @@ export function SheetTabs() {
           const id = addSheet()
           setEditing(id)
         }}
-        className="my-auto ml-1 inline-flex size-7 items-center justify-center rounded-md text-text-subtle transition-colors hover:bg-border hover:text-foreground"
+        className="inline-flex size-9 shrink-0 items-center justify-center rounded-[13px] text-text-subtle transition-colors hover:bg-surface-2 hover:text-foreground"
       >
-        <Plus size={15} />
+        <Plus size={16} />
       </button>
+      </div>
 
-      <span className="my-auto ml-auto truncate pl-4 text-[12px] text-text-faint" aria-live="polite">
+      {/* Messaggi di stato (layout salvato, ecc.): a destra, fuori dalla pillola. */}
+      <span className="pointer-events-none absolute top-0 right-(--cct-gap) bottom-(--cct-gap) hidden max-w-[28%] items-center truncate text-[12px] text-text-faint lg:flex" aria-live="polite">
         {status}
       </span>
 
@@ -248,5 +293,5 @@ function SheetAttention({ sheetId }: { sheetId: string }) {
 function PanelCount({ sheetId }: { sheetId: string }) {
   const count = useWorkspace((s) => s.panelCounts[sheetId])
   if (count === undefined) return null
-  return <span className="font-mono text-[11px] font-normal text-text-faint">{count}</span>
+  return <span className="font-mono text-[11px] font-normal opacity-60">{count}</span>
 }

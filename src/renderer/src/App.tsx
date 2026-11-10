@@ -1,6 +1,11 @@
 import { useEffect } from 'react'
+import { Splash } from '@/components/Splash'
 import { Toasts } from '@/components/Toasts'
+import { preloadAll } from '@/lib/preload'
+import { trackBoot } from '@/state/boot'
+import { useSheetColors } from '@/state/sheetColors'
 import { PluginUi } from '@/components/PluginUi'
+import { FileOpsDialogs } from '@/files/FileOpsDialogs'
 import { startPluginBridge } from '@/plugins/pluginBridge'
 import { useChanges } from '@/state/changes'
 import { useEditor } from '@/state/editor'
@@ -19,22 +24,25 @@ export function App() {
   const { loaded, sheets, activeSheetId, load } = useWorkspace()
 
   useEffect(() => {
-    void load()
-    void useSessions.getState().init()
-    void useTerminalSettings.getState().load()
-    void useChanges.getState().init()
-    void useSidebar.getState().load()
-    void useRecent.getState().load()
+    // Ogni caricamento che serve per partire si registra: la schermata iniziale ne mostra l'avanzamento.
+    void trackBoot('workspace', 'Spazio di lavoro', load())
+    void trackBoot('sessions', 'Sessioni', useSessions.getState().init())
+    void trackBoot('terminal', 'Impostazioni del terminale', useTerminalSettings.getState().load())
+    void trackBoot('changes', 'Modifiche di Claude', useChanges.getState().init())
+    void trackBoot('sidebar', 'Barra laterale', useSidebar.getState().load())
+    void trackBoot('recent', 'File recenti', useRecent.getState().load())
+    void trackBoot('colors', 'Colori dei fogli', useSheetColors.getState().load())
     startPluginGutter()
     startPluginBridge()
-    useEditor.getState().init()
+    void trackBoot('plugins', 'Plugin', useEditor.getState().init())
+    // Quello che altrimenti si carica alla prima apertura (editor, confronto, icone, shell, adapter dei plugin).
+    preloadAll()
   }, [load])
 
-  if (!loaded) {
-    return <div className="flex h-full items-center justify-center text-text-faint">Caricamento…</div>
-  }
-
+  // La schermata iniziale sta sopra a tutto e dura finché i caricamenti registrati non sono finiti (vedi state/boot.ts).
   return (
+    <>
+    {loaded && (
     <div className="flex h-full flex-col">
       <TopBar />
       <div className="flex min-h-0 flex-1">
@@ -49,6 +57,10 @@ export function App() {
       <SheetTabs />
       <Toasts />
       <PluginUi />
+      <FileOpsDialogs />
     </div>
+    )}
+    <Splash />
+    </>
   )
 }

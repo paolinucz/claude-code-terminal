@@ -62,6 +62,36 @@ export interface ApiCapabilities {
   hover: boolean
   definition: boolean
   diagnostics: boolean
+  /** Refactoring allo spostamento/rinomina di file e cartelle (`refactor/willRename`). Facoltativa. */
+  willRename?: boolean
+}
+
+// ---- Refactoring allo spostamento e alla rinomina (Esplora file, vista Package) ----
+
+/** Una modifica di testo (righe e colonne da 1). */
+export interface ApiTextEdit {
+  range: ApiRange
+  newText: string
+}
+
+/** Le modifiche a un file, con i percorsi del file PRIMA della rinomina. */
+export interface ApiFileEdit {
+  path: string
+  edits: ApiTextEdit[]
+}
+
+export interface ApiRename {
+  from: string
+  to: string
+}
+
+/** Risposta di `refactor/willRename`: le modifiche ai file che rimangono coerenti dopo lo spostamento. */
+export interface WillRenameResult {
+  files: ApiFileEdit[]
+}
+
+export interface ApiRefactorPreview {
+  files: ApiFileEdit[]
 }
 
 // ---- Messaggi ----

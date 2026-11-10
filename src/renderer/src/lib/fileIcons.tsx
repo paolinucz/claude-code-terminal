@@ -16,6 +16,12 @@ let data: IconData | null = null
 let loading: Promise<void> | null = null
 const waiting = new Set<() => void>()
 
+/** Carica il pacchetto delle icone (lo fa anche la schermata iniziale, così la prima icona è già pronta). */
+export function preloadFileIcons(): Promise<void> {
+  ensureLoaded()
+  return loading ?? Promise.resolve()
+}
+
 function ensureLoaded(): void {
   if (data || loading) return
   loading = import('@iconify-json/vscode-icons/icons.json')

@@ -19,6 +19,11 @@ export interface PluginManifest {
   main?: string
   /** Plugin necessari (per id), es. Maven richiede il runtime Java del plugin Java. */
   requires?: string[]
+  /**
+   * Plugin che questo sostituisce (per id): se sono installati si disinstallano dopo l'installazione di questo. Serve quando
+   * due plugin vengono unificati in uno. Le impostazioni dell'utente (chiavi `storage.settingsPrefixes`) restano.
+   */
+  replaces?: string[]
   /** Linguaggi che il plugin definisce: estensioni dei file → linguaggio di Monaco per la colorazione. */
   languages?: PluginLanguage[]
   /**

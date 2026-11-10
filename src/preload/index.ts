@@ -42,6 +42,8 @@ const api: AppApi = {
     watch: (root) => ipcRenderer.send('files:watch', root),
     unwatch: (root) => ipcRenderer.send('files:unwatch', root),
     reveal: (path) => ipcRenderer.invoke('files:reveal', path),
+    prepareMove: (root, items, copy) => ipcRenderer.invoke('files:prepareMove', root, items, copy),
+    move: (root, items, copy, replace, edits) => ipcRenderer.invoke('files:move', root, items, copy, replace, edits),
     onChanged: (cb) => on('files:changed', cb)
   },
   lsp: {
@@ -65,6 +67,7 @@ const api: AppApi = {
     install: (token) => ipcRenderer.invoke('plugins:install', token),
     setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
     uninstall: (id) => ipcRenderer.invoke('plugins:uninstall', id),
+    warm: () => ipcRenderer.invoke('plugins:warm'),
     onChanged: (cb) => on('plugins:changed', cb),
     onProgress: (cb) => on('plugins:progress', cb),
     call: (pluginId, method, params) => ipcRenderer.invoke('plugin:call', pluginId, method, params),

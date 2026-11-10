@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SerializedDockview } from 'dockview-react'
-import { ArrowDownToLine, ChevronDown, LayoutGrid, Plus, Puzzle, Search, ShieldCheck } from 'lucide-react'
+import { ArrowDownToLine, ChevronDown, Keyboard, LayoutGrid, Plus, Puzzle, ShieldCheck } from 'lucide-react'
 import { openPluginsPanel, useEditor } from '@/state/editor'
 import { runPluginCommand } from '@/plugins/pluginBridge'
 import type { PanelParams } from '@/panels/kinds'
@@ -29,6 +29,7 @@ import { addPanel, buildDefaultLayout, removeHiddenPanels, stripSessions } from 
 import { dockRegistry } from './registry'
 import { CommandPalette, type PaletteCommand, type PaletteMode } from './CommandPalette'
 import { SaveLayoutDialog } from './SaveLayoutDialog'
+import { ShortcutsDialog } from './ShortcutsDialog'
 import { ProjectMenu } from './ProjectMenu'
 import { ContextSwitcher } from './ContextSwitcher'
 import { useProject } from '@/state/project'
@@ -41,7 +42,6 @@ import { AccentDialog } from './AccentDialog'
 import { useAccent } from '@/state/accent'
 import { sendPreset } from './presets'
 import { openDocsPanel } from '@/docs/DocsPanel'
-import appLogo from '@/assets/icon-small.svg'
 
 /** In Electron i pulsanti della finestra (riduci, ingrandisci, chiudi) stanno sopra la barra, a destra. */
 const WINDOW_CONTROLS_WIDTH = window.api ? 140 : 0
@@ -58,6 +58,7 @@ export function TopBar() {
   const [resetting, setResetting] = useState(false)
   const [newTerminal, setNewTerminal] = useState(false)
   const [palette, setPalette] = useState(false)
+  const [shortcuts, setShortcuts] = useState(false)
   const [paletteMode, setPaletteMode] = useState<PaletteMode>('all')
   const [installing, setInstalling] = useState(false)
   const update = useUpdates((s) => s.status)
@@ -95,10 +96,11 @@ export function TopBar() {
         }
       }
       // F1–F9: foglio 1–9 del contesto attivo, anche con il focus dentro un terminale.
-      // Sulla scheda di un foglio F2 resta «rinomina»; nei campi di testo non si intercetta.
+      // Sulla scheda di un foglio F2 resta «rinomina»; nei campi di testo non si intercetta; nell'albero dei file F2, F5 e F6
+      // sono rinomina, copia e sposta.
       const fn = /^F([1-9])$/.exec(e.key)
       const target = e.target as Element | null
-      if (fn && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && !target?.closest?.('[role="tab"], input, textarea:not(.xterm-helper-textarea)')) {
+      if (fn && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && !target?.closest?.('[role="tab"], [role="tree"], input, textarea:not(.xterm-helper-textarea)')) {
         const { sheets, contextId, setActive } = useWorkspace.getState()
         const sheet = sheetsOf(sheets, contextId)[Number(fn[1]) - 1]
         e.preventDefault()
@@ -235,32 +237,17 @@ export function TopBar() {
   }, [activeSheet, layouts, update, appInfo, project, explainOn, presets, installedPlugins])
 
   return (
-    // La barra è una scheda (angoli da 10 px, 6 px dal bordo) come sidebar, pannelli e linguette dei fogli. Il contenitore trascina
+    // La barra non ha sfondo né bordo: i suoi elementi stanno sullo sfondo scuro della finestra, a --cct-gap dal bordo. Il contenitore trascina
     // la finestra anche nei margini; i controlli nativi di Windows stanno a destra, fuori dalla scheda.
-    <div className="app-drag shrink-0 pt-(--cct-gap) pl-(--cct-gap)" style={{ paddingRight: WINDOW_CONTROLS_WIDTH || 10 }}>
-    <header className="flex h-11 items-center gap-3 rounded-[10px] border border-border bg-surface px-3">
-      <div className="flex items-center gap-2">
-        <img src={appLogo} alt="Magnolia" title="Magnolia" draggable={false} className="size-7 shrink-0" />
-      </div>
+    <div className="app-drag shrink-0 pt-(--cct-gap)" style={{ paddingRight: WINDOW_CONTROLS_WIDTH || 10 }}>
+    <header className="flex h-11 items-center gap-3 pr-3">
+      {/* La barra comincia dove comincia il pannello della sidebar (68 px a sinistra), allineata al suo bordo. */}
+      <div className="w-[68px] shrink-0" aria-hidden="true" />
 
       <ProjectMenu />
       <ContextSwitcher />
 
-      <button
-        type="button"
-        onClick={() => {
-          refreshLayouts()
-          setPalette(true)
-        }}
-        title="Palette comandi (Ctrl+K)"
-        className="app-no-drag relative mx-auto flex h-8 w-full max-w-md items-center rounded-lg border border-border bg-background pr-14 pl-8 text-left text-[13px] text-text-faint outline-none transition-colors hover:border-strong focus-visible:border-brand"
-      >
-        <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-text-faint" />
-        Cerca file, sessioni o comandi…
-        <kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border border-border px-1.5 font-mono text-[10px] text-text-faint">
-          Ctrl K
-        </kbd>
-      </button>
+      <div className="flex-1" aria-hidden="true" />
 
       <div className="app-no-drag flex items-center gap-2">
         <button
@@ -336,6 +323,15 @@ export function TopBar() {
         <button type="button" className={buttonClass} onClick={openPluginsPanel} title="Plugin di linguaggio (language server)">
           <Puzzle size={14} /> Plugin
         </button>
+        <button
+          type="button"
+          onClick={() => setShortcuts(true)}
+          title="Scorciatoie da tastiera"
+          aria-label="Scorciatoie da tastiera"
+          className="app-no-drag inline-flex size-8 items-center justify-center rounded-lg text-text-subtle transition-colors hover:bg-border hover:text-foreground"
+        >
+          <Keyboard size={16} />
+        </button>
         {update.state === 'ready' && (
           <button
             type="button"
@@ -354,6 +350,7 @@ export function TopBar() {
       </div>
 
       <NewTerminalDialog open={newTerminal} onClose={() => setNewTerminal(false)} />
+      <ShortcutsDialog open={shortcuts} onClose={() => setShortcuts(false)} />
       <PresetsDialog />
       <AccentDialog />
 

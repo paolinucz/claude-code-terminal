@@ -18,7 +18,10 @@ import { PermissionsService } from './permissions/PermissionsService'
 import { FileService } from './files/FileService'
 import { PluginHost } from './plugins/PluginHost'
 import { PluginManager } from './plugins/PluginManager'
-import type { ApiPosition } from '@shared/pluginApi'
+import type { ApiFileEdit, ApiPosition } from '@shared/pluginApi'
+import { applyTextEdits } from '@shared/textEdits'
+import { isInsidePath, perform as performMove, validate as validateMove } from './files/FileOps'
+import type { MoveItem, MovePrepareResult, MoveResult } from '@shared/types'
 import type { PermissionScope, ScopeData } from '@shared/permissions'
 import { detectShells, findClaudeCli } from './sessions/environment'
 import { listResumable } from './sessions/history'
@@ -371,6 +374,23 @@ function registerIpc(store: AppDb): void {
   ipcMain.on('files:watch', (_e, root: string) => files.watch(root))
   ipcMain.on('files:unwatch', (_e, root: string) => files.unwatch(root))
   ipcMain.handle('files:reveal', (_e, path: string) => shell.showItemInFolder(path))
+  // Sposta, rinomina, copia: passo 1 (controlli + proposte di refactoring dei plugin), passo 2 (esecuzione).
+  const validItems = (x: unknown): x is MoveItem[] =>
+    Array.isArray(x) && x.length > 0 && x.length <= 500 && x.every((i) => i && typeof i.from === 'string' && typeof i.to === 'string')
+  ipcMain.handle('files:prepareMove', async (_e, root: string, items: unknown, copy: boolean): Promise<MovePrepareResult> => {
+    if (typeof root !== 'string' || !root || !validItems(items)) return { ok: false, error: 'Richiesta non valida.', conflicts: [], edits: [] }
+    const v = await validateMove(root, items, Boolean(copy))
+    if (!v.ok) return { ok: false, error: v.error, conflicts: [], edits: [] }
+    const edits = copy ? [] : ((await lsp?.willRename(items).catch(() => [])) ?? []).filter((f) => isInsidePath(f.path, root))
+    return { ok: true, conflicts: v.conflicts, edits }
+  })
+  ipcMain.handle('files:move', async (_e, root: string, items: unknown, copy: boolean, replace: boolean, edits: unknown): Promise<MoveResult> => {
+    if (typeof root !== 'string' || !root || !validItems(items)) return { ok: false, error: 'Richiesta non valida.', edited: 0 }
+    const fileEdits = Array.isArray(edits) ? (edits as ApiFileEdit[]).filter((f) => f && typeof f.path === 'string' && Array.isArray(f.edits)) : []
+    const r = await performMove(root, items, Boolean(copy), Boolean(replace), fileEdits, applyTextEdits)
+    if (r.ok && !copy) lsp?.didRename(items)
+    return r
+  })
 
   // ---- Language server (F2, F3), forniti dai plugin ----
   ipcMain.on('lsp:open', (_e, path: string, text: string, workspace?: string) => void lsp?.open(path, text, workspace).catch(() => {}))
@@ -388,8 +408,26 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('lsp:statuses', () => lsp?.statuses() ?? [])
 
   // ---- Plugin di linguaggio (X1–X9) ----
-  ipcMain.handle('plugins:list', () => plugins?.list() ?? [])
-  ipcMain.handle('plugins:languages', () => plugins?.languages() ?? [])
+  // L'elenco aspetta la verifica dei plugin: così all'avvio gli stati sono quelli veri e la schermata iniziale la copre.
+  ipcMain.handle('plugins:list', async () => {
+    await plugins?.whenVerified()
+    return plugins?.list() ?? []
+  })
+  ipcMain.handle('plugins:languages', async () => {
+    await plugins?.whenVerified()
+    return plugins?.languages() ?? []
+  })
+  // Avvio anticipato degli adapter dei plugin con interfaccia (viste, comandi, margine dell'editor): partono mentre si vede la
+  // schermata iniziale invece che alla prima richiesta. Quelli dei soli language server partono quando si apre un file.
+  ipcMain.handle('plugins:warm', async () => {
+    await plugins?.whenVerified()
+    const ids = (plugins?.list() ?? [])
+      .filter((p) => p.enabled && p.state === 'ok' && p.manifest.main && (p.manifest.contributes?.sidebarViews?.length || p.manifest.contributes?.commands?.length || p.manifest.contributes?.editorGutter))
+      .map((p) => p.manifest.id)
+    const limit = new Promise<boolean>((r) => setTimeout(() => r(false), 15000))
+    const results = await Promise.all(ids.map((id) => Promise.race([lsp?.warm(id).catch(() => false) ?? Promise.resolve(false), limit])))
+    return results.filter(Boolean).length
+  })
   ipcMain.handle('plugins:pick', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const opts: Electron.OpenDialogOptions = {
@@ -522,7 +560,12 @@ function registerIpc(store: AppDb): void {
 
   // ---- Ambiente: Claude Code, shell, cronologia, preferenze di progetto (W1–W4) ----
   ipcMain.handle('env:claudeCli', (_e, refresh?: boolean) => findClaudeCli(refresh))
-  ipcMain.handle('env:shells', async () => (await detectShells()).map((s) => s.info))
+  // Il rilevamento delle shell (WSL compreso) è lento: si ricorda per un minuto, così aprire «Nuovo terminale» è immediato.
+  let shellsCache: { at: number; list: Awaited<ReturnType<typeof detectShells>> } | null = null
+  ipcMain.handle('env:shells', async () => {
+    if (!shellsCache || Date.now() - shellsCache.at > 60_000) shellsCache = { at: Date.now(), list: await detectShells() }
+    return shellsCache.list.map((s) => s.info)
+  })
   ipcMain.handle('env:resumable', (_e, cwd: string) => listResumable(cwd))
   ipcMain.handle('env:projectPrefs', (_e, cwd: string) => store.getProjectPrefs(cwd))
   ipcMain.handle('env:recentProjects', () => store.recentProjects())
@@ -629,7 +672,7 @@ app.whenReady().then(async () => {
   plugins = new PluginManager(db, join(app.getPath('userData'), 'plugins'), join(app.getPath('userData'), 'plugin-data'), () => {
     sendToMain('plugins:changed', plugins?.list() ?? [], plugins?.languages() ?? [])
   })
-  void plugins.verifyAll()
+  plugins.startVerification()
   lsp = new PluginHost(
     plugins,
     (d) => sendToMain('lsp:diagnostics', d),

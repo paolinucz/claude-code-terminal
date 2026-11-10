@@ -74,6 +74,18 @@ export class PluginManager {
   }
 
   /** X7: ricontrolla l'impronta dei file di ogni plugin (in background, all'avvio). */
+  private verification: Promise<void> = Promise.resolve()
+
+  /** Avvia la verifica dei plugin (impronta e dimensione dei file) e la ricorda: chi legge l'elenco aspetta che sia finita. */
+  startVerification(): void {
+    this.verification = this.verifyAll().catch((err) => console.warn('[plugin] verifica non riuscita', err))
+  }
+
+  /** Si risolve quando la verifica dei plugin è finita (gli stati «modificato» sono quelli veri). */
+  whenVerified(): Promise<void> {
+    return this.verification
+  }
+
   async verifyAll(): Promise<void> {
     for (const [id, p] of this.plugins) {
       const { hash } = await treeHash(this.pluginDir(id))
@@ -221,6 +233,10 @@ export class PluginManager {
       warnings.push(`Il plugin usa la versione ${manifest.apiVersion ?? '?'} della Plugin API, l'app la ${PLUGIN_API_VERSION}: potrebbe non funzionare.`)
     }
     if (!manifest.main && (manifest.languages ?? []).length) warnings.push('Il plugin non ha un adapter: dà solo la colorazione della sintassi.')
+    for (const old of manifest.replaces ?? []) {
+      const p = this.plugins.get(old)
+      if (p) warnings.push(`Sostituisce «${p.manifest.name}» (${old}), che verrà disinstallato: le tue impostazioni e i tuoi dati restano.`)
+    }
     const preview: PluginPreview = {
       token,
       file,
@@ -287,6 +303,13 @@ export class PluginManager {
       const now = new Date().toISOString()
       this.db.savePlugin({ id: m.id, version: m.version, manifest_json: JSON.stringify(m), enabled: 1, installed_at: now, package_hash: s.preview.packageHash, tree_hash: hash })
       this.plugins.set(m.id, { manifest: m, enabled: true, installedAt: now, packageHash: s.preview.packageHash, treeHash: hash, state: 'ok', size: await dirSize(target) })
+      // Plugin unificati in questo: i vecchi si tolgono (le impostazioni dell'utente stanno nell'app e restano).
+      for (const old of m.replaces ?? []) {
+        if (old === m.id || !this.plugins.has(old)) continue
+        onProgress({ pluginId: m.id, step: `Tolgo il plugin sostituito (${old})`, progress: 1 })
+        const r = await this.uninstall(old, beforeReplace)
+        if (!r.ok) console.warn(`[plugin ${m.id}] non ho potuto togliere ${old}: ${r.error}`)
+      }
       this.refreshRequirements()
       this.changed()
       onProgress({ pluginId: m.id, step: 'Installato', progress: 1, done: true })
@@ -351,6 +374,9 @@ function validate(m: PluginManifest): string[] {
     if (!v.id || !v.title || !rel(v.entry) || !/\.html?$/.test(v.entry) || (v.icon !== undefined && (!rel(v.icon) || !/\.svg$/.test(v.icon)))) {
       p.push(`voce della barra laterale non valida: ${v.id ?? '?'} (serve id, title, entry .html ed eventuale icon .svg dentro il pacchetto)`)
     }
+  }
+  if (m.replaces !== undefined && (!Array.isArray(m.replaces) || m.replaces.some((x) => typeof x !== 'string' || !ID_RE.test(x) || x === m.id))) {
+    p.push('«replaces» deve essere un elenco di id di altri plugin')
   }
   if (m.permissions !== undefined && (!Array.isArray(m.permissions) || m.permissions.some((x) => !(x in PLUGIN_PERMISSIONS)))) {
     p.push(`«permissions» deve essere un elenco di: ${Object.keys(PLUGIN_PERMISSIONS).join(', ')}`)

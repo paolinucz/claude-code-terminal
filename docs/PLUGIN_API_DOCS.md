@@ -51,6 +51,7 @@ Le pagine non hanno rete né accesso al sistema: per fare qualcosa chiamano l'ad
 | `id` | Minuscole, cifre, punti, trattini. Unico. |
 | `main` | Adapter `.mjs`/`.cjs`/`.js` dentro il pacchetto. Senza adapter il plugin può dare solo colorazione e pagine che non chiamano l'adapter. |
 | `apiVersion` | Versione della Plugin API implementata dall'adapter (oggi **1**). Se diversa, l'installazione avvisa. |
+| `replaces` | Id di plugin che questo sostituisce (per esempio dopo aver unificato due plugin): se sono installati si disinstallano dopo l'installazione di questo, con un avviso nell'anteprima. Le impostazioni dell'utente (`storage.settingsPrefixes`) restano. |
 | `requires` | Plugin che devono essere attivi; solo questi si possono chiamare con `app.plugin` (§5). |
 | `permissions` | Servizi sensibili usati dalle pagine e dall'adapter (§6). |
 | `activities` | Frasi per l'utente, mostrate prima dell'installazione. |
@@ -92,7 +93,7 @@ addEventListener('message', (e) => {
 parent.postMessage({ cct: 'ready' }, '*')   // dopo aver registrato i listener
 ```
 
-Esempi completi: `plugins/java/ui/packages.html` (vista a package), `plugins/java-dev/ui/run.html` (pannello con adapter e dialoghi propri).
+Esempi completi: `plugins/java/ui/packages.html` (vista a package), `plugins/java/ui/run.html` (pannello con adapter e dialoghi propri).
 
 ### 3.1 Pagina → app
 
@@ -148,7 +149,7 @@ Per applicare il tema: `for (const [k, v] of Object.entries(m.theme)) document.d
 ### 3.3 Vista alveare e pagine in finestra
 
 - **Alveare**: un pannello dell'app che mostra più terminali in un mosaico che si riorganizza da solo in base al numero di celle e alle dimensioni del pannello (celle simili a un terminale, senza spazi vuoti inutili). Ogni cella ha una testata con nome, stato (verde in esecuzione, grigio terminato, rosso uscito con errore), «Ferma» e «Ingrandisci»; si ingrandisce anche con il doppio clic sulla testata. Con una cella ingrandita le altre restano in esecuzione, nascoste, e si passa dall'una all'altra con le linguette in alto; «Mosaico» le rimette tutte. «Ferma tutti» chiude le sessioni. Il pannello non sopravvive al riavvio (le sessioni nemmeno). Lo apre il plugin con `terminal.hive` / `app.terminal.hive`; il plugin sceglie `key` (che l'app prefissa con l'id del plugin, così due plugin non si prendono il gruppo a vicenda) e l'elenco delle sessioni, e può aggiornarlo mentre le sessioni partono.
-- **Pagine in finestra** (`ui.openPage`): per interfacce che non entrano nella barra laterale (modali di configurazione, editor di preset…). La pagina è isolata come le altre, ha lo stesso protocollo e si chiude con `ui.close`, con Esc o con la X; un clic fuori non la chiude. L'app mostra sempre il nome del plugin nell'intestazione. Per far arrivare alla pagina aperta le novità, usa gli eventi dell'adapter (`app.emit`): li ricevono tutte le pagine aperte del plugin. Esempio: `plugins/java-dev/ui/combo.html` (avvio combo con trascinamento).
+- **Pagine in finestra** (`ui.openPage`): per interfacce che non entrano nella barra laterale (modali di configurazione, editor di preset…). La pagina è isolata come le altre, ha lo stesso protocollo e si chiude con `ui.close`, con Esc o con la X; un clic fuori non la chiude. L'app mostra sempre il nome del plugin nell'intestazione. Per far arrivare alla pagina aperta le novità, usa gli eventi dell'adapter (`app.emit`): li ricevono tutte le pagine aperte del plugin. Esempio: `plugins/java/ui/combo.html` (avvio combo con trascinamento).
 
 ## 4. Adapter: ciclo di vita e SDK
 
@@ -180,7 +181,7 @@ L'adapter parte quando serve (primo uso, un file del suo linguaggio, una chiamat
 | `app.plugin(idPlugin, metodo, parametri)` | Richiesta all'adapter di un plugin dichiarato in `requires` | no (ma serve `requires`) |
 | `app.editor.markers(path, [{line, kind, hint?, reveal?}])` / `clearMarkers()` | Segni nel margine dell'editor (`kind`: `breakpoint` `breakpoint-disabled` `stopped`); `reveal` apre il file alla riga | no (serve `editorGutter`) |
 
-Il clic nel margine arriva all'adapter come `call(<editorGutter.click>, {path, line})`. I tipi sono in `plugins/java-dev/src/cct-plugin-sdk.d.mts` (se scrivi l'adapter in TypeScript).
+Il clic nel margine arriva all'adapter come `call(<editorGutter.click>, {path, line})`. I tipi sono in `plugins/java/src/cct-plugin-sdk.d.mts` (se scrivi l'adapter in TypeScript).
 
 Gli eventi `app.notify`, `app.terminal.show` e `app.terminal.hive` viaggiano come eventi riservati (`$ui.notify`, `$terminal.show`, `$terminal.hive`) gestiti dall'app: non arrivano mai alle pagine.
 

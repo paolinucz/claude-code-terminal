@@ -1,8 +1,5 @@
 /** Java development pack: servizi, JDK, run configuration e debug (tipi condivisi tra processo principale e interfaccia). */
 
-/** Id del pacchetto che abilita tutto questo (pacchetto .ccplugin, richiede cct.java). */
-export const JAVA_PACK_ID = 'cct.java-dev'
-
 export type JavaBuild = 'maven' | 'gradle'
 export type JavaFramework = 'quarkus' | 'spring-boot' | 'plain'
 

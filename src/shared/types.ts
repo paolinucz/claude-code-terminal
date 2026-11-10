@@ -11,7 +11,7 @@ import type {
   SaveFileResult
 } from './files'
 import type { GutterMarkersUpdate, InstalledPlugin, PluginInstallProgress, PluginLanguageInfo, PluginPreview } from './plugins'
-import type { ApiCompletionList, ApiHover, ApiLocation, ApiPosition } from './pluginApi'
+import type { ApiCompletionList, ApiFileEdit, ApiHover, ApiLocation, ApiPosition } from './pluginApi'
 import type {
   ClaudeCliInfo,
   ClaudeEffort,
@@ -57,6 +57,28 @@ export interface WorkspaceState {
 }
 
 /** API esposta dal preload su `window.api`. Nel browser la sostituisce un'implementazione su localStorage. */
+/** Un elemento da spostare o copiare: percorso attuale e nuovo percorso completo. */
+export interface MoveItem {
+  from: string
+  to: string
+}
+
+export interface MovePrepareResult {
+  ok: boolean
+  error?: string
+  /** Destinazioni che esistono già. */
+  conflicts: string[]
+  /** Modifiche al codice proposte dai plugin (percorsi di prima dello spostamento). Vuote per le copie. */
+  edits: ApiFileEdit[]
+}
+
+export interface MoveResult {
+  ok: boolean
+  error?: string
+  /** File di codice modificati. */
+  edited: number
+}
+
 export interface AppApi {
   /** Dove vengono salvati i dati: 'sqlite' in Electron, 'localStorage' nel browser. */
   readonly backend: 'sqlite' | 'localStorage'
@@ -103,6 +125,13 @@ export interface AppApi {
     watch(root: string): void
     unwatch(root: string): void
     reveal(path: string): Promise<void>
+    /**
+     * Sposta, rinomina o copia (passo 1): controlla le operazioni e, per uno spostamento, chiede ai plugin le modifiche al
+     * codice che lo tengono coerente (package, import…). Non cambia niente sul disco.
+     */
+    prepareMove(root: string, items: MoveItem[], copy: boolean): Promise<MovePrepareResult>
+    /** Passo 2: applica le modifiche al codice e sposta/copia. Se qualcosa fallisce tutto torna com'era. */
+    move(root: string, items: MoveItem[], copy: boolean, replace: boolean, edits: ApiFileEdit[]): Promise<MoveResult>
     onChanged(cb: (root: string, paths: string[]) => void): () => void
   }
   /** Language server dell'editor (F2, F3), forniti dai plugin. Il processo principale sceglie i server dal file. */
@@ -132,6 +161,8 @@ export interface AppApi {
     uninstall(id: string): Promise<{ ok: boolean; error?: string }>
     onChanged(cb: (list: InstalledPlugin[], languages: PluginLanguageInfo[]) => void): () => void
     onProgress(cb: (p: PluginInstallProgress) => void): () => void
+    /** Avvia in anticipo gli adapter dei plugin con interfaccia; restituisce quanti sono pronti. */
+    warm(): Promise<number>
     /** Una pagina del plugin chiama l'adapter del proprio plugin (contributi). */
     call(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown>
     /** Eventi mandati dall'adapter di un plugin alle sue pagine. */

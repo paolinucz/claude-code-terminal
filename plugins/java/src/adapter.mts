@@ -1,12 +1,15 @@
-// Adapter del Java development pack (cct.java-dev): la logica di Java che non sta nell'app ma nel plugin.
-// Servizi Maven e Gradle, JDK, run configuration, debug (java-debug dentro jdtls) e importazione da IntelliJ.
-// L'app gli dà solo impostazioni, terminali, eventi per le sue pagine e la richiesta al language server (plugin cct.java).
-import { dirname } from 'node:path'
-import { runAdapter, type AdapterApp, type GutterMarkerOut } from './cct-plugin-sdk.mjs'
+// Adapter del plugin Java (cct.java): un solo processo con tutto ciò che riguarda Java, e l'app non ne sa niente.
+// - language server (jdtls): completamento, errori, importazione Maven e Gradle, con il JDK del plugin;
+// - motore di esecuzione: servizi Maven/Gradle, JDK, run configuration, combo, debug (java-debug dentro jdtls),
+//   importazione da IntelliJ.
+// Il motore parla con jdtls direttamente (stesso processo), non più da un plugin all'altro.
+// L'app gli dà solo impostazioni, terminali, eventi per le sue pagine e l'apertura di indirizzi.
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { lspAdapter, type AdapterApp, type AdapterContext, type GutterMarkerOut, type LspBridge } from './cct-plugin-sdk.mjs'
 import { JavaDevService } from './JavaDevService.mts'
 import type { Combo, ComboStep, DebugState, JavaBreakpoint, RunConfig } from './types.mts'
 
-const LANGUAGE_SERVER = 'cct.java'
 /** Impostazioni del plugin: tutte con il prefisso «java.» dichiarato nel manifest (i dati già salvati restano). */
 const KEYS = ['java.runConfigs', 'java.defaultJdk', 'java.serviceJdk', 'java.serviceSettings', 'java.combos', 'java.breakpoints']
 
@@ -63,11 +66,10 @@ async function toggleBreakpoint(file: string, line: number): Promise<void> {
   app.emit('breakpoints', breakpoints())
 }
 
-runAdapter({
-  async initialize(ctx, a) {
-    app = a
+/** Avvia il motore di esecuzione (chiamato dall'estensione dell'adapter LSP, con il ponte verso jdtls). */
+async function startService(ctx: AdapterContext, lsp: LspBridge): Promise<void> {
     for (const k of KEYS) cache.set(k, await app.settings.get(k).catch(() => null))
-    // I JDK scaricati stanno in <dati dell'app>/jdks (come prima del plugin): i dati del plugin sono <dati>/plugin-data/<id>.
+    // I JDK scaricati stanno in <dati dell'app>/jdks; i dati del plugin sono <dati>/plugin-data/<id>.
     const userData = dirname(dirname(ctx.plugin.dataDir))
     svc = new JavaDevService({
       getSetting: (k) => cache.get(k) ?? undefined,
@@ -78,7 +80,7 @@ runAdapter({
       userDataDir: userData,
       packDataDir: () => ctx.plugin.dataDir,
       packActive: () => true,
-      lsp: (method, params) => app.plugin(LANGUAGE_SERVER, method, params),
+      lsp: (method, params) => lsp.call(method, params),
       createTask: (req) => app.session.create({ ...req }),
       // Un programma lanciato da una run configuration va mostrato subito in un terminale: senza una vista la sessione
       // sparirebbe appena finisce e non si vedrebbero l'avvio, gli errori né i log. Le combo li raccolgono nell'alveare
@@ -97,10 +99,10 @@ runAdapter({
       emitState: () => app.emit('state', null)
     })
     paintMarkers()
-  },
+}
 
-  /** Richieste delle pagine del plugin (e clic nel margine dell'editor): un metodo per ogni funzione del servizio. */
-  async call(method, p) {
+/** Richieste delle pagine del plugin (e clic nel margine dell'editor): un metodo per ogni funzione del servizio. */
+async function dispatch(method: string, p: Record<string, any>): Promise<unknown> {
     switch (method) {
       case 'state': return svc.state(String(p.root ?? ''), Boolean(p.fresh))
       case 'setDefaultJdk': return svc.setDefaultJdk((p.id as string | null) ?? null)
@@ -140,10 +142,85 @@ runAdapter({
       case 'gutter.click': return toggleBreakpoint(String(p.path), Number(p.line))
       default: throw new Error(`Metodo non gestito: ${method}`)
     }
-  },
+}
 
-  shutdown() {
-    svc?.shutdown()
+// ---------------------------------------------------------------- language server (jdtls)
+
+/** Cosa porta il pacchetto nella sua cartella dei download: JDK completo, bundle java-debug, Lombok; più i JDK dell'utente. */
+function bundle(ctx: AdapterContext) {
+  const down = ctx.plugin.downloadsDir
+  const file = (...p: string[]) => (existsSync(join(down, ...p)) ? join(down, ...p) : null)
+  let runtimes: { name: string; path: string; default?: boolean }[] = []
+  try {
+    // I JDK dell'utente li scrive il motore di esecuzione in jdks.json (nella cartella dati del plugin), jdtls li legge all'avvio.
+    const raw = JSON.parse(readFileSync(join(ctx.plugin.dataDir, 'jdks.json'), 'utf8'))
+    runtimes = Array.isArray(raw) ? raw.filter((r) => r && r.name && r.path && existsSync(r.path)) : []
+  } catch {
+    // nessun elenco: jdtls usa il suo JDK
+  }
+  return { jdk: existsSync(join(down, 'jdk', 'bin', 'java.exe')) ? join(down, 'jdk') : null, debug: file('debug', 'java-debug.jar'), lombok: file('lombok', 'lombok.jar'), runtimes }
+}
+
+const settingsFor = (b: ReturnType<typeof bundle>) => ({
+  java: {
+    import: { maven: { enabled: true }, gradle: { enabled: true } },
+    ...(b.runtimes.length ? { configuration: { runtimes: b.runtimes } } : {})
+  }
+})
+
+function launcher(ctx: AdapterContext): string {
+  const dir = join(ctx.plugin.downloadsDir, 'jdtls', 'plugins')
+  const jar = readdirSync(dir).find((f) => /^org\.eclipse\.equinox\.launcher_.*\.jar$/.test(f))
+  if (!jar) throw new Error('jar di avvio di jdtls non trovato: reinstalla il plugin Java.')
+  return join(dir, jar)
+}
+
+// Particolarità di jdtls gestite qui: il jar di avvio ha la versione nel nome; una cartella «-data» per progetto (cache
+// dell'importazione Maven/Gradle); la notifica propria «language/status» mostra l'avanzamento dell'importazione.
+lspAdapter({
+  id: 'jdtls',
+  name: 'Eclipse JDT Language Server',
+  rootMarkers: ['pom.xml', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts', '.project', '.git'],
+  rootStrategy: 'outermost',
+  server: (ctx: any, root: string) => {
+    const b = bundle(ctx)
+    // JDK completo del plugin (jdtls ha bisogno di jdk.jdi per il debug, che un JRE non ha) e Lombok come agente.
+    const rt = b.jdk ? { command: join(b.jdk, 'bin', 'java.exe'), args: ['-Djavax.net.ssl.trustStoreType=Windows-ROOT'] } : null
+    const args = [
+      ...(b.lombok ? [`-javaagent:${b.lombok}`] : []),
+      '-Declipse.application=org.eclipse.jdt.ls.core.id1',
+      '-Dosgi.bundles.defaultStartLevel=4',
+      '-Declipse.product=org.eclipse.jdt.ls.core.product',
+      '-Dlog.level=WARNING',
+      '-Xms256m',
+      '-Xmx1G',
+      '--add-modules=ALL-SYSTEM',
+      '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+      '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
+      '-jar', launcher(ctx),
+      // config_win contiene config.ini; jdtls ci scrive le sue cache (cartella dei download, esclusa dall'impronta).
+      '-configuration', join(ctx.plugin.downloadsDir, 'jdtls', 'config_win'),
+      '-data', join(ctx.dataDirFor(root), 'workspace')
+    ]
+    return rt ? { command: rt.command, args: [...rt.args, ...args] } : ctx.runtime('java', args)
+  },
+  initializationOptions: (ctx: any) => {
+    const b = bundle(ctx)
+    return { settings: settingsFor(b), bundles: b.debug ? [b.debug] : [] }
+  },
+  settings: (ctx: any) => settingsFor(bundle(ctx)),
+  onNotification: {
+    'language/status': (p: any, server: any) => server.setMessage(p?.message),
+    'language/progressReport': (p: any, server: any) => p?.status && server.setMessage(p.status)
+  },
+  // Il motore di esecuzione sta nello stesso processo: parla con jdtls tramite il ponte che l'SDK gli dà.
+  extend: (ctx: AdapterContext, a: AdapterApp, lsp: LspBridge) => {
+    app = a
+    return {
+      initialize: () => startService(ctx, lsp),
+      call: (method: string, p: Record<string, any>) => dispatch(method, p),
+      shutdown: () => svc?.shutdown()
+    }
   }
 })
 

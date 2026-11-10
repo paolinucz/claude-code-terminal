@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { IDockviewPanelProps } from 'dockview-react'
-import { AArrowDown, AArrowUp, ChevronDown, GitBranch, Layers, MessagesSquare, MoreHorizontal, Power, RotateCcw, SquareTerminal } from 'lucide-react'
+import { AArrowDown, AArrowUp, ChevronDown, GitBranch, Layers, MessagesSquare, MoreHorizontal, Power, RotateCcw, Square, SquareTerminal } from 'lucide-react'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, useTerminalSettings } from '@/state/terminalSettings'
 import { CLAUDE_EFFORTS, CLAUDE_MODELS, type SessionInfo } from '@shared/sessions'
 import { api } from '@/lib/api'
@@ -349,6 +349,17 @@ function StatusBar({ session, graphic, onToggleGraphic }: { session: SessionInfo
           className={cn('ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 hover:bg-border hover:text-foreground', graphic ? 'bg-border text-foreground' : 'text-text-muted')}
         >
           {graphic ? <SquareTerminal size={12} /> : <MessagesSquare size={12} />} {graphic ? 'Terminale' : 'Vista grafica'}
+        </button>
+      )}
+      {/* Programma lanciato da una run configuration (anche in debug): si interrompe con un clic, senza passare dal menu. */}
+      {session.kind === 'task' && live && (
+        <button
+          type="button"
+          onClick={() => void api.sessions.kill(session.id)}
+          title="Interrompe l'esecuzione (e il debug, se è in debug)"
+          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-md bg-danger/15 px-2 font-sans text-[11px] font-semibold text-danger transition-colors hover:bg-danger/25"
+        >
+          <Square size={10} fill="currentColor" /> Ferma
         </button>
       )}
       <FontSizeControl />

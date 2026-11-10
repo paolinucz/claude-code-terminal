@@ -12,10 +12,12 @@
   :root { --cct-bg:#09090b; --cct-surface:#18181b; --cct-surface-2:#1f1f23; --cct-border:#27272a; --cct-text:#fafafa; --cct-text-muted:#a1a1aa; --cct-text-faint:#71717a; --cct-accent:#e8875f; --cct-ok:#6fd39b; --cct-warn:#f5c46b; --cct-danger:#ff8a8a; --cct-info:#6ea8fe; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--cct-surface); color: var(--cct-text-muted); font: 12px/1.2 system-ui, sans-serif; overflow: hidden; }
-  #tree { height: 100%; overflow: auto; padding: 4px 0; }
+  #tree { height: 100%; overflow: auto; padding: 4px 0; outline: none; }
   .row { display: flex; align-items: center; gap: 4px; height: 22px; padding-right: 8px; cursor: pointer; white-space: nowrap; user-select: none; border-radius: 4px; }
   .row:hover { background: var(--cct-surface-2); color: var(--cct-text); }
   .row.bold { font-weight: 600; color: var(--cct-text); }
+  .row.sel { background: var(--cct-border); color: var(--cct-text); }
+  .row.drop { background: color-mix(in srgb, var(--cct-accent) 25%, transparent); outline: 1px solid var(--cct-accent); }
   .caret { width: 12px; flex: none; text-align: center; color: var(--cct-text-faint); font-size: 9px; }
   .ico { width: 14px; flex: none; text-align: center; }
   .ico.mod { color: var(--cct-accent); } .ico.pkg { color: var(--cct-info); } .ico.dir { color: var(--cct-text-faint); }
@@ -28,6 +30,8 @@
   #menu { position: fixed; z-index: 10; background: var(--cct-surface-2); border: 1px solid var(--cct-border); border-radius: 6px; padding: 4px; min-width: 170px; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: none; }
   #menu div { padding: 5px 10px; border-radius: 4px; cursor: pointer; color: var(--cct-text); }
   #menu div:hover { background: var(--cct-border); }
+  #menu hr { border: 0; border-top: 1px solid var(--cct-border); margin: 4px 0; }
+  #menu kbd { float: right; margin-left: 24px; color: var(--cct-text-faint); font: 10px ui-monospace, monospace; }
 </style>
 </head>
 <body>
@@ -40,6 +44,7 @@ let ctx = { win: false, cwd: '' }
 let decor = { git: {}, claude: [], errors: {} }
 let files = null
 let truncated = false
+let reloadTimer = 0
 const pending = new Map()
 let nextId = 1
 const rpc = (method, params) => new Promise((resolve, reject) => {
@@ -59,6 +64,10 @@ window.addEventListener('message', (e) => {
     ctx = { win: !!m.win, cwd: m.cwd }
     for (const [k, v] of Object.entries(m.theme || {})) if (v) document.documentElement.style.setProperty(k, v)
     if (cwdChanged) load()
+  } else if (m.cct === 'event' && m.event === 'app.file.changed') {
+    // Dopo uno spostamento o una rinomina l'albero si rilegge (con un po' di calma se i cambiamenti sono tanti).
+    clearTimeout(reloadTimer)
+    reloadTimer = setTimeout(load, 250)
   } else if (m.cct === 'state') {
     decor = m.decor || decor
     // I file cambiano (git, Claude): si rilegge l'elenco e si ridisegna.
@@ -138,6 +147,10 @@ const treeEl = document.getElementById('tree')
 const MARK = { M: 'var(--cct-warn)', A: 'var(--cct-ok)', D: 'var(--cct-danger)', R: 'var(--cct-info)', U: 'var(--cct-danger)' }
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const claude = () => new Set(decor.claude)
+// Selezione (percorsi relativi al progetto) e trascinamento.
+const sel = new Set()
+const isSel = (rel) => sel.has(rel)
+let dragPaths = []
 
 function render() {
   const top = treeEl.scrollTop
@@ -155,21 +168,24 @@ function render() {
   }
   const cl = claude()
   const out = []
-  const dirRow = (key, label, depth, icon, cls, bold) =>
-    `<div class="row${bold ? ' bold' : ''}" data-toggle="${esc(key)}" style="padding-left:${6 + depth * 14}px"><span class="caret">${open.has(key) ? '▼' : '▶'}</span><span class="ico ${cls}">${icon}</span><span class="name">${esc(label)}</span></div>`
+  // `path` (relativo al progetto): cartelle e package si possono selezionare, trascinare e rinominare (`movable`); le radici
+  // (Sorgenti, Risorse...) ricevono soltanto i rilasci.
+  const dirRow = (key, label, depth, icon, cls, bold, path, movable) =>
+    `<div class="row${bold ? ' bold' : ''}${path && isSel(path) ? ' sel' : ''}" data-toggle="${esc(key)}"${path ? ` data-path="${esc(path)}" data-dir="1"${movable ? ' data-movable="1" draggable="true"' : ''}` : ''} style="padding-left:${6 + depth * 14}px"><span class="caret">${open.has(key) ? '▼' : '▶'}</span><span class="ico ${cls}">${icon}</span><span class="name">${esc(label)}</span></div>`
   const fileRow = (rel, depth) => {
     const a = abs(rel)
     const k = norm(a)
     const mark = decor.git[k]
     const errs = decor.errors[k]
-    return `<div class="row" data-file="${esc(rel)}" title="${esc(rel)}" style="padding-left:${6 + depth * 14}px"><span class="caret"></span><span class="ico dir">·</span><span class="name"${mark ? ` style="color:${MARK[mark]}"` : ''}>${esc(rel.split('\\').pop())}</span><span class="tags">${cl.has(k) ? '<span class="tag-claude">Claude</span>' : ''}${errs ? `<span class="err">${errs}</span>` : ''}${mark ? `<span style="color:${MARK[mark]}">${mark}</span>` : ''}</span></div>`
+    return `<div class="row${isSel(rel) ? ' sel' : ''}" data-file="${esc(rel)}" data-path="${esc(rel)}" data-movable="1" draggable="true" title="${esc(rel)}" style="padding-left:${6 + depth * 14}px"><span class="caret"></span><span class="ico dir">·</span><span class="name"${mark ? ` style="color:${MARK[mark]}"` : ''}>${esc(rel.split('\\').pop())}</span><span class="tags">${cl.has(k) ? '<span class="tag-claude">Claude</span>' : ''}${errs ? `<span class="err">${errs}</span>` : ''}${mark ? `<span style="color:${MARK[mark]}">${mark}</span>` : ''}</span></div>`
   }
-  const tree = (prefix, n, depth, pkg) => {
+  // I `rel` dei nodi sono relativi al modulo: `modDir` li riporta alla cartella del progetto.
+  const tree = (prefix, n, depth, pkg, modDir) => {
     const dirs = [...n.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
     for (const d0 of pkg ? dirs.map(compact) : dirs) {
       const key = prefix + '/' + d0.rel
-      out.push(dirRow(key, d0.name, depth, pkg ? '◈' : '▪', pkg ? 'pkg' : 'dir'))
-      if (open.has(key)) tree(prefix, d0, depth + 1, pkg)
+      out.push(dirRow(key, d0.name, depth, pkg ? '◈' : '▪', pkg ? 'pkg' : 'dir', false, modDir ? modDir + '\\' + d0.rel : d0.rel, true))
+      if (open.has(key)) tree(prefix, d0, depth + 1, pkg, modDir)
     }
     for (const f of n.files.slice().sort((a, b) => a.localeCompare(b))) out.push(fileRow(f, depth))
   }
@@ -179,13 +195,13 @@ function render() {
     if (!open.has(mk)) continue
     for (const g of m.groups) {
       const gk = 'g:' + m.dir + '|' + g.id
-      out.push(dirRow(gk, g.label, 1, '▪', 'dir'))
-      if (open.has(gk)) tree(gk, g.tree, 2, g.kind === 'java')
+      out.push(dirRow(gk, g.label, 1, '▪', 'dir', false, m.dir ? m.dir + '\\' + g.tree.rel : g.tree.rel, false))
+      if (open.has(gk)) tree(gk, g.tree, 2, g.kind === 'java', m.dir)
     }
     if (m.other.dirs.size + m.other.files.length) {
       const ok = 'o:' + m.dir
       out.push(dirRow(ok, 'Altri file', 1, '▪', 'dir'))
-      if (open.has(ok)) tree(ok, m.other, 2, false)
+      if (open.has(ok)) tree(ok, m.other, 2, false, m.dir)
     }
   }
   if (truncated) out.push('<p class="warn">Progetto molto grande: l\'elenco è stato tagliato, alcuni file potrebbero mancare.</p>')
@@ -212,25 +228,114 @@ async function load() {
 // ---- Interazione ----
 const menu = document.getElementById('menu')
 const hideMenu = () => (menu.style.display = 'none')
+const parentRel = (rel) => rel.replace(/\\[^\\]*$/, '')
+const rowOf = (e) => e.target.closest && e.target.closest('.row')
+// Elementi su cui agiscono i comandi: la selezione, senza quelli che stanno dentro un'altra cartella selezionata.
+const selectedPaths = () => [...sel].filter((p) => ![...sel].some((q) => q !== p && p.startsWith(q + '\\')))
+const fail = (err) => rpc('ui.notify', { message: err.message, kind: 'error' }).catch(() => {})
+const rename = (rel, dir) => rpc('files.rename', { path: abs(rel), dir }).catch(fail)
+const moveDialog = (rels, copy) => rpc('files.move', { paths: rels.map(abs), copy }).catch(fail)
+
 treeEl.addEventListener('click', (e) => {
   hideMenu()
-  const row = e.target.closest('.row')
+  const row = rowOf(e)
   if (!row) return
-  if (row.dataset.toggle) { const k = row.dataset.toggle; open.has(k) ? open.delete(k) : open.add(k); render() }
+  const path = row.dataset.path
+  if (path && (e.ctrlKey || e.metaKey)) { sel.has(path) ? sel.delete(path) : sel.add(path); render(); return }
+  sel.clear()
+  if (path) sel.add(path)
+  if (row.dataset.toggle) { const k = row.dataset.toggle; open.has(k) ? open.delete(k) : open.add(k) }
   else if (row.dataset.file) rpc('editor.open', { path: abs(row.dataset.file) }).catch(() => {})
+  render()
 })
 treeEl.addEventListener('contextmenu', (e) => {
-  const row = e.target.closest('.row[data-file]')
+  const row = e.target.closest('.row[data-path]')
   if (!row) return
   e.preventDefault()
-  const p = abs(row.dataset.file)
-  const items = [['Apri', () => rpc('editor.open', { path: p })], ['Mostra nel file manager', () => rpc('files.reveal', { path: p })], ['Copia percorso', () => rpc('clipboard.copy', { text: p })]]
+  const rel = row.dataset.path
+  const dir = row.dataset.dir === '1'
+  const movable = row.dataset.movable === '1'
+  if (!sel.has(rel)) { sel.clear(); sel.add(rel); render() }
+  const many = selectedPaths()
+  const p = abs(rel)
+  const items = []
+  if (!dir) items.push(['Apri', () => rpc('editor.open', { path: p })])
+  items.push(['Mostra nel file manager', () => rpc('files.reveal', { path: p })])
+  if (movable) {
+    items.push(null)
+    if (many.length === 1) items.push(['Rinomina…', () => rename(rel, dir), 'F2'])
+    items.push(['Sposta in…', () => moveDialog(many, false), 'F6'], ['Copia in…', () => moveDialog(many, true), 'F5'])
+  }
+  items.push(null, ['Copia percorso', () => rpc('clipboard.copy', { text: p })], ['Copia percorso relativo', () => rpc('clipboard.copy', { text: rel.replace(/\\/g, '/') })])
   menu.innerHTML = ''
-  for (const [label, fn] of items) { const d = document.createElement('div'); d.textContent = label; d.onclick = () => { hideMenu(); fn().catch(() => {}) }; menu.appendChild(d) }
-  menu.style.left = Math.min(e.clientX, innerWidth - 180) + 'px'
-  menu.style.top = Math.min(e.clientY, innerHeight - 100) + 'px'
+  for (const it of items) {
+    if (!it) { menu.appendChild(document.createElement('hr')); continue }
+    const d = document.createElement('div')
+    d.textContent = it[0]
+    if (it[2]) { const k = document.createElement('kbd'); k.textContent = it[2]; d.appendChild(k) }
+    d.onclick = () => { hideMenu(); Promise.resolve(it[1]()).catch(fail) }
+    menu.appendChild(d)
+  }
+  menu.style.left = Math.min(e.clientX, innerWidth - 200) + 'px'
+  menu.style.top = Math.min(e.clientY, innerHeight - 24 * items.length - 16) + 'px'
   menu.style.display = 'block'
 })
+// Tastiera: F2 rinomina, F6 sposta, F5 copia (come in IntelliJ).
+treeEl.tabIndex = 0
+treeEl.addEventListener('keydown', (e) => {
+  const many = selectedPaths()
+  if (!many.length) return
+  if (e.key === 'F2' && many.length === 1) {
+    const row = treeEl.querySelector('.row.sel[data-movable="1"]')
+    if (row) rename(many[0], row.dataset.dir === '1')
+  } else if (e.key === 'F6' || e.key === 'F5') moveDialog(many, e.key === 'F5')
+  else return
+  e.preventDefault()
+})
+// Trascinamento: su una cartella o package si sposta lì (con Ctrl si copia); su un file, nella sua cartella.
+let dropRow = null
+let hoverTimer = 0
+const clearDrop = () => { clearTimeout(hoverTimer); if (dropRow) dropRow.classList.remove('drop'); dropRow = null }
+treeEl.addEventListener('dragstart', (e) => {
+  const row = rowOf(e)
+  if (!row || row.dataset.movable !== '1') return e.preventDefault()
+  if (!sel.has(row.dataset.path)) {
+    // Niente render() qui: ridisegnare l'albero durante dragstart annulla il trascinamento.
+    sel.clear(); sel.add(row.dataset.path)
+    treeEl.querySelectorAll('.row.sel').forEach((r) => r.classList.remove('sel'))
+    row.classList.add('sel')
+  }
+  dragPaths = selectedPaths()
+  e.dataTransfer.effectAllowed = 'copyMove'
+  e.dataTransfer.setData('text/plain', dragPaths.join('\n'))
+})
+treeEl.addEventListener('dragover', (e) => {
+  if (!dragPaths.length) return
+  const row = rowOf(e)
+  if (!row || !row.dataset.path) return clearDrop()
+  e.preventDefault()
+  e.dataTransfer.dropEffect = e.ctrlKey ? 'copy' : 'move'
+  const target = row.dataset.dir === '1' ? row : null
+  if (target === dropRow) return
+  clearDrop()
+  if (!target) return
+  dropRow = target
+  target.classList.add('drop')
+  // Una cartella chiusa si apre dopo un po', per arrivare alle sottocartelle.
+  const k = target.dataset.toggle
+  if (k && !open.has(k)) hoverTimer = setTimeout(() => { open.add(k); render() }, 700)
+})
+treeEl.addEventListener('drop', (e) => {
+  const row = rowOf(e)
+  const paths = dragPaths
+  dragPaths = []
+  clearDrop()
+  if (!row || !row.dataset.path || !paths.length) return
+  e.preventDefault()
+  const toDir = row.dataset.dir === '1' ? row.dataset.path : parentRel(row.dataset.path)
+  rpc('files.move', { paths: paths.map(abs), toDir: abs(toDir), copy: e.ctrlKey }).catch(fail)
+})
+treeEl.addEventListener('dragend', () => { dragPaths = []; clearDrop() })
 window.addEventListener('blur', hideMenu)
 parent.postMessage({ cct: 'ready' }, '*')
 </script>

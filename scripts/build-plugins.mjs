@@ -66,8 +66,11 @@ function npmInstall(dir, packages) {
 }
 
 function javaHome() {
-  const fromPlugin = join(process.env.APPDATA ?? '', 'Claude Code Terminal', 'plugins', 'cct.java', 'downloads', 'jre')
-  if (existsSync(join(fromPlugin, 'bin', 'java.exe'))) return fromPlugin
+  // Il plugin Java porta un JDK (le versioni 1.x portavano un JRE): va bene l'uno o l'altro.
+  for (const dir of ['jdk', 'jre']) {
+    const fromPlugin = join(process.env.APPDATA ?? '', 'Claude Code Terminal', 'plugins', 'cct.java', 'downloads', dir)
+    if (existsSync(join(fromPlugin, 'bin', 'java.exe'))) return fromPlugin
+  }
   const fromPhase6 = join(process.env.APPDATA ?? '', 'Claude Code Terminal', 'toolchains', 'java', 'jre')
   if (existsSync(join(fromPhase6, 'bin', 'java.exe'))) return fromPhase6
   if (process.env.JAVA_HOME && existsSync(join(process.env.JAVA_HOME, 'bin', 'java.exe'))) return process.env.JAVA_HOME
@@ -175,51 +178,20 @@ const PLUGINS = {
     })
   },
 
-  /** Java: JRE 25 Temurin + jdtls, scaricati all'installazione. Fornisce il runtime «java» agli altri plugin. */
+  /**
+   * Java: tutto in un solo plugin. Language server (jdtls), motore di esecuzione (Maven, Gradle, Quarkus, combo, debug con
+   * java-debug, importazione da IntelliJ) e le loro pagine. Porta un JDK Temurin 25 completo (jdtls ne ha bisogno per il debug:
+   * un JRE non ha jdk.jdi), jdtls, java-debug e Lombok. Fornisce il runtime «java» agli altri plugin (Maven e Gradle).
+   * Sostituisce i due plugin di prima (`cct.java-dev` si disinstalla da solo all'installazione di questo).
+   */
   async java() {
-    const jre = (await json('https://api.adoptium.net/v3/assets/latest/25/hotspot?os=windows&architecture=x64&image_type=jre&vendor=eclipse'))[0]
+    const jdk = (await json('https://api.adoptium.net/v3/assets/latest/25/hotspot?os=windows&architecture=x64&image_type=jdk&vendor=eclipse'))[0]
     const base = 'https://download.eclipse.org/jdtls/snapshots/'
     const name = (await text(base + 'latest.txt')).trim()
     const jdtlsSha = (await text(base + name + '.sha256')).trim().split(/\s+/)[0]
     const tgz = await download(base + name, join(WORK, 'cache', name))
     if (sha256(tgz) !== jdtlsSha) throw new Error('checksum di jdtls non valido')
     const version = name.match(/jdt-language-server-([\d.]+)/)?.[1] ?? '?'
-    const dir = staging('cct.java')
-    pack(dir, 'java', {
-      id: 'cct.java',
-      name: 'Java',
-      version: '1.2.0',
-      publisher: PUBLISHER,
-      license: 'EPL-2.0 (jdtls), GPLv2 con Classpath Exception (Temurin)',
-      description: `Eclipse JDT Language Server ${version} con un JRE ${jre.version.semver} (Eclipse Temurin). Importa i progetti Maven e Gradle. Fornisce Java ai plugin Maven e Gradle.`,
-      languages: [{ id: 'java', extensions: ['.java'], monaco: 'java' }],
-      // Vista «Package» dell'Esplora file (come IntelliJ): la pagina sta nel pacchetto, l'app non sa nulla di Java.
-      contributes: { explorerViews: [{ id: 'packages', title: 'Package', entry: 'ui/packages.html' }] },
-      downloads: [
-        { id: 'jre', url: jre.binary.package.link, sha256: jre.binary.package.checksum, size: jre.binary.package.size, type: 'zip', to: 'jre', strip: true },
-        { id: 'jdtls', url: base + name, sha256: jdtlsSha, size: readFileSync(tgz).length, type: 'tar.gz', to: 'jdtls' }
-      ],
-      provides: {
-        runtimes: {
-          // Certificati di Windows: con antivirus o proxy che ispezionano HTTPS, Maven e Gradle scaricano comunque.
-          java: { command: '${downloads}/jre/bin/java.exe', args: ['-Djavax.net.ssl.trustStoreType=Windows-ROOT'] }
-        }
-      },
-      activities: [
-        `Avvia Eclipse JDT Language Server ${version} con il JRE del plugin, uno per progetto (il più esterno con pom.xml o build.gradle)`,
-        'Importa i progetti Maven e Gradle: può scaricare le loro dipendenze da Maven Central',
-        'Aggiunge all\'Esplora file la vista «Package» (moduli, sorgenti, test e package compatti)',
-        'Tiene le sue cache nella cartella dati dell\'app'
-      ]
-    })
-  },
-
-  /**
-   * Java development pack: debugger Java (java-debug dentro jdtls), run configuration per Maven, Gradle e Quarkus,
-   * importazione da IntelliJ e Lombok. Porta un JDK Temurin completo per jdtls (il JRE di cct.java non ha jdk.jdi).
-   */
-  async javadev() {
-    const jdk = (await json('https://api.adoptium.net/v3/assets/latest/25/hotspot?os=windows&architecture=x64&image_type=jdk&vendor=eclipse'))[0]
     const latest = async (path) => (await text(`https://repo1.maven.org/maven2/${path}/maven-metadata.xml`)).match(/<release>([^<]+)<\/release>/)?.[1] ?? (await text(`https://repo1.maven.org/maven2/${path}/maven-metadata.xml`)).match(/<latest>([^<]+)<\/latest>/)[1]
     const debugVersion = await latest('com/microsoft/java/com.microsoft.java.debug.plugin')
     const lombokVersion = await latest('org/projectlombok/lombok')
@@ -227,39 +199,50 @@ const PLUGINS = {
     const lombokUrl = `https://repo1.maven.org/maven2/org/projectlombok/lombok/${lombokVersion}/lombok-${lombokVersion}.jar`
     const debugJar = await download(debugUrl, join(WORK, 'cache', `java-debug-${debugVersion}.jar`))
     const lombokJar = await download(lombokUrl, join(WORK, 'cache', `lombok-${lombokVersion}.jar`))
-    const dir = staging('cct.java-dev')
-    pack(dir, 'java-dev', {
-      id: 'cct.java-dev',
-      name: 'Java Development Pack',
-      version: '2.2.0',
+    const dir = staging('cct.java')
+    pack(dir, 'java', {
+      id: 'cct.java',
+      name: 'Java',
+      version: '2.0.0',
       publisher: PUBLISHER,
-      license: 'EPL-1.0 (java-debug), MIT (Lombok), GPLv2 con Classpath Exception (Temurin)',
-      description: `Debugger Java (java-debug ${debugVersion}) con run configuration per Maven, Gradle e Quarkus, importazione delle run configuration di IntelliJ IDEA e supporto a Lombok ${lombokVersion}. Porta un JDK Eclipse Temurin ${jdk.version.semver} per il language server.`,
-      requires: ['cct.java'],
-      languages: [],
-      // Tutta l'interfaccia è del plugin: l'app non contiene più nulla di Java (docs/PLUGIN_API_DOCS.md).
-      // I dati già salvati (run configuration, JDK, breakpoint) restano sotto «java.».
+      license: 'EPL-2.0 (jdtls), EPL-1.0 (java-debug), MIT (Lombok), GPLv2 con Classpath Exception (Temurin)',
+      description: `Tutto per Java in un plugin: Eclipse JDT Language Server ${version} (completamento, errori, importazione Maven e Gradle), esecuzione e debug (java-debug ${debugVersion}) con run configuration per Maven, Gradle e Quarkus, combo di più servizi in una vista ad alveare, scelta di JDK, Maven e Gradle per servizio, importazione da IntelliJ IDEA, Lombok ${lombokVersion} e un JDK Eclipse Temurin ${jdk.version.semver}. Fornisce Java ai plugin Maven e Gradle.`,
+      replaces: ['cct.java-dev'],
+      languages: [{ id: 'java', extensions: ['.java'], monaco: 'java' }],
+      // I dati già salvati (run configuration, JDK, breakpoint, combo) stanno sotto «java.» nelle impostazioni dell'app e restano.
       storage: { settingsPrefixes: ['java.'] },
-      permissions: ['terminal'],
+      permissions: ['terminal', 'files.write'],
       contributes: {
+        // Vista «Package» dell'Esplora file (come IntelliJ), pannello «Esegui e debug», margine dell'editor per i breakpoint.
+        explorerViews: [{ id: 'packages', title: 'Package', entry: 'ui/packages.html' }],
         sidebarViews: [{ id: 'run', title: 'Esegui e debug', entry: 'ui/run.html', icon: 'ui/run.svg', shortcut: 'Ctrl+Maiusc+D' }],
         editorGutter: { languages: ['java'], click: 'gutter.click' },
-        commands: [{ id: 'open', title: 'Apri Esegui e debug', keywords: 'java maven gradle quarkus debug breakpoint avvia', openView: 'run' }]
+        commands: [{ id: 'open', title: 'Apri Esegui e debug', keywords: 'java maven gradle quarkus debug breakpoint avvia combo', openView: 'run' }]
       },
       downloads: [
         { id: 'jdk', url: jdk.binary.package.link, sha256: jdk.binary.package.checksum, size: jdk.binary.package.size, type: 'zip', to: 'jdk', strip: true },
+        { id: 'jdtls', url: base + name, sha256: jdtlsSha, size: readFileSync(tgz).length, type: 'tar.gz', to: 'jdtls' },
         { id: 'debug', url: debugUrl, sha256: sha256(debugJar), size: readFileSync(debugJar).length, type: 'file', to: 'debug/java-debug.jar' },
         { id: 'lombok', url: lombokUrl, sha256: sha256(lombokJar), size: readFileSync(lombokJar).length, type: 'file', to: 'lombok/lombok.jar' }
       ],
+      provides: {
+        runtimes: {
+          // Certificati di Windows: con antivirus o proxy che ispezionano HTTPS, Maven e Gradle scaricano comunque.
+          java: { command: '${downloads}/jdk/bin/java.exe', args: ['-Djavax.net.ssl.trustStoreType=Windows-ROOT'] }
+        }
+      },
       activities: [
-        `Fa partire il language server Java con il JDK Temurin ${jdk.version.semver} del pack (completo, serve al debug) e con Lombok ${lombokVersion} come agente`,
+        `Avvia Eclipse JDT Language Server ${version} con il JDK Temurin ${jdk.version.semver} del plugin e Lombok ${lombokVersion} come agente, uno per progetto (il più esterno con pom.xml o build.gradle)`,
+        'Importa i progetti Maven e Gradle: può scaricare le loro dipendenze da Maven Central',
         `Carica java-debug ${debugVersion} nel language server per il debug (breakpoint, passo-passo, variabili)`,
-        'Aggiunge la vista «Esegui e debug»: avvia Maven, Gradle, Quarkus e applicazioni Java in un terminale, anche in debug',
-        'Combo: avvia più servizi insieme, nell\'ordine che scegli e con una pausa tra l\'uno e l\'altro, e ne mostra i terminali in una vista ad alveare (i preset si salvano)',
+        'Aggiunge la vista «Esegui e debug»: avvia Maven, Gradle, Quarkus e applicazioni Java in un terminale, anche in debug, e più servizi insieme (combo) in una vista ad alveare',
         'Per ogni servizio permette di scegliere il JDK, la versione di Maven o Gradle (altrimenti il wrapper del progetto) e le variabili d\'ambiente',
         'Scarica Maven (da Maven Central) e Gradle (da services.gradle.org) nella cartella dell\'app quando lo chiedi, verificando il checksum pubblicato',
         'Legge le run configuration di IntelliJ IDEA dalle cartelle .idea e .run del progetto (solo lettura)',
-        'Scarica Eclipse Temurin (JDK) da api.adoptium.net quando lo chiedi dal pannello, verificando il checksum'
+        'Scarica Eclipse Temurin (JDK) da api.adoptium.net quando lo chiedi dal pannello, verificando il checksum',
+        'Aggiunge all\'Esplora file la vista «Package» (moduli, sorgenti, test e package compatti)',
+        'Sostituisce il vecchio plugin «Java Development Pack», se è installato (le impostazioni restano)',
+        'Tiene le sue cache nella cartella dati dell\'app'
       ]
     })
   },

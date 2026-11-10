@@ -24,3 +24,10 @@ export interface AdapterHandlers {
   shutdown?(): Promise<void> | void
 }
 export function runAdapter(handlers: AdapterHandlers): AdapterApp
+
+/** Ponte verso il language server, per chi ha altro da fare nello stesso processo (`lspAdapter({ extend })`). */
+export interface LspBridge {
+  call(method: 'lsp/executeCommand' | 'lsp/state', params: Record<string, unknown>): Promise<unknown>
+}
+/** Adapter di un language server (vedi plugins/sdk/cct-plugin-sdk.mjs). Le opzioni sono libere: i tipi stanno nel commento dell'SDK. */
+export function lspAdapter(options: Record<string, any>): AdapterApp

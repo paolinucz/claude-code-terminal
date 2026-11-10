@@ -212,10 +212,15 @@ export function runAdapter(handlers) {
         hover: Boolean(handlers.hover),
         definition: Boolean(handlers.definition),
         diagnostics: true,
+        willRename: Boolean(handlers.willRename),
         ...caps
       }
     }
   })
+  // Refactoring allo spostamento/rinomina di file e cartelle (facoltativo). `willRename({renames: [{from, to}]})` risponde con
+  // `{files: [{path, edits: [{range, newText}]}]}` (percorsi di prima della rinomina, righe e colonne da 1); `didRename` avvisa a cose fatte.
+  conn.onRequest('refactor/willRename', async (p) => (handlers.willRename ? ((await handlers.willRename(p)) ?? { files: [] }) : { files: [] }))
+  conn.onNotification('refactor/didRename', (p) => handlers.didRename?.(p))
   conn.onRequest('completion', async (p) => (handlers.completion ? ((await handlers.completion(p)) ?? { items: [], incomplete: false }) : { items: [], incomplete: false }))
   conn.onRequest('hover', async (p) => (handlers.hover ? ((await handlers.hover(p)) ?? null) : null))
   conn.onRequest('definition', async (p) => (handlers.definition ? ((await handlers.definition(p)) ?? []) : []))
@@ -391,6 +396,9 @@ export const lsp = {
  * - onNotification     { metodo: (params, server) => … } per le notifiche proprie del server
  * - onRequest          { metodo: (params, server) => risultato } per le richieste proprie del server
  * - onReady(server)    dopo initialized
+ * - extend(ctx, app, lsp)  per un plugin che oltre al language server ha altro da fare (per esempio un motore di esecuzione):
+ *                      restituisce { initialize?, call?(method, params), shutdown? }. `call` riceve i metodi che non sono «lsp/…»;
+ *                      `lsp.call('lsp/executeCommand' | 'lsp/state', params)` parla con il server (anche dallo stesso processo).
  *
  * `server` (nei gestori) ha: root, conn, setMessage(testo), setStatus(stato, testo), log(livello, testo).
  */
@@ -403,6 +411,8 @@ export function lspAdapter(options) {
   let ctx
   let app
   let name = ''
+  /** Estensione del plugin (options.extend), se c'è. */
+  let extension = null
 
   function ensure(root) {
     const key = normPath(root)
@@ -500,11 +510,18 @@ export function lspAdapter(options) {
             publishDiagnostics: { relatedInformation: false, versionSupport: false },
             diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false }
           },
-          workspace: { configuration: true, workspaceFolders: true, diagnostics: { refreshSupport: true } },
+          workspace: {
+            configuration: true,
+            workspaceFolders: true,
+            diagnostics: { refreshSupport: true },
+            workspaceEdit: { documentChanges: true },
+            fileOperations: { willRename: true, didRename: true }
+          },
           window: { workDoneProgress: false }
         }
       })
       s.pull = Boolean(init?.capabilities?.diagnosticProvider)
+      s.fileOps = init?.capabilities?.workspace?.fileOperations ?? {}
       conn.notify('initialized', {})
       const settings = settingsFor(root)
       if (settings && Object.keys(settings).length) conn.notify('workspace/didChangeConfiguration', { settings })
@@ -596,12 +613,86 @@ export function lspAdapter(options) {
     }
   }
 
+  /** Richieste dell'app (o dell'estensione) al server: comandi e stato. */
+  async function lspCall(method, p) {
+    if (method !== 'lsp/executeCommand' && method !== 'lsp/state') throw new Error(`Metodo non gestito: ${method}`)
+    const root = p.root ? resolve(p.root) : null
+    if (!root) throw new Error('Manca la cartella del progetto.')
+    const under = [...servers.values()].filter((x) => x.alive && (normPath(root) === normPath(x.root) || normPath(root).startsWith(normPath(x.root) + '\\')))
+    let s = under.sort((a, b) => a.root.length - b.root.length)[0]
+    if (method === 'lsp/state') return s ? { state: s.state, root: s.root } : { state: 'stopped', root }
+    if (!s) {
+      const start = findRoot(join(root, 'pom.xml'), p.workspace, options.rootMarkers, options.rootStrategy)
+      s = ensure(start)
+    }
+    await s.ready
+    if (!s.alive) throw new Error('Il language server non è attivo.')
+    return await s.conn.request('workspace/executeCommand', { command: p.command, arguments: p.arguments ?? [] }, p.timeout ?? 60000)
+  }
+
+  const isUnder = (path, root) => normPath(path) === normPath(root) || normPath(path).startsWith(normPath(root) + '\\')
+
+  /** WorkspaceEdit (changes o documentChanges) → modifiche per file nel formato dell'app. Le operazioni su file si ignorano: le fa l'app. */
+  function toFileEdits(we) {
+    const byPath = new Map()
+    const add = (uri, edits) => {
+      if (!uri?.startsWith('file:') || !edits?.length) return
+      const path = fromUri(uri)
+      const k = normPath(path)
+      const cur = byPath.get(k) ?? { path, edits: [] }
+      cur.edits.push(...edits.map((e) => ({ range: lsp.toRange(e.range), newText: e.newText ?? '' })))
+      byPath.set(k, cur)
+    }
+    for (const [uri, edits] of Object.entries(we?.changes ?? {})) add(uri, edits)
+    for (const dc of we?.documentChanges ?? []) if (dc?.textDocument) add(dc.textDocument.uri, dc.edits)
+    return [...byPath.values()]
+  }
+
+  /** Server pronti il cui progetto contiene tutte le rinomine e che dichiarano di gestire l'operazione (`willRename`/`didRename`). */
+  const refactorServers = (renames, cap) =>
+    [...servers.values()].filter((s) => s.alive && s.state === 'ready' && s.fileOps?.[cap] && renames.every((r) => isUnder(r.from, s.root) || isUnder(r.to, s.root)))
+
+  const fileOpParams = (renames) => ({ files: renames.map((r) => ({ oldUri: toUri(r.from), newUri: toUri(r.to) })) })
+
   return runAdapter({
-    initialize(c, a) {
+    async initialize(c, a) {
       ctx = c
       app = a
       name = typeof options.name === 'function' ? options.name(ctx) : (options.name ?? id)
-      return { completion: true, hover: true, definition: true, diagnostics: true }
+      extension = options.extend?.(ctx, app, { call: lspCall }) ?? null
+      await extension?.initialize?.()
+      return { completion: true, hover: true, definition: true, diagnostics: true, willRename: true }
+    },
+
+    async willRename(p) {
+      const renames = Array.isArray(p?.renames) ? p.renames : []
+      const files = new Map()
+      for (const s of refactorServers(renames, 'willRename')) {
+        try {
+          const we = await s.conn.request('workspace/willRenameFiles', fileOpParams(renames), 30000)
+          for (const f of toFileEdits(we)) {
+            const k = normPath(f.path)
+            const cur = files.get(k)
+            if (cur) cur.edits.push(...f.edits)
+            else files.set(k, f)
+          }
+        } catch {
+          // il server non sa o non riesce: nessuna proposta da quel server
+        }
+      }
+      return { files: [...files.values()] }
+    },
+
+    async didRename(p) {
+      const renames = Array.isArray(p?.renames) ? p.renames : []
+      for (const s of refactorServers(renames, 'didRename')) s.conn.notify('workspace/didRenameFiles', fileOpParams(renames))
+      // I documenti spostati non sono più quelli aperti: l'app li riapre con i nuovi percorsi.
+      for (const [k, doc] of [...docs]) {
+        if (!renames.some((r) => isUnder(doc.path, r.from))) continue
+        docs.delete(k)
+        const s = doc.server
+        if (s?.alive && s.opened.delete(k)) s.conn.notify('textDocument/didClose', { textDocument: { uri: doc.uri } })
+      }
     },
 
     async open(p) {
@@ -671,22 +762,13 @@ export function lspAdapter(options) {
      * Si usa il server già avviato che contiene la cartella; se non c'è, si avvia quello della radice del progetto.
      */
     async call(method, p) {
-      if (method !== 'lsp/executeCommand' && method !== 'lsp/state') throw new Error(`Metodo non gestito: ${method}`)
-      const root = p.root ? resolve(p.root) : null
-      if (!root) throw new Error('Manca la cartella del progetto.')
-      const under = [...servers.values()].filter((x) => x.alive && (normPath(root) === normPath(x.root) || normPath(root).startsWith(normPath(x.root) + '\\')))
-      let s = under.sort((a, b) => a.root.length - b.root.length)[0]
-      if (method === 'lsp/state') return s ? { state: s.state, root: s.root } : { state: 'stopped', root }
-      if (!s) {
-        const start = findRoot(join(root, 'pom.xml'), p.workspace, options.rootMarkers, options.rootStrategy)
-        s = ensure(start)
-      }
-      await s.ready
-      if (!s.alive) throw new Error('Il language server non è attivo.')
-      return await s.conn.request('workspace/executeCommand', { command: p.command, arguments: p.arguments ?? [] }, p.timeout ?? 60000)
+      if (method === 'lsp/executeCommand' || method === 'lsp/state') return lspCall(method, p)
+      if (extension?.call) return extension.call(method, p)
+      throw new Error(`Metodo non gestito: ${method}`)
     },
 
     async shutdown() {
+      await extension?.shutdown?.()
       await Promise.all(
         [...servers.values()].map(async (s) => {
           if (!s.alive) return

@@ -3,6 +3,7 @@ import { IS_WIN, normPath, type GitMark } from '@shared/files'
 import { pluginUiUrl, type PluginPermission } from '@shared/plugins'
 import { api } from '@/lib/api'
 import { openFile } from '@/state/editor'
+import { moveInto, requestMove, requestRename, topLevel } from '@/state/fileOps'
 import { useAccent } from '@/state/accent'
 import { openPluginPage, pluginConfirm, pluginNotify, pluginPrompt, usePluginUi } from '@/state/pluginUi'
 import { useSessions } from '@/state/sessions'
@@ -90,6 +91,25 @@ export function PluginFrame({ pluginId, entry, cwd, decor, modalId, params }: { 
             need('files.write')
             if (!inProject(p.path)) return reply(false, undefined, `File fuori dal progetto (${cwdRef.current || 'nessuna cartella'})`)
             return reply(true, await api.files.write(p.path as string, String(p.text ?? ''), typeof p.expectedMtime === 'number' ? p.expectedMtime : undefined))
+          // Rinomina, sposta o copia file e cartelle del progetto (permesso `files.write`). L'app chiede il nome o la cartella con le
+          // sue finestre e, se un plugin sa aggiornare il codice (package, import), mostra cosa cambia prima di confermare.
+          case 'files.rename':
+            need('files.write')
+            if (!inProject(p.path) || normPath(p.path as string) === normPath(cwdRef.current)) return reply(false, undefined, `Elemento fuori dal progetto (${cwdRef.current || 'nessuna cartella'})`)
+            requestRename(p.path as string, cwdRef.current, p.dir === true)
+            return reply(true)
+          case 'files.move': {
+            need('files.write')
+            const paths = Array.isArray(p.paths) ? p.paths.filter((x): x is string => typeof x === 'string').slice(0, 200) : []
+            if (!paths.length || !paths.every((x) => inProject(x) && normPath(x) !== normPath(cwdRef.current))) return reply(false, undefined, `Elementi fuori dal progetto (${cwdRef.current || 'nessuna cartella'})`)
+            const copy = p.copy === true
+            if (typeof p.toDir === 'string') {
+              if (!inProject(p.toDir)) return reply(false, undefined, 'Destinazione fuori dal progetto')
+              // La pagina non aspetta la fine (può durare, con le conferme): l'esito lo mostra l'app.
+              void moveInto(topLevel(paths), p.toDir, cwdRef.current, copy)
+            } else requestMove(topLevel(paths), cwdRef.current, copy)
+            return reply(true)
+          }
           // Terminale di una sessione avviata dall'adapter (`app.session.create`).
           case 'terminal.show':
             need('terminal')

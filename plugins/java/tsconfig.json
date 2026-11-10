@@ -10,7 +10,7 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "rootDir": "src",
-    "outDir": "../../dist/plugin-build/java-dev",
+    "outDir": "../../dist/plugin-build/java",
     "noEmitOnError": true
   },
   "include": ["src/**/*.mts"]
