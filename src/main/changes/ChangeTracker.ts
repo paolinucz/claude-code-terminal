@@ -331,7 +331,7 @@ export class ChangeTracker {
     if (!list?.length) return null
     this.notices.delete(sessionId)
     return [
-      "L'utente ha esaminato e RIFIUTATO alcune tue modifiche nel pannello di revisione di Claude Code Terminal:",
+      "L'utente ha esaminato e RIFIUTATO alcune tue modifiche nel pannello di revisione di Magnolia:",
       ...list,
       'Considera questi file come sono ora su disco. Non riapplicare quelle modifiche senza chiedere prima.'
     ].join('\n')

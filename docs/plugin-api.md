@@ -1,6 +1,8 @@
 # CCT Plugin API · versione 1
 
-Specifica dell'interfaccia tra Claude Code Terminal e i plugin di linguaggio (requisiti X1–X9).
+> Per le pagine dei plugin, i contributi all'interfaccia, i servizi `app.*` e i permessi vedi [PLUGIN_API_DOCS.md](PLUGIN_API_DOCS.md). Questo file descrive il protocollo dell'adapter per i language server.
+
+Specifica dell'interfaccia tra Magnolia e i plugin di linguaggio (requisiti X1–X9).
 
 ## 1. Idea
 
@@ -38,7 +40,7 @@ server/ …            file del server inclusi nel pacchetto (facoltativi)
   "id": "cct.java",
   "name": "Java",
   "version": "1.0.0",
-  "publisher": "Claude Code Terminal",
+  "publisher": "Magnolia",
   "description": "…",
   "license": "EPL-2.0",
   "apiVersion": 1,

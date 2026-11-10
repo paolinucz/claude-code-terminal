@@ -3,7 +3,7 @@
  * (`@animate-ui/react/primitives/radix-ui`) con lo stile del tema dell'app.
  * Il resto dell'app importa solo da qui, così lo stile resta in un posto solo.
  */
-import { createContext, useContext, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 import {
   AlertDialog as AD,
@@ -127,6 +127,32 @@ export function AlertDialogCancel({ className, ...props }: ComponentProps<typeof
 
 /* ---------------- Toggle Group (scelte a segmenti: modello, effort, posizione) ---------------- */
 
+/**
+ * Animate UI disegna l'evidenziazione della voce attiva come una «superficie» a parte e ne legge colore e angoli una volta
+ * sola, quando il gruppo compare. I fogli non attivi restano montati ma nascosti (`display: none`): lì il gruppo misura 0 e
+ * gli angoli vengono letti come 0, cioè a 90° (e tali restano fino al primo clic, che le rilegge). Quando il gruppo
+ * diventa visibile si cambia per un istante una classe, che la libreria osserva: così rilegge l'aspetto con le misure vere.
+ */
+function useRelookWhenShown() {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let hidden = el.offsetWidth === 0
+    const watcher = new ResizeObserver(() => {
+      const nowHidden = el.offsetWidth === 0
+      if (hidden && !nowHidden) {
+        el.classList.add('cct-relook')
+        requestAnimationFrame(() => el.classList.remove('cct-relook'))
+      }
+      hidden = nowHidden
+    })
+    watcher.observe(el)
+    return () => watcher.disconnect()
+  }, [])
+  return ref
+}
+
 /** Gruppo di scelta singola. `value` vuoto non è ammesso: un clic sulla voce attiva non la deseleziona. */
 export function Segmented<T extends string>({
   value,
@@ -143,8 +169,10 @@ export function Segmented<T extends string>({
   className?: string
   size?: 'sm' | 'md'
 }) {
+  const group = useRelookWhenShown()
   return (
     <TG.ToggleGroup
+      ref={group}
       type="single"
       value={value}
       onValueChange={(v: string) => v && onChange(v as T)}
@@ -156,7 +184,7 @@ export function Segmented<T extends string>({
           key={o.id}
           value={o.id}
           className={cn(
-            'flex-1 rounded-md px-2.5 font-medium text-text-muted transition-colors hover:text-foreground data-[state=on]:bg-brand data-[state=on]:font-semibold data-[state=on]:text-on-brand',
+            'cct-seg flex-1 rounded-md px-2.5 font-medium text-text-muted transition-colors hover:text-foreground data-[state=on]:bg-brand data-[state=on]:font-semibold data-[state=on]:text-on-brand',
             size === 'sm' ? 'h-7 text-[12px]' : 'h-8 text-[13px]'
           )}
         >

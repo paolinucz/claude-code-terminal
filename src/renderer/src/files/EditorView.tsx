@@ -8,8 +8,6 @@ import { MarkdownView } from '@/docs/MarkdownView'
 import { renderMarkdown } from '@/docs/markdown'
 import { useExplainSettings } from '@/state/explain'
 import { useSnippetExplain } from '@/state/snippetExplain'
-import { breakpointsOf, useJavaDev } from '@/state/javaDev'
-import { stoppedLineIn } from '@/state/javaFollow'
 import { usePluginGutter } from '@/state/pluginGutter'
 import { normPath } from '@shared/files'
 import { api } from '@/lib/api'
@@ -155,7 +153,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
         detectIndentation: true,
         fixedOverflowWidgets: true,
         // Margine per i segni dei plugin (breakpoint, riga fermata) se un plugin li chiede per questo linguaggio.
-        glyphMargin: Boolean(gutter) || /\.java$/i.test(filePath)
+        glyphMargin: Boolean(gutter)
       })
       editorRef.current = editor
       if (gutter) {
@@ -179,34 +177,6 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
             if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position) {
               void api.plugins.call(gutter.pluginId, gutter.click, { path: filePath, line: e.target.position.lineNumber }).catch(() => {})
             }
-          })
-        )
-      } else if (/\.java$/i.test(filePath)) {
-        // Breakpoint (clic nel margine) e riga in cui il programma è fermo.
-        const marks = editor.createDecorationsCollection()
-        const paint = () => {
-          const st = useJavaDev.getState()
-          const k = normPath(filePath)
-          const live = st.debug.status === 'running' || st.debug.status === 'paused'
-          const verifiedKey = Object.keys(st.debug.verified).find((f) => normPath(f) === k)
-          const ok = verifiedKey ? new Set(st.debug.verified[verifiedKey]) : null
-          const stop = stoppedLineIn(filePath, normPath)
-          marks.set([
-            ...breakpointsOf(st.breakpoints, filePath).list.map((b) => ({
-              range: new monaco.Range(b.line, 1, b.line, 1),
-              options: {
-                glyphMarginClassName: !b.enabled || (live && ok && !ok.has(b.line)) ? 'cct-bp cct-bp-off' : 'cct-bp',
-                glyphMarginHoverMessage: { value: live && ok && !ok.has(b.line) ? 'Breakpoint non verificato dal debugger' : 'Breakpoint' }
-              }
-            })),
-            ...(stop ? [{ range: new monaco.Range(stop, 1, stop, 1), options: { isWholeLine: true, className: 'cct-debug-line', glyphMarginClassName: 'cct-debug-arrow' } }] : [])
-          ])
-        }
-        paint()
-        subs.push({ dispose: useJavaDev.subscribe(paint) })
-        subs.push(
-          editor.onMouseDown((e) => {
-            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position) useJavaDev.getState().toggleBreakpoint(filePath, e.target.position.lineNumber)
           })
         )
       }

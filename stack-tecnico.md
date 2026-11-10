@@ -1,4 +1,4 @@
-# Claude Code Terminal – Proposta di stack tecnico
+# Magnolia – Proposta di stack tecnico
 
 Versione 0.4 · 7 novembre 2026 · approvata (interfaccia in React) · aggiornata con la fase 8 (verso la 1.0)
 
@@ -190,4 +190,4 @@ Fase 8, cosa contiene:
 - [x] Aggiornamenti automatici sin dalla 1.0: sì, con GitHub Releases (fase 8).
 - [ ] Account e nome del repository GitHub che ospita le release (serve per attivare gli aggiornamenti nell'installer).
 - [x] Icona dell'app: nuova icona in `build/` (exe, installer, finestre) e nella barra in alto (9 novembre 2026).
-- [ ] **Interfaccia dei plugin nel pacchetto** (come le estensioni di VS Code): decisa l'impostazione (iframe isolato con API a messaggi, permessi nel manifest, Java come primo plugin), ma non iniziata. Oggi la vista «Esegui e debug» sta nell'app e il pacchetto `cct.java-dev` porta motore e file (JDK, java-debug, Lombok). Vedi CLAUDE.md.
+- [x] **Interfaccia dei plugin nel pacchetto** (come le estensioni di VS Code): iframe isolato con API a messaggi, permessi nel manifest, servizi `app.*` per gli adapter. Java è il primo plugin convertito (nulla di Java nel core). Riferimento: docs/PLUGIN_API_DOCS.md. Da fare: CSS di base condiviso per le pagine, build dell'interfaccia (piccolo bundler), versione dell'API delle pagine.

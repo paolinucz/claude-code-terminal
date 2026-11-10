@@ -20,8 +20,9 @@ import { join, resolve } from 'node:path'
 const ROOT = resolve(import.meta.dirname, '..')
 const OUT = join(ROOT, 'dist', 'plugins')
 const WORK = join(tmpdir(), 'cct-plugin-build')
-const PUBLISHER = 'Claude Code Terminal'
+const PUBLISHER = 'Magnolia'
 const NPM = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 
 const log = (...a) => console.log('·', ...a)
 
@@ -80,7 +81,16 @@ function javaHome() {
 function pack(staging, source, manifest) {
   // `source` null = pacchetto senza adapter (per esempio il Java development pack: porta file e abilita funzioni dell'app).
   if (source) {
-    cpSync(join(ROOT, 'plugins', source, 'adapter.mjs'), join(staging, 'adapter.mjs'))
+    const srcDir = join(ROOT, 'plugins', source)
+    if (existsSync(join(srcDir, 'tsconfig.json'))) {
+      // Sorgenti TypeScript (.mts): si compilano in .mjs (outDir del tsconfig) e finiscono nella radice del pacchetto.
+      const outDir = join(ROOT, 'dist', 'plugin-build', source)
+      rmSync(outDir, { recursive: true, force: true })
+      execFileSync(NPX, ['tsc', '-p', join(srcDir, 'tsconfig.json')], { cwd: ROOT, stdio: 'inherit', shell: true })
+      cpSync(outDir, staging, { recursive: true })
+    } else {
+      cpSync(join(srcDir, 'adapter.mjs'), join(staging, 'adapter.mjs'))
+    }
     cpSync(join(ROOT, 'plugins', 'sdk', 'cct-plugin-sdk.mjs'), join(staging, 'cct-plugin-sdk.mjs'))
     // Pagine dell'interfaccia del plugin (contributi, docs/plugin-contributi.md): plugins/<nome>/ui → ui/ nel pacchetto.
     if (existsSync(join(ROOT, 'plugins', source, 'ui'))) cpSync(join(ROOT, 'plugins', source, 'ui'), join(staging, 'ui'), { recursive: true })
@@ -218,15 +228,24 @@ const PLUGINS = {
     const debugJar = await download(debugUrl, join(WORK, 'cache', `java-debug-${debugVersion}.jar`))
     const lombokJar = await download(lombokUrl, join(WORK, 'cache', `lombok-${lombokVersion}.jar`))
     const dir = staging('cct.java-dev')
-    pack(dir, null, {
+    pack(dir, 'java-dev', {
       id: 'cct.java-dev',
       name: 'Java Development Pack',
-      version: '1.0.0',
+      version: '2.0.0',
       publisher: PUBLISHER,
       license: 'EPL-1.0 (java-debug), MIT (Lombok), GPLv2 con Classpath Exception (Temurin)',
       description: `Debugger Java (java-debug ${debugVersion}) con run configuration per Maven, Gradle e Quarkus, importazione delle run configuration di IntelliJ IDEA e supporto a Lombok ${lombokVersion}. Porta un JDK Eclipse Temurin ${jdk.version.semver} per il language server.`,
       requires: ['cct.java'],
       languages: [],
+      // Tutta l'interfaccia è del plugin: l'app non contiene più nulla di Java (docs/PLUGIN_API_DOCS.md).
+      // I dati già salvati (run configuration, JDK, breakpoint) restano sotto «java.».
+      storage: { settingsPrefixes: ['java.'] },
+      permissions: ['terminal'],
+      contributes: {
+        sidebarViews: [{ id: 'run', title: 'Esegui e debug', entry: 'ui/run.html', icon: 'ui/run.svg', shortcut: 'Ctrl+Maiusc+D' }],
+        editorGutter: { languages: ['java'], click: 'gutter.click' },
+        commands: [{ id: 'open', title: 'Apri Esegui e debug', keywords: 'java maven gradle quarkus debug breakpoint avvia', openView: 'run' }]
+      },
       downloads: [
         { id: 'jdk', url: jdk.binary.package.link, sha256: jdk.binary.package.checksum, size: jdk.binary.package.size, type: 'zip', to: 'jdk', strip: true },
         { id: 'debug', url: debugUrl, sha256: sha256(debugJar), size: readFileSync(debugJar).length, type: 'file', to: 'debug/java-debug.jar' },

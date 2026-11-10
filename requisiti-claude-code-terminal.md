@@ -1,4 +1,4 @@
-# Claude Code Terminal – Requisiti funzionali
+# Magnolia – Requisiti funzionali
 
 Versione 0.4 · 7 novembre 2026 · Paolo Coletta
 

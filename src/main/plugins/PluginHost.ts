@@ -16,7 +16,7 @@ import {
   type LogNotification,
   type StatusNotification
 } from '@shared/pluginApi'
-import type { GutterMarker, GutterMarkersUpdate } from '@shared/plugins'
+import { HOST_EVENT_NOTIFY, HOST_EVENT_TERMINAL, type GutterMarker, type GutterMarkersUpdate } from '@shared/plugins'
 import type { AdapterSpec, PluginManager } from './PluginManager'
 
 /** Un adapter in esecuzione: un processo per plugin. */
@@ -193,6 +193,14 @@ export class PluginHost {
     host.conn.onNotification('editor/markers', (p: { path?: string | null; markers?: unknown }) => {
       const markers = Array.isArray(p?.markers) ? (p.markers as GutterMarker[]).filter((m) => m && Number.isInteger(m.line) && m.line > 0 && ['breakpoint', 'breakpoint-disabled', 'stopped'].includes(m.kind)) : []
       this.services?.markers({ pluginId: id, path: typeof p?.path === 'string' ? p.path : null, markers })
+    })
+    // Avvisi e terminali dall'adapter: l'interfaccia li gestisce come eventi riservati (`$…`), che non arrivano alle pagine.
+    host.conn.onNotification('ui/notify', (p: { message?: unknown; kind?: unknown }) => {
+      if (typeof p?.message !== 'string' || !p.message) return
+      this.services?.emit(id, HOST_EVENT_NOTIFY, { message: p.message.slice(0, 500), kind: ['info', 'ok', 'warn', 'error'].includes(String(p.kind)) ? p.kind : 'info' })
+    })
+    host.conn.onNotification('ui/terminal.show', (p: { sessionId?: unknown }) => {
+      if (typeof p?.sessionId === 'string' && p.sessionId) this.services?.emit(id, HOST_EVENT_TERMINAL, { sessionId: p.sessionId })
     })
     host.conn.onNotification('ui/event', (p: { event?: string; data?: unknown }) => {
       if (p && typeof p.event === 'string') this.services?.emit(id, p.event, p.data ?? null)

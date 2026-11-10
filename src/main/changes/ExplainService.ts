@@ -29,7 +29,7 @@ Regole:
 - CSS e JavaScript stanno nello stesso file. Nessuna risorsa esterna: niente librerie, font, immagini, rete.
 - Lingua: italiano. Pagina breve (circa 6 KB al massimo): cosa cambia in 2-4 frasi, perché conta, cosa controllare. Evidenzia le righe chiave del diff.
 - Animazioni leggere in CSS solo se aiutano a capire. JavaScript solo per interazioni semplici, per esempio mostrare o nascondere il dettaglio di un blocco.
-- Tema scuro con questi colori: sfondo #09090b, pannelli #18181b, bordi #27272a, testo #fafafa, testo secondario #a1a1aa, accento #e8875f, aggiunte #6fd39b, rimozioni #ff8a8a, avvisi #f5c46b. Font di sistema, e monospazio per il codice.`
+- Tema scuro con questi colori: sfondo #09090b, pannelli #18181b, bordi #27272a, testo #fafafa, testo secondario #a1a1aa, accento #3fb5c8, aggiunte #6fd39b, rimozioni #ff8a8a, avvisi #f5c46b. Font di sistema, e monospazio per il codice.`
 
 /** Istruzioni per «Spiega con Haiku» su righe selezionate: cosa fanno e che ruolo hanno nel file. */
 const SNIPPET_SYSTEM_PROMPT = `Spieghi a uno sviluppatore, in modo chiaro e visivo, alcune righe di codice che ha selezionato in un file.
@@ -42,7 +42,7 @@ Regole:
 - Solo il documento HTML: nessun testo fuori, nessun blocco markdown.
 - CSS e JavaScript nello stesso file. Nessuna risorsa esterna: niente librerie, font, immagini, rete.
 - Lingua: italiano. Pagina breve (circa 4 KB al massimo). Il codice citato in monospazio.
-- Tema scuro con questi colori: sfondo #09090b, pannelli #18181b, bordi #27272a, testo #fafafa, testo secondario #a1a1aa, accento #e8875f, aggiunte #6fd39b, rimozioni #ff8a8a, avvisi #f5c46b. Font di sistema.`
+- Tema scuro con questi colori: sfondo #09090b, pannelli #18181b, bordi #27272a, testo #fafafa, testo secondario #a1a1aa, accento #3fb5c8, aggiunte #6fd39b, rimozioni #ff8a8a, avvisi #f5c46b. Font di sistema.`
 
 /** Politica dell'iframe (O4): niente rete, niente frame, niente moduli; solo il suo stesso codice incorporato. */
 export const EXPLAIN_CSP =

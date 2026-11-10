@@ -18,7 +18,7 @@ monaco.editor.defineTheme('cct-dark', {
   inherit: true,
   rules: [
     { token: 'comment', foreground: '71717a', fontStyle: 'italic' },
-    { token: 'keyword', foreground: 'e8875f' },
+    { token: 'keyword', foreground: '3fb5c8' },
     { token: 'string', foreground: '6fd39b' },
     { token: 'number', foreground: 'f5c46b' },
     { token: 'type', foreground: '6ea8fe' }

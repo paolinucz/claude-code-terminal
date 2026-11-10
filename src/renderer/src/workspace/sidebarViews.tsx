@@ -1,14 +1,11 @@
 import { create } from 'zustand'
 import type { ReactNode } from 'react'
 import { FolderTree, Search } from 'lucide-react'
-import { FileIcon } from '@/lib/fileIcons'
 import { ExplorerView } from '@/files/ExplorerView'
 import { SearchView } from '@/files/SearchView'
-import { JavaView } from '@/java/JavaView'
-import { useJavaDev } from '@/state/javaDev'
 import { useMemo } from 'react'
 import { pluginUiUrl } from '@shared/plugins'
-import { PluginFrame } from '@/plugins/PluginFrame'
+import { EMPTY_DECOR, PluginFrame } from '@/plugins/PluginFrame'
 import { useEditor } from '@/state/editor'
 import { useSidebar } from '@/state/sidebar'
 
@@ -47,7 +44,6 @@ function PluginSidebarPage({ pluginId, entry }: { pluginId: string; entry: strin
   const cwd = useSidebar((s) => s.explorerCwd)
   return <PluginFrame pluginId={pluginId} entry={entry} cwd={cwd} decor={EMPTY_DECOR} />
 }
-const EMPTY_DECOR = { git: {}, claude: [], errors: {} }
 
 /** Viste che i plugin attivi aggiungono alla barra laterale (contributi `sidebarViews`). */
 export function usePluginSidebarViews(): SidebarView[] {
@@ -72,9 +68,6 @@ export function usePluginSidebarViews(): SidebarView[] {
 /** Viste in ordine: prima quelle dell'app, poi i widget. */
 export function useSidebarViews(): SidebarView[] {
   const extra = useExtraViews((s) => s.extra)
-  // «Esegui e debug» compare solo con il Java development pack installato e attivo.
-  const javaOn = useJavaDev((s) => s.state?.enabled === true)
-  const java: SidebarView[] = javaOn ? [{ id: 'java', title: 'Esegui e debug', icon: <FileIcon name="Main.java" size={24} />, shortcut: 'Ctrl+Maiusc+D', render: () => <JavaView /> }] : []
   const fromPlugins = usePluginSidebarViews()
-  return [...BUILTIN, ...java, ...fromPlugins, ...extra]
+  return [...BUILTIN, ...fromPlugins, ...extra]
 }

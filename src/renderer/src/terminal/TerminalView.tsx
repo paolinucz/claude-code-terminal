@@ -14,9 +14,9 @@ import { sessionHub } from './hub'
 const THEME: ITheme = {
   background: '#09090b',
   foreground: '#e4e4e7',
-  cursor: '#e8875f',
+  cursor: '#3fb5c8',
   cursorAccent: '#09090b',
-  selectionBackground: 'rgba(232, 135, 95, 0.30)',
+  selectionBackground: 'rgba(22, 130, 148, 0.40)',
   black: '#27272a',
   red: '#ff8a8a',
   green: '#6fd39b',

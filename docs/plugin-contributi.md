@@ -1,5 +1,7 @@
 # Contributi dei plugin all'interfaccia (CCT Plugin API v1.1)
 
+> Il riferimento completo e aggiornato dell'API (metodi delle pagine, eventi, servizi `app.*`, permessi) è [PLUGIN_API_DOCS.md](PLUGIN_API_DOCS.md). Questo documento tiene la storia e il piano per portare Java fuori dal core.
+
 Obiettivo: l'app non deve conoscere nessun linguaggio. Tutto ciò che è specifico di Java (e di qualsiasi altro linguaggio) sta nel plugin: l'app offre **punti di aggancio** e carica il codice del plugin solo se è installato e attivo. Un'app senza plugin Java non contiene nulla di Java.
 
 ## Come funziona
@@ -20,8 +22,8 @@ Un plugin dichiara nel `plugin.json` cosa aggiunge (`contributes`) e porta nel p
 | --- | --- | --- |
 | `explorerViews` | Vista alternativa dell'Esplora file, con un pulsante accanto a «File». | **Fatto** (plugin Java: vista «Package» come IntelliJ). |
 | `sidebarViews` | Voce della barra laterale: icona SVG del pacchetto + pagina; scorciatoia opzionale (es. `Ctrl+Maiusc+D`). | **Fatto** (infrastruttura; il pannello Java ci va nel passo 2). |
-| `commands` | Comandi nella palette (Ctrl+K). | Da fare. |
-| `settings` | Pagina di impostazioni del plugin. | Da fare. |
+| `commands` | Comandi nella palette (Ctrl+K): chiamano un metodo dell'adapter o aprono una vista. | **Fatto**. |
+| `settings` | Pagina di impostazioni del plugin, aperta dal pannello Plugin. | **Fatto**. |
 | servizi dell'adapter | La pagina chiama l'adapter del proprio plugin (`plugin.call`) e riceve eventi (`event`); l'adapter usa impostazioni, terminali e altri plugin dell'app (`host/…`). | **Fatto** (provato con un adapter vero). |
 | `editorGutter` | Margine dell'editor per i file di certi linguaggi: l'adapter decide i segni (`app.editor.markers`), il clic nel margine chiama un suo metodo. | **Fatto** (infrastruttura; a Java si collega nel passo 3). |
 
@@ -51,18 +53,11 @@ L'adapter gira in un processo Node separato (solo quando serve) e chiede all'app
 
 Esempio completo: `plugins/java/ui/packages.html`.
 
-## Cosa resta di Java nel core (da spostare)
+## Java fuori dal core (fatto)
 
-Piano a passi, ognuno rilasciabile da solo:
+Tutti i passi sono completati: vista a package (`cct.java`), infrastruttura (`sidebarViews`, `app.*`, `plugin.call`, `editorGutter`), pannello «Esegui e debug» come pagina del plugin Java Dev, logica (`src/main/java/*`) nell'adapter `plugins/java-dev/` (sorgenti `.mts` compilati dallo script di build), tipi dentro il plugin, handler `java:*`, `window.api.java` e `shared/java.ts` rimossi dal core. Il pacchetto `cct.java-dev` 2.0.0 non è più un interruttore: senza di lui l'app non contiene niente di Java.
 
-1. ✔ Vista a package → plugin Java (`explorerViews`).
-1b. ✔ Infrastruttura per i passi seguenti: `sidebarViews`, servizi `app.*` per gli adapter, `plugin.call` ed eventi verso le pagine, `editorGutter` (breakpoint e riga fermata). Il vecchio codice Java dell'editor resta attivo finché nessun plugin dichiara `editorGutter` per `java`.
-2. Pannello «Esegui e debug» (`JavaView`, `ConfigDialog`, `state/javaDev`, `javaFollow`) → `sidebarViews` + pagina del plugin Java Dev (JS senza React, come la vista a package). Il margine dell'editor è già pronto (`editorGutter`).
-3. Logica del processo principale (`src/main/java/*`: servizi Maven/Gradle, JDK, run configuration, DAP, import da IntelliJ) → adapter del Java development pack (`plugins/java-dev/`, sorgenti TypeScript compilati dallo script di build), con `app.settings`/`app.session`/`app.plugin`; via i ~20 handler `java:*` in `main/index.ts`, `preload` e `AppApi`. Da provare su Windows con un JDK vero: breakpoint, passo-passo e download dei JDK non si possono verificare su Linux.
-4. Tipi di `shared/java.ts` → dentro il plugin; l'app tiene solo il protocollo generico.
-5. Il pacchetto `cct.java-dev` non è più un interruttore (`packActive`): le funzioni esistono solo se il plugin è installato.
-
-Il codice di Java compare nel bundle dell'app finché non sono fatti i passi 2–4: è la ragione per cui l'app oggi pesa più del necessario.
+Da provare a mano su Windows con un JDK vero: breakpoint, passo-passo e download dei JDK con i pacchetti nuovi (l'adapter e i servizi dell'app sono provati, il debug completo con jdtls no).
 
 ## Sicurezza
 

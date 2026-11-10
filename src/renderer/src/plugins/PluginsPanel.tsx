@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { AlertTriangle, CheckCircle2, PackagePlus, Puzzle, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, PackagePlus, Puzzle, Settings, Trash2 } from 'lucide-react'
 import type { InstalledPlugin, PluginPreview } from '@shared/plugins'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui-kit'
+import { useSidebar } from '@/state/sidebar'
+import { EMPTY_DECOR, PluginFrame } from './PluginFrame'
 import { useEditor } from '@/state/editor'
 import { useWorkspace } from '@/state/workspace'
 import { formatBytes } from './format'
@@ -22,6 +25,8 @@ export function PluginsPanel() {
   const [preview, setPreview] = useState<PluginPreview | null>(null)
   const [error, setError] = useState('')
   const [removing, setRemoving] = useState<InstalledPlugin | null>(null)
+  const [configuring, setConfiguring] = useState<InstalledPlugin | null>(null)
+  const cwd = useSidebar((s) => s.explorerCwd)
 
   const importPackage = async () => {
     setError('')
@@ -130,10 +135,15 @@ export function PluginsPanel() {
                   ))}
                 {p.sizeBytes > 0 && <span>{formatBytes(p.sizeBytes)}</span>}
                 <span>installato {new Date(p.installedAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                {m.contributes?.settings && p.enabled && p.state === 'ok' && (
+                  <button type="button" onClick={() => setConfiguring(p)} className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-text-subtle hover:bg-border hover:text-foreground">
+                    <Settings size={12} /> Impostazioni
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setRemoving(p)}
-                  className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-text-subtle hover:bg-danger/10 hover:text-danger"
+                  className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-text-subtle hover:bg-danger/10 hover:text-danger', !(m.contributes?.settings && p.enabled && p.state === 'ok') && 'ml-auto')}
                 >
                   <Trash2 size={12} /> Disinstalla
                 </button>
@@ -153,6 +163,20 @@ export function PluginsPanel() {
           setPreview(null)
         }}
       />
+      {/* Pagina di impostazioni del plugin (contributo `settings`): sta in un iframe isolato come le altre. */}
+      <Dialog open={configuring !== null} onOpenChange={(o) => !o && setConfiguring(null)}>
+        <DialogContent className="flex h-[70vh] max-w-2xl flex-col">
+          <DialogHeader>
+            <DialogTitle>{configuring?.manifest.contributes?.settings?.title ?? `Impostazioni di ${configuring?.manifest.name ?? ''}`}</DialogTitle>
+            <DialogDescription>Plugin {configuring?.manifest.id}</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
+            {configuring?.manifest.contributes?.settings && (
+              <PluginFrame pluginId={configuring.manifest.id} entry={configuring.manifest.contributes.settings.entry} cwd={cwd} decor={EMPTY_DECOR} />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog
         open={removing !== null}
         title={`Disinstallare «${removing?.manifest.name ?? ''}»?`}

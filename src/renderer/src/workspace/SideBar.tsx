@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/cn'
-import { useJavaDev } from '@/state/javaDev'
 import { openMarkdownFind } from '@/docs/MarkdownView'
 import { SIDEBAR_MAX, SIDEBAR_MIN, useSidebar } from '@/state/sidebar'
 import { useSidebarViews } from './sidebarViews'
@@ -74,12 +73,6 @@ export function SideBarPanel() {
           useSidebar.getState().toggle(v.id)
           return
         }
-      }
-      // Ctrl+Maiusc+D: Esegui e debug (solo con il pack Java).
-      if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyD' && useJavaDev.getState().state?.enabled) {
-        e.preventDefault()
-        e.stopPropagation()
-        useSidebar.getState().toggle('java')
       }
       // Ctrl+Maiusc+F: ricerca nei file (anche dal terminale: non è un tasto della shell). Il testo selezionato diventa la ricerca.
       if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyF') {

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { basename, join, sep } from 'node:path'
 import { promisify } from 'node:util'
-import type { InstalledPlugin, PluginInstallProgress, PluginLanguageInfo, PluginManifest, PluginPreview } from '@shared/plugins'
+import { PLUGIN_PERMISSIONS, type InstalledPlugin, type PluginInstallProgress, type PluginLanguageInfo, type PluginManifest, type PluginPreview } from '@shared/plugins'
 import { PLUGIN_API_VERSION } from '@shared/pluginApi'
 import type { AppDb } from '../db'
 import { dirSize, downloadVerified, extract, fileSha256, TAR, treeHash } from './download'
@@ -352,6 +352,19 @@ function validate(m: PluginManifest): string[] {
       p.push(`voce della barra laterale non valida: ${v.id ?? '?'} (serve id, title, entry .html ed eventuale icon .svg dentro il pacchetto)`)
     }
   }
+  if (m.permissions !== undefined && (!Array.isArray(m.permissions) || m.permissions.some((x) => !(x in PLUGIN_PERMISSIONS)))) {
+    p.push(`«permissions» deve essere un elenco di: ${Object.keys(PLUGIN_PERMISSIONS).join(', ')}`)
+  }
+  const ids = new Set<string>()
+  for (const c of m.contributes?.commands ?? []) {
+    if (!c.id || !c.title || ids.has(c.id) || Boolean(c.method) === Boolean(c.openView)) {
+      p.push(`comando non valido: ${c.id ?? '?'} (serve id unico, title e uno solo tra method e openView)`)
+    }
+    ids.add(c.id)
+    if (c.openView && !(m.contributes?.sidebarViews ?? []).some((v) => v.id === c.openView)) p.push(`il comando ${c.id} apre una vista che non esiste: ${c.openView}`)
+  }
+  const st = m.contributes?.settings
+  if (st && (!rel(st.entry) || !/\.html?$/.test(st.entry))) p.push('«settings» richiede entry (.html dentro il pacchetto)')
   if (m.storage?.settingsPrefixes !== undefined && (!Array.isArray(m.storage.settingsPrefixes) || m.storage.settingsPrefixes.some((x) => typeof x !== 'string' || !/^[a-z][\w.-]*\.$/.test(x)))) {
     p.push('«storage.settingsPrefixes» deve essere un elenco di prefissi come «java.»')
   }

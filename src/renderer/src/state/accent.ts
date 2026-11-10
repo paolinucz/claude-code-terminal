@@ -2,10 +2,12 @@ import { create } from 'zustand'
 import { api } from '@/lib/api'
 
 const KEY = 'ui.accent'
-export const DEFAULT_ACCENT = '#e8875f'
+/** Ottanio: il blu-verde profondo del colore di base dell'app. */
+export const DEFAULT_ACCENT = '#168294'
 
 export const ACCENT_PRESETS = [
-  { name: 'Arancio', value: DEFAULT_ACCENT },
+  { name: 'Ottanio', value: DEFAULT_ACCENT },
+  { name: 'Arancio', value: '#e8875f' },
   { name: 'Rosso', value: '#f26d6d' },
   { name: 'Rosa', value: '#f472b6' },
   { name: 'Viola', value: '#a78bfa' },

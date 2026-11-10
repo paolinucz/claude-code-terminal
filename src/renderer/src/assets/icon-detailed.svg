@@ -1,42 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100">
 <defs>
 <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2A2A30"/><stop offset="1" stop-color="#121214"/></linearGradient>
-<linearGradient id="acc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EEA587"/><stop offset="1" stop-color="#E8875F"/></linearGradient>
+<linearGradient id="pf" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#0A4B55"/><stop offset="0.35" stop-color="#127580"/><stop offset="0.75" stop-color="#6FB7BB"/><stop offset="1" stop-color="#DDF1F0"/></linearGradient>
+<linearGradient id="pb" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#05343B"/><stop offset="0.45" stop-color="#0D5D66"/><stop offset="1" stop-color="#7FB9BC"/></linearGradient>
+<linearGradient id="bud" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8A7A6E"/><stop offset="1" stop-color="#4D4038"/></linearGradient>
+<radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#1B8F99" stop-opacity="0.2"/><stop offset="1" stop-color="#1B8F99" stop-opacity="0"/></radialGradient>
 </defs>
 <rect x="2" y="2" width="96" height="96" rx="22" fill="url(#bg)"/>
 <rect x="2.6" y="2.6" width="94.8" height="94.8" rx="21.4" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="1"/>
-<rect x="11" y="13" width="48" height="62" rx="7" fill="#09090B" stroke="#3F3F46" stroke-width="1"/>
-<rect x="11" y="13" width="48" height="9" rx="7" fill="#18181B"/>
-<rect x="11" y="18" width="48" height="4" fill="#18181B"/>
-<rect x="14.5" y="15.8" width="13" height="4" rx="2" fill="#E8875F"/>
-<rect x="29.5" y="15.8" width="9" height="4" rx="2" fill="#3F3F46"/>
-<rect x="40.5" y="15.8" width="7" height="4" rx="2" fill="#27272A"/>
-<polyline points="16,29 20.5,32.5 16,36" fill="none" stroke="#E8875F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="23.5" y="31.4" width="20" height="2.4" rx="1.2" fill="#D4D4D8"/>
-<rect x="16" y="40" width="9" height="2.2" rx="1.1" fill="#52525B"/>
-<rect x="27" y="40" width="22" height="2.2" rx="1.1" fill="#3F3F46"/>
-<rect x="16" y="45.5" width="30" height="2.4" rx="1.2" fill="#6FD39B" fill-opacity="0.85"/>
-<rect x="16" y="51" width="24" height="2.4" rx="1.2" fill="#FF8A8A" fill-opacity="0.7"/>
-<rect x="16" y="56.5" width="14" height="2.2" rx="1.1" fill="#3F3F46"/>
-<polyline points="16,62 20.5,65.5 16,69" fill="none" stroke="#E8875F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="23.5" y="63" width="3.2" height="5.2" rx="0.8" fill="#FAFAFA"/>
-<rect x="63" y="13" width="26" height="23" rx="6" fill="url(#acc)"/>
-<rect x="68" y="25" width="3.6" height="7" rx="1.2" fill="#1A0F0A" fill-opacity="0.85"/>
-<rect x="74.2" y="20" width="3.6" height="12" rx="1.2" fill="#1A0F0A" fill-opacity="0.85"/>
-<rect x="80.4" y="22.5" width="3.6" height="9.5" rx="1.2" fill="#1A0F0A" fill-opacity="0.85"/>
-<rect x="63" y="40" width="26" height="15" rx="5" fill="#27272A" stroke="#3F3F46" stroke-width="0.8"/>
-<rect x="67" y="44.5" width="11" height="6" rx="3" fill="#6FD39B"/>
-<circle cx="75" cy="47.5" r="2.3" fill="#FAFAFA"/>
-<rect x="80.5" y="46.4" width="5" height="2.2" rx="1.1" fill="#71717A"/>
-<rect x="11" y="79" width="14" height="7" rx="2.5" fill="#E8875F"/>
-<rect x="27.5" y="79" width="11" height="7" rx="2.5" fill="#3F3F46"/>
-<rect x="41" y="79" width="11" height="7" rx="2.5" fill="#27272A"/>
-<rect x="52.2" y="62.8" width="39" height="28" rx="6" fill="#000000" fill-opacity="0.45"/>
-<rect x="51" y="61" width="39" height="28" rx="6" fill="#18181B" stroke="#E8875F" stroke-width="1.2"/>
-<rect x="51.6" y="61.6" width="37.8" height="6.5" rx="5.4" fill="#27272A"/>
-<circle cx="56" cy="64.8" r="1.4" fill="#6EA8FE"/>
-<rect x="59.5" y="64" width="13" height="1.8" rx="0.9" fill="#A1A1AA"/>
-<polyline points="56,73 59.5,75.8 56,78.6" fill="none" stroke="#E8875F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="62" y="74.8" width="20" height="2" rx="1" fill="#D4D4D8"/>
-<rect x="56" y="81.5" width="14" height="2" rx="1" fill="#52525B"/>
+<g fill="none" stroke="#FFFFFF" stroke-opacity="0.045" stroke-width="0.8">
+<rect x="10" y="10" width="38" height="50" rx="6"/><rect x="52" y="10" width="38" height="24" rx="6"/><rect x="52" y="38" width="38" height="22" rx="6"/><rect x="10" y="64" width="80" height="26" rx="6"/>
+</g>
+<circle cx="50" cy="44" r="32" fill="url(#glow)"/>
+<!-- ramo -->
+<path d="M14 90 C26 84 38 76 48 70" fill="none" stroke="#5B4B42" stroke-width="3.2" stroke-linecap="round"/>
+<path d="M33 79 C40 79 46 82 52 86" fill="none" stroke="#5B4B42" stroke-width="2" stroke-linecap="round"/>
+<path d="M51.5 85.7 C53 82.5 57 80.5 60.5 81 C60 84.5 56.5 87 51.5 85.7Z" fill="url(#bud)"/>
+<path d="M53 85 C55.5 83.5 57.5 82.6 59.5 82.2" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="0.5" stroke-linecap="round"/>
+<g transform="translate(50 68)">
+<!-- petali posteriori -->
+<path transform="rotate(-40)" d="M0,0 C-9,-5 -12,-20 -9,-30 C-7,-37 6,-37 8,-30 C11,-20 9,-5 0,0Z" fill="url(#pb)"/>
+<path transform="rotate(40)" d="M0,0 C-9,-5 -11,-20 -8,-30 C-6,-37 7,-37 9,-30 C12,-20 9,-5 0,0Z" fill="url(#pb)"/>
+<path d="M0,0 C-10,-6 -13,-26 -9,-38 C-6,-46 6,-46 9,-38 C13,-26 10,-6 0,0Z" fill="url(#pb)"/>
+<!-- petali anteriori a coppa -->
+<path transform="rotate(-17)" d="M0,0 C-11,-5 -15,-23 -11,-35 C-8,-43 4,-44 7,-37 C10,-25 8,-6 0,0Z" fill="url(#pf)" stroke="#021E22" stroke-opacity="0.35" stroke-width="0.6"/>
+<path transform="rotate(17)" d="M0,0 C-8,-6 -10,-25 -7,-37 C-4,-44 8,-43 11,-35 C15,-23 11,-5 0,0Z" fill="url(#pf)" stroke="#021E22" stroke-opacity="0.35" stroke-width="0.6"/>
+<path d="M0,1.5 C-10,-4 -12,-20 -9,-29 C-6,-36 6,-36 9,-29 C12,-20 10,-4 0,1.5Z" fill="url(#pf)" stroke="#021E22" stroke-opacity="0.35" stroke-width="0.6"/>
+<path d="M0,-2 C-0.6,-10 -0.6,-20 0,-30" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="0.7" stroke-linecap="round"/>
+<path transform="rotate(-17)" d="M-2,-4 C-3,-14 -3.5,-26 -2,-36" fill="none" stroke="#FFFFFF" stroke-opacity="0.25" stroke-width="0.6" stroke-linecap="round"/>
+<path transform="rotate(17)" d="M2,-4 C3,-14 3.5,-26 2,-36" fill="none" stroke="#FFFFFF" stroke-opacity="0.25" stroke-width="0.6" stroke-linecap="round"/>
+<!-- calice -->
+<path d="M-6,1 C-4,5 4,5 6,1 C3,3 -3,3 -6,1Z" fill="#5B4B42"/>
+</g>
 </svg>

@@ -155,7 +155,8 @@ export class Connection {
  *
  * `app` serve per mandare all'app: app.diagnostics(path, source, items), app.status(s), app.log(level, message), e per
  * usare i servizi dell'app (Plugin API «host/…»): app.settings.get/set, app.session.create/kill/status,
- * app.plugin(idPlugin, metodo, parametri) verso un plugin richiesto, app.emit(evento, dati) verso le pagine del plugin.
+ * app.plugin(idPlugin, metodo, parametri) verso un plugin richiesto, app.emit(evento, dati) verso le pagine del plugin,
+ * app.notify(messaggio, tipo) per un avviso, app.terminal.show(idSessione) per mostrare il terminale di una sessione.
  */
 export function runAdapter(handlers) {
   // stdout è il canale del protocollo.
@@ -182,6 +183,10 @@ export function runAdapter(handlers) {
       markers: (path, markers) => conn.notify('editor/markers', { path, markers }),
       clearMarkers: () => conn.notify('editor/markers', { path: null, markers: [] })
     },
+    // Avviso nell'app (toast). `kind`: 'info' (predefinito), 'ok', 'warn', 'error'.
+    notify: (message, kind = 'info') => conn.notify('ui/notify', { message, kind }),
+    // Mostra in un pannello il terminale di una sessione avviata con `session.create` (serve il permesso `terminal`).
+    terminal: { show: (sessionId) => conn.notify('ui/terminal.show', { sessionId }) },
     /** Evento per le pagine di questo plugin (le mostra l'interfaccia): avanzamento, stato del debug… */
     emit: (event, data) => conn.notify('ui/event', { event, data })
   }
@@ -474,7 +479,7 @@ export function lspAdapter(options) {
       wire(s, conn)
       const init = await conn.request('initialize', {
         processId: process.pid,
-        clientInfo: { name: 'Claude Code Terminal' },
+        clientInfo: { name: 'Magnolia' },
         locale: ctx.locale,
         rootUri: toUri(root),
         rootPath: root,

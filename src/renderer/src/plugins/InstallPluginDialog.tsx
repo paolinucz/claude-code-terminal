@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, Download, FileCode, Server, ShieldCheck } from 'lucide-react'
-import type { PluginPreview } from '@shared/plugins'
+import { PLUGIN_PERMISSIONS, type PluginPreview } from '@shared/plugins'
 import { api } from '@/lib/api'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui-kit'
 import { useEditor } from '@/state/editor'
@@ -79,6 +79,16 @@ export function InstallPluginDialog({ preview, onClose }: { preview: PluginPrevi
                     Adapter <span className="font-mono text-[11px]">{preview.entry.main}</span> · Plugin API v{preview.entry.apiVersion}
                   </div>
                   <p className="text-text-faint">L'adapter e i language server girano come processi sul tuo PC, con i tuoi permessi: installa solo plugin di cui ti fidi.</p>
+                </Section>
+              )}
+
+              {(m.permissions ?? []).length > 0 && (
+                <Section icon={<ShieldCheck size={14} />} title="Permessi richiesti">
+                  <ul className="list-disc pl-4 text-text-muted">
+                    {(m.permissions ?? []).map((x) => (
+                      <li key={x}>{PLUGIN_PERMISSIONS[x] ?? x}</li>
+                    ))}
+                  </ul>
                 </Section>
               )}
 

@@ -36,7 +36,27 @@ export interface PluginManifest {
   storage?: { settingsPrefixes?: string[] }
   /** Cosa fa il plugin, in frasi per l'utente: si mostra prima dell'installazione (X3). */
   activities?: string[]
+  /** Servizi sensibili dell'app che le pagine e l'adapter del plugin possono usare; si mostrano prima dell'installazione. */
+  permissions?: PluginPermission[]
 }
+
+/**
+ * Permessi dei servizi sensibili (docs/PLUGIN_API_DOCS.md §6). Quello che non è qui (aprire un file nell'editor, avvisi,
+ * dialoghi, impostazioni del plugin, chiamate al proprio adapter) è sempre disponibile.
+ */
+export const PLUGIN_PERMISSIONS = {
+  terminal: 'Mostrare i terminali delle sessioni che avvia',
+  'files.read': 'Leggere i file del progetto aperto',
+  'files.write': 'Scrivere i file del progetto aperto'
+} as const
+export type PluginPermission = keyof typeof PLUGIN_PERMISSIONS
+
+/** Eventi che l'app manda alle pagine dei plugin (oltre a quelli dell'adapter): `{cct:'event', event, data}`. */
+export const APP_EVENTS = ['app.workspace', 'app.file.changed', 'app.session.exit'] as const
+
+/** Eventi riservati che l'adapter manda all'app tramite `app.notify` e `app.terminal.show`: non arrivano alle pagine. */
+export const HOST_EVENT_NOTIFY = '$ui.notify'
+export const HOST_EVENT_TERMINAL = '$terminal.show'
 
 /**
  * Contributi di un plugin all'interfaccia. L'app offre i punti di aggancio e non sa cosa ci sia dentro: la pagina
@@ -53,6 +73,33 @@ export interface PluginContributions {
   editorGutter?: PluginEditorGutter
   /** Voci della barra laterale (icona + pagina), per esempio «Esegui e debug» di Java. */
   sidebarViews?: PluginSidebarView[]
+  /** Comandi nella palette (Ctrl+K). */
+  commands?: PluginCommand[]
+  /** Pagina di impostazioni del plugin, aperta dal pannello Plugin. */
+  settings?: PluginSettingsPage
+}
+
+/**
+ * Comando del plugin nella palette. Fa una cosa sola: `method` chiama l'adapter (con `{command: id}`), `openView` apre una
+ * vista della barra laterale del plugin (id della vista).
+ */
+export interface PluginCommand {
+  /** Unico dentro il plugin. */
+  id: string
+  title: string
+  /** Parole in più per la ricerca. */
+  keywords?: string
+  /** Testo a destra nella palette (per esempio una scorciatoia). */
+  hint?: string
+  method?: string
+  openView?: string
+}
+
+export interface PluginSettingsPage {
+  /** Titolo della finestra (predefinito: «Impostazioni di <plugin>»). */
+  title?: string
+  /** Pagina HTML nel pacchetto. */
+  entry: string
 }
 
 /**

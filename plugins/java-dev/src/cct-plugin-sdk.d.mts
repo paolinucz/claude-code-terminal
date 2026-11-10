@@ -11,6 +11,8 @@ export interface AdapterApp {
   session: { create(request: Record<string, unknown>): Promise<{ id: string }>; kill(id: string): Promise<unknown>; status(id: string): Promise<string | null> }
   plugin(plugin: string, method: string, params?: Record<string, unknown>): Promise<unknown>
   emit(event: string, data: unknown): void
+  notify(message: string, kind?: 'info' | 'ok' | 'warn' | 'error'): void
+  terminal: { show(sessionId: string): void }
   editor: { markers(path: string, markers: GutterMarkerOut[]): void; clearMarkers(): void }
 }
 export interface AdapterContext {

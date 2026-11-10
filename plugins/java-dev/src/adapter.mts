@@ -79,7 +79,13 @@ runAdapter({
       packDataDir: () => ctx.plugin.dataDir,
       packActive: () => true,
       lsp: (method, params) => app.plugin(LANGUAGE_SERVER, method, params),
-      createTask: (req) => app.session.create({ ...req }),
+      // Il programma lanciato da una run configuration va mostrato subito in un terminale: senza una vista la sessione
+      // sparirebbe appena finisce e non si vedrebbero l'avvio, gli errori né i log (permesso `terminal`).
+      createTask: async (req) => {
+        const s = await app.session.create({ ...req })
+        app.terminal.show(s.id)
+        return s
+      },
       killSession: (id) => void app.session.kill(id).catch(() => {}),
       sessionStatus: async (id) => (await app.session.status(id)) ?? undefined,
       emitDebug: (s) => {

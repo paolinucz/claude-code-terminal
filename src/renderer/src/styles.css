@@ -24,9 +24,9 @@
   --cct-text-muted: #d4d4d8;
   --cct-text-subtle: #a1a1aa;
   --cct-text-faint: #71717a;
-  --cct-accent: #e8875f;
-  --cct-accent-soft: #f0a27a;
-  --cct-on-accent: #1a0f0a;
+  --cct-accent: #168294;
+  --cct-accent-soft: #459ba9;
+  --cct-on-accent: #ffffff;
   --cct-ok: #6fd39b;
   --cct-warn: #f5c46b;
   --cct-danger: #ff8a8a;
@@ -136,6 +136,47 @@
 .cct-bp-off { background: transparent; border: 1.5px solid #e5484d; box-sizing: border-box; }
 .cct-debug-line { background-color: color-mix(in srgb, var(--cct-warn) 22%, transparent); }
 .cct-debug-arrow { background: var(--cct-warn); clip-path: polygon(0 20%, 60% 20%, 60% 0, 100% 50%, 60% 100%, 60% 80%, 0 80%); width: 12px !important; height: 12px !important; margin: 4px 0 0 4px; }
+
+/*
+ * Tasti morbidi, in stile iOS: una luce appena accennata dall'alto, bordo senza contorni duri e un'ombra diffusa sotto.
+ * Le sfumature sono semitrasparenti sopra il colore già impostato (accento o grigio), quindi seguono qualsiasi colore
+ * d'accento e gli stati hover esistenti restano visibili. Al clic il tasto si riduce un poco, non si «abbassa».
+ * - primari: pulsanti con `bg-brand` e voce attiva dei segmenti (`.cct-seg`);
+ * - secondari: pulsanti con bordo (`border border-border`).
+ */
+@layer components {
+  :is(button, a, [role='button']).bg-brand:not(:disabled):not([aria-disabled='true']),
+  .cct-seg[data-state='on'] {
+    background-image: linear-gradient(180deg, rgb(255 255 255 / 0.14) 0%, rgb(255 255 255 / 0) 55%, rgb(0 0 0 / 0.07) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.2),
+      0 1px 2px rgb(0 0 0 / 0.28),
+      0 6px 14px -6px color-mix(in srgb, var(--cct-accent) 55%, transparent);
+    transition: filter 160ms ease, transform 120ms ease, box-shadow 160ms ease;
+  }
+  :is(button, a, [role='button']).bg-brand:not(:disabled):not([aria-disabled='true']):hover {
+    filter: brightness(1.07);
+  }
+  :is(button, a, [role='button']).bg-brand:not(:disabled):not([aria-disabled='true']):active {
+    transform: scale(0.98);
+    filter: brightness(0.94);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 1px 1px rgb(0 0 0 / 0.2);
+  }
+
+  button.border.border-border:not(:disabled) {
+    background-image: linear-gradient(180deg, rgb(255 255 255 / 0.04) 0%, rgb(255 255 255 / 0) 60%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.05),
+      0 1px 2px rgb(0 0 0 / 0.25);
+    transition: filter 160ms ease, transform 120ms ease, background-color 160ms ease;
+  }
+  button.border.border-border:not(:disabled):hover {
+    filter: brightness(1.12);
+  }
+  button.border.border-border:not(:disabled):active {
+    transform: scale(0.98);
+  }
+}
 
 /* La barra superiore fa da barra del titolo (finestra senza cornice). */
 .app-drag {

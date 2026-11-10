@@ -12,8 +12,6 @@ import { AppDb } from './db'
 import { SessionManager } from './sessions/SessionManager'
 import { HookServer } from './sessions/HookServer'
 import type { SearchOptions } from '@shared/search'
-import { JAVA_PACK_ID, type JavaBreakpoint, type RunConfig } from '@shared/java'
-import { JavaDevService } from './java/JavaDevService'
 import { contextMenuTemplate } from './contextMenuTemplate'
 import { ChangeTracker, fileReviewMessage } from './changes/ChangeTracker'
 import { PermissionsService } from './permissions/PermissionsService'
@@ -63,7 +61,6 @@ const files = new FileService((root, paths) => sendToMain('files:changed', root,
 /** Fase 6a: plugin di linguaggio e i loro language server (creati quando il database è pronto). */
 let plugins: PluginManager | null = null
 let lsp: PluginHost | null = null
-let javaDev: JavaDevService | null = null
 
 /** Ferma un plugin e quelli che lo richiedono (es. Java → Maven, Gradle: usano il suo runtime). */
 async function stopWithDependents(id: string): Promise<void> {
@@ -201,7 +198,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    title: 'Claude Code Terminal',
+    title: 'Magnolia',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -224,7 +221,7 @@ function createMainWindow(): BrowserWindow {
         overrideBrowserWindowOptions: {
           ...darkWindow,
           titleBarOverlay: { ...darkWindow.titleBarOverlay, height: 36 },
-          title: 'Claude Code Terminal – pannello staccato',
+          title: 'Magnolia – pannello staccato',
           minWidth: 320,
           minHeight: 200
         }
@@ -359,35 +356,6 @@ function registerIpc(store: AppDb): void {
     files.write(path, text, expectedMtime, force)
   )
   ipcMain.handle('files:gitStatus', (_e, dir: string) => files.gitStatus(dir))
-  // ---- Java development pack: servizi, JDK, run configuration, debug ----
-  const java = () => javaDev!
-  ipcMain.handle('java:state', (_e, root: string, fresh?: boolean) => java().state(String(root ?? ''), Boolean(fresh)))
-  ipcMain.handle('java:setDefaultJdk', (_e, id: string | null) => java().setDefaultJdk(id))
-  ipcMain.handle('java:setServiceJdk', (_e, root: string, id: string | null) => java().setServiceJdk(root, id))
-  ipcMain.handle('java:downloadJdk', (_e, major: number) => java().downloadJdk(Number(major)))
-  ipcMain.handle('java:removeJdk', (_e, id: string) => java().removeJdk(String(id)))
-  ipcMain.handle('java:saveConfig', (_e, cfg: RunConfig) => java().saveConfig(cfg))
-  ipcMain.handle('java:deleteConfig', (_e, id: string) => java().deleteConfig(String(id)))
-  ipcMain.handle('java:importIdea', (_e, root: string) => java().importIdea(String(root)))
-  ipcMain.handle('java:run', (_e, id: string, workspace: string) => java().run(String(id), String(workspace ?? '')))
-  ipcMain.handle('java:debug', (_e, id: string, workspace: string) => java().debug(String(id), String(workspace ?? '')))
-  ipcMain.handle('java:debugState', () => java().debugState())
-  ipcMain.handle('java:control', async (_e, action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut') => {
-    try {
-      await java().control(action)
-      return { ok: true }
-    } catch (e) {
-      return { ok: false, error: (e as Error).message }
-    }
-  })
-  ipcMain.handle('java:stop', () => java().stop())
-  ipcMain.handle('java:restart', () => java().restart())
-  ipcMain.handle('java:scopes', (_e, frameId: number) => java().scopes(Number(frameId)).catch(() => []))
-  ipcMain.handle('java:variables', (_e, ref: number) => java().variables(Number(ref)).catch(() => []))
-  ipcMain.handle('java:evaluate', (_e, expression: string, frameId?: number) => java().evaluate(String(expression), frameId === undefined ? undefined : Number(frameId)))
-  ipcMain.handle('java:breakpoints', () => java().breakpoints())
-  ipcMain.handle('java:setBreakpoints', (_e, file: string, list: JavaBreakpoint[]) => java().setBreakpoints(String(file), Array.isArray(list) ? list : []))
-
   ipcMain.handle('files:index', (_e, root: string) => files.index(root))
   ipcMain.handle('files:search', (_e, root: string, query: string, opts: SearchOptions) =>
     typeof root === 'string' && typeof query === 'string' && opts
@@ -424,7 +392,7 @@ function registerIpc(store: AppDb): void {
     const win = BrowserWindow.fromWebContents(e.sender)
     const opts: Electron.OpenDialogOptions = {
       title: 'Importa un plugin',
-      filters: [{ name: 'Plugin di Claude Code Terminal', extensions: ['ccplugin'] }],
+      filters: [{ name: 'Plugin di Magnolia', extensions: ['ccplugin'] }],
       properties: ['openFile']
     }
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
@@ -482,7 +450,7 @@ function registerIpc(store: AppDb): void {
     const opts: Electron.OpenDialogOptions = {
       title: 'Apri progetto',
       defaultPath: defaultPath && existsSync(defaultPath) ? defaultPath : undefined,
-      filters: [{ name: 'Progetto Claude Code Terminal', extensions: ['cctproj'] }],
+      filters: [{ name: 'Progetto Magnolia', extensions: ['cctproj'] }],
       properties: ['openFile']
     }
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
@@ -568,6 +536,18 @@ function registerIpc(store: AppDb): void {
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return res.canceled ? null : (res.filePaths[0] ?? null)
   })
+  ipcMain.handle('env:pickFile', async (e, opts?: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const filters = (Array.isArray(opts?.filters) ? opts.filters : []).filter((f) => f && typeof f.name === 'string' && Array.isArray(f.extensions)).slice(0, 10)
+    const o: Electron.OpenDialogOptions = {
+      title: typeof opts?.title === 'string' ? opts.title.slice(0, 200) : 'Scegli il file',
+      defaultPath: typeof opts?.defaultPath === 'string' && existsSync(opts.defaultPath) ? opts.defaultPath : undefined,
+      filters: filters.map((f) => ({ name: f.name.slice(0, 80), extensions: f.extensions.map(String).slice(0, 20) })),
+      properties: ['openFile']
+    }
+    const res = win ? await dialog.showOpenDialog(win, o) : await dialog.showOpenDialog(o)
+    return res.canceled ? null : (res.filePaths[0] ?? null)
+  })
   ipcMain.handle('env:pathStatus', async (_e, path: string) => {
     if (!isValidFolderPath(path)) return 'invalid'
     try {
@@ -608,6 +588,8 @@ sessions.onChange((list) => {
 // Una sola istanza: due copie dell'app scriverebbero sullo stesso database e avrebbero sessioni separate.
 // Per le prove: una cartella dati separata (database e blocco d'istanza propri), senza toccare l'app in uso.
 if (process.env.CCT_USER_DATA) app.setPath('userData', process.env.CCT_USER_DATA)
+// L'app si chiamava «Claude Code Terminal»: la cartella dati (database, impostazioni, plugin) resta quella, così nessuno perde niente.
+else app.setPath('userData', join(app.getPath('appData'), 'Claude Code Terminal'))
 
 const primaryInstance = app.requestSingleInstanceLock()
 if (!primaryInstance) {
@@ -644,7 +626,6 @@ app.whenReady().then(async () => {
   explain = new ExplainService(db, join(app.getPath('userData'), 'explain-work'))
   plugins = new PluginManager(db, join(app.getPath('userData'), 'plugins'), join(app.getPath('userData'), 'plugin-data'), () => {
     sendToMain('plugins:changed', plugins?.list() ?? [], plugins?.languages() ?? [])
-    sendToMain('java:changed')
   })
   void plugins.verifyAll()
   lsp = new PluginHost(
@@ -660,25 +641,6 @@ app.whenReady().then(async () => {
     sessionStatus: (id) => sessions.list().find((x) => x.id === id)?.status,
     emit: (pluginId, event, data) => sendToMain('plugin:event', { pluginId, event, data }),
     markers: (update) => sendToMain('plugin:markers', update)
-  })
-  const packDataDir = join(app.getPath('userData'), 'plugin-data', JAVA_PACK_ID)
-  javaDev = new JavaDevService({
-    getSetting: (k) => db?.getSetting(k),
-    setSetting: (k, v) => db?.setSetting(k, v),
-    userDataDir: app.getPath('userData'),
-    packDataDir: () => packDataDir,
-    packActive: () => (plugins?.list() ?? []).some((p) => p.manifest.id === JAVA_PACK_ID && p.enabled && p.state === 'ok'),
-    lsp: (method, params) => {
-      if (!lsp) throw new Error('Plugin non pronti.')
-      return lsp.call('cct.java', method, params)
-    },
-    createTask: (req) => sessions.create(req),
-    killSession: (id) => sessions.kill(id),
-    sessionStatus: (id) => sessions.list().find((x) => x.id === id)?.status,
-    emitDebug: (st) => sendToMain('java:debug', st),
-    emitOutput: (o) => sendToMain('java:output', o),
-    emitProgress: (p) => sendToMain('java:progress', p),
-    emitState: () => sendToMain('java:changed')
   })
   permissions = new PermissionsService(
     db,
@@ -699,7 +661,6 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   sessions.killAll()
-  javaDev?.shutdown()
   hookServer.stop()
   lsp?.stopAll()
   files.dispose()

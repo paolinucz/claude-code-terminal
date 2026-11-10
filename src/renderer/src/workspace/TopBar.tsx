@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SerializedDockview } from 'dockview-react'
 import { ArrowDownToLine, ChevronDown, LayoutGrid, Plus, Puzzle, Search, ShieldCheck } from 'lucide-react'
-import { openPluginsPanel } from '@/state/editor'
+import { openPluginsPanel, useEditor } from '@/state/editor'
+import { runPluginCommand } from '@/plugins/pluginBridge'
 import type { PanelParams } from '@/panels/kinds'
 import { useSessions } from '@/state/sessions'
 import { useTerminalSettings } from '@/state/terminalSettings'
@@ -148,6 +149,7 @@ export function TopBar() {
     }
   }
 
+  const installedPlugins = useEditor((s) => s.plugins)
   const commands = useMemo<PaletteCommand[]>(() => {
     const d = () => (activeSheet ? dockRegistry.get(activeSheet.id) : undefined)
     const font = useTerminalSettings.getState()
@@ -198,6 +200,18 @@ export function TopBar() {
       { id: 'docs', title: 'Apri Documentazione', keywords: 'claude.md markdown progetto riferimenti', run: openDocsPanel },
       { id: 'permissions', title: 'Apri Permessi', keywords: 'regole claude settings', run: openPermissions },
       { id: 'plugins', title: 'Apri Plugin', keywords: 'language server linguaggi', run: openPluginsPanel },
+      // Comandi contribuiti dai plugin attivi (`contributes.commands`).
+      ...installedPlugins
+        .filter((p) => p.enabled && p.state === 'ok')
+        .flatMap((p) =>
+          (p.manifest.contributes?.commands ?? []).map((c) => ({
+            id: `plugin-${p.manifest.id}-${c.id}`,
+            title: `${p.manifest.name}: ${c.title}`,
+            hint: c.hint,
+            keywords: c.keywords,
+            run: () => runPluginCommand(p.manifest.id, c)
+          }))
+        ),
       { id: 'save-layout', title: 'Salva layout con nome…', run: () => setSaving(true) },
       ...layouts.map((l) => ({ id: `layout-${l.id}`, title: `Applica layout «${l.name}»`, run: () => applyLayout(l) })),
       { id: 'reset-layout', title: 'Ripristina layout predefinito', run: () => setResetting(true) },
@@ -213,12 +227,12 @@ export function TopBar() {
         title: 'Versione dell\'app',
         hint: appInfo ? appInfo.version : undefined,
         keywords: 'informazioni about',
-        run: () => setStatus(`Claude Code Terminal ${appInfo?.version ?? ''} · ${describeUpdate(useUpdates.getState().status)}`)
+        run: () => setStatus(`Magnolia ${appInfo?.version ?? ''} · ${describeUpdate(useUpdates.getState().status)}`)
       }
     ]
     // openPermissions e applyLayout dipendono solo dal foglio attivo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSheet, layouts, update, appInfo, project, explainOn, presets])
+  }, [activeSheet, layouts, update, appInfo, project, explainOn, presets, installedPlugins])
 
   return (
     <header
@@ -226,8 +240,7 @@ export function TopBar() {
       style={{ paddingRight: WINDOW_CONTROLS_WIDTH + 12 }}
     >
       <div className="flex items-center gap-2">
-        <img src={appLogo} alt="" aria-hidden="true" draggable={false} className="size-7 shrink-0" />
-        <span className="whitespace-nowrap text-[13px] font-semibold max-lg:hidden">Claude Code Terminal</span>
+        <img src={appLogo} alt="Magnolia" title="Magnolia" draggable={false} className="size-7 shrink-0" />
       </div>
 
       <ProjectMenu />

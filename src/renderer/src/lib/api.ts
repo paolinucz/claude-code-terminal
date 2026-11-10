@@ -120,59 +120,6 @@ function createLocalStorageApi(): AppApi {
       async install() {},
       onStatus: () => () => {}
     },
-    java: {
-      async state() {
-        return { enabled: false, services: [], jdks: [], configs: [], serviceJdk: {} }
-      },
-      async setDefaultJdk() {},
-      async setServiceJdk() {},
-      async downloadJdk() {
-        return { ok: false, error: 'Solo nell\'app desktop.' }
-      },
-      async removeJdk() {
-        return false
-      },
-      async saveConfig(cfg) {
-        return cfg
-      },
-      async deleteConfig() {},
-      async importIdea() {
-        return { configs: [], warnings: ['Solo nell\'app desktop.'] }
-      },
-      async run() {
-        return { ok: false, error: 'Solo nell\'app desktop.' }
-      },
-      async debug() {
-        return { ok: false, error: 'Solo nell\'app desktop.' }
-      },
-      async debugState() {
-        return { status: 'idle', frames: [], verified: {} }
-      },
-      async control() {
-        return { ok: false }
-      },
-      async stop() {},
-      async restart() {
-        return { ok: false }
-      },
-      async scopes() {
-        return []
-      },
-      async variables() {
-        return []
-      },
-      async evaluate() {
-        return { ok: false, error: 'Nessun debug.' }
-      },
-      async breakpoints() {
-        return {}
-      },
-      async setBreakpoints() {},
-      onChanged: () => () => {},
-      onDebug: () => () => {},
-      onOutput: () => () => {},
-      onProgress: () => () => {}
-    },
     settings: {
       async get(key) {
         return read<unknown>(`cct.setting.${key}`, undefined)
@@ -285,7 +232,7 @@ function createDemoFiles(): Pick<AppApi, 'files' | 'lsp' | 'plugins'> {
 /** Plugin finti per il browser: Java installato, e un pacchetto Maven da «importare». */
 function createDemoPlugins(): AppApi['plugins'] {
   const java: PluginManifest = {
-    id: 'cct.java', name: 'Java', version: '1.0.0', publisher: 'Claude Code Terminal', license: 'EPL-2.0',
+    id: 'cct.java', name: 'Java', version: '1.0.0', publisher: 'Magnolia', license: 'EPL-2.0',
     description: 'Eclipse JDT Language Server con un JRE 25 Temurin.',
     languages: [{ id: 'java', extensions: ['.java'], monaco: 'java' }],
     contributes: { editorGutter: { languages: ['java'], click: 'gutter.click' } },
@@ -299,7 +246,7 @@ function createDemoPlugins(): AppApi['plugins'] {
     activities: ['Avvia Eclipse JDT Language Server con il JRE del plugin, uno per progetto Maven o Gradle', 'Importa i progetti Maven e Gradle (scarica le dipendenze)']
   }
   const maven: PluginManifest = {
-    id: 'cct.maven', name: 'Maven (e XML)', version: '1.0.0', publisher: 'Claude Code Terminal', license: 'EPL-2.0',
+    id: 'cct.maven', name: 'Maven (e XML)', version: '1.0.0', publisher: 'Magnolia', license: 'EPL-2.0',
     description: 'LemMinX con l\'estensione Maven: completamento e controlli in pom.xml e negli altri file XML.',
     requires: ['cct.java'],
     languages: [{ id: 'xml', extensions: ['.xml', '.xsd'], monaco: 'xml' }],
@@ -687,6 +634,9 @@ function createDemoSessions(): Pick<AppApi, 'sessions' | 'env'> {
       async saveProjectPrefs() {},
       async pickFolder() {
         return window.prompt('Cartella (demo nel browser)', 'C:\\progetti\\api-server')
+      },
+      async pickFile() {
+        return window.prompt('File (demo nel browser)', 'C:\\progetti\\api-server\\pom.xml')
       },
       async homeDir() {
         return 'C:\\Users\\demo'

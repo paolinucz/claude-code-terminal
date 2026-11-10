@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
 import { Toasts } from '@/components/Toasts'
+import { PluginUi } from '@/components/PluginUi'
+import { startPluginBridge } from '@/plugins/pluginBridge'
 import { useChanges } from '@/state/changes'
 import { useEditor } from '@/state/editor'
 import { useSessions } from '@/state/sessions'
 import { useTerminalSettings } from '@/state/terminalSettings'
 import { useWorkspace } from '@/state/workspace'
-import { startJavaDev } from '@/state/javaFollow'
 import { startPluginGutter } from '@/state/pluginGutter'
 import { useRecent } from '@/state/recent'
 import { useSidebar } from '@/state/sidebar'
@@ -24,8 +25,8 @@ export function App() {
     void useChanges.getState().init()
     void useSidebar.getState().load()
     void useRecent.getState().load()
-    startJavaDev()
     startPluginGutter()
+    startPluginBridge()
     useEditor.getState().init()
   }, [load])
 
@@ -47,6 +48,7 @@ export function App() {
       </div>
       <SheetTabs />
       <Toasts />
+      <PluginUi />
     </div>
   )
 }

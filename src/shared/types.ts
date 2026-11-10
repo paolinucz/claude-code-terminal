@@ -28,7 +28,6 @@ import type { AppInfo, UpdateStatus } from './updates'
 import type { ProjectFile, ProjectInfo, ProjectRef, ProjectResult } from './project'
 import type { ExplainResult, SnippetRequest } from './explain'
 import type { SearchOptions, SearchResult } from './search'
-import type { DebugOutput, DebugScope, DebugState, DebugVariable, IdeaImportResult, JavaBreakpoint, JavaProgress, JavaState, RunConfig } from './java'
 import type { ChatItem, TranscriptUpdate } from './transcript'
 
 /** Layout serializzato di Dockview (risultato di `api.toJSON()`). Lo trattiamo come dato opaco. */
@@ -157,34 +156,6 @@ export interface AppApi {
     onStatus(cb: (s: UpdateStatus) => void): () => void
   }
   /** Impostazioni dell'app, salvate come JSON. */
-  /** Java development pack: servizi, JDK, run configuration e debug. */
-  java: {
-    state(root: string, fresh?: boolean): Promise<JavaState>
-    setDefaultJdk(id: string | null): Promise<void>
-    setServiceJdk(serviceRoot: string, id: string | null): Promise<void>
-    downloadJdk(major: number): Promise<{ ok: boolean; error?: string }>
-    removeJdk(id: string): Promise<boolean>
-    saveConfig(cfg: RunConfig): Promise<RunConfig>
-    deleteConfig(id: string): Promise<void>
-    /** Legge le run configuration di IntelliJ (non le salva: lo fa l'utente scegliendo). */
-    importIdea(root: string): Promise<IdeaImportResult>
-    run(configId: string, workspace: string): Promise<{ ok: boolean; error?: string; sessionId?: string }>
-    debug(configId: string, workspace: string): Promise<{ ok: boolean; error?: string }>
-    debugState(): Promise<DebugState>
-    control(action: 'continue' | 'pause' | 'next' | 'stepIn' | 'stepOut'): Promise<{ ok: boolean; error?: string }>
-    stop(): Promise<void>
-    restart(): Promise<{ ok: boolean; error?: string }>
-    scopes(frameId: number): Promise<DebugScope[]>
-    variables(ref: number): Promise<DebugVariable[]>
-    evaluate(expression: string, frameId?: number): Promise<{ ok: boolean; result?: string; type?: string; ref?: number; error?: string }>
-    breakpoints(): Promise<Record<string, JavaBreakpoint[]>>
-    setBreakpoints(file: string, list: JavaBreakpoint[]): Promise<void>
-    /** Cambiano configurazioni, JDK o il pack: si rilegge lo stato. */
-    onChanged(cb: () => void): () => void
-    onDebug(cb: (s: DebugState) => void): () => void
-    onOutput(cb: (o: DebugOutput) => void): () => void
-    onProgress(cb: (p: JavaProgress) => void): () => void
-  }
   settings: {
     get(key: string): Promise<unknown>
     set(key: string, value: unknown): Promise<void>
@@ -256,6 +227,8 @@ export interface AppApi {
     recentProjects(): Promise<ProjectPrefs[]>
     saveProjectPrefs(p: Omit<ProjectPrefs, 'updatedAt'>): Promise<void>
     pickFolder(defaultPath?: string, title?: string): Promise<string | null>
+    /** Sceglie un file (dialogo del sistema). `filters`: per esempio [{name:'Java', extensions:['java']}]. */
+    pickFile(opts?: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>
     homeDir(): Promise<string>
     /** Cosa c'è a quel percorso: cartella, file, niente, oppure percorso non valido (non assoluto). */
     pathStatus(path: string): Promise<'dir' | 'file' | 'missing' | 'invalid'>

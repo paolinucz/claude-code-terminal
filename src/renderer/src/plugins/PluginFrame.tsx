@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { IS_WIN, normPath, type GitMark } from '@shared/files'
-import { pluginUiUrl } from '@shared/plugins'
+import { pluginUiUrl, type PluginPermission } from '@shared/plugins'
 import { api } from '@/lib/api'
 import { openFile } from '@/state/editor'
 import { useAccent } from '@/state/accent'
+import { pluginConfirm, pluginNotify, pluginPrompt } from '@/state/pluginUi'
+import { useSessions } from '@/state/sessions'
+import { hasPermission, pluginName, settingKey, showSessionTerminal } from './pluginBridge'
 
 /** Cosa l'Esplora file sa dei file, in percorsi normalizzati (stessa regola di `normPath`): git, Claude, errori. */
 export interface ExplorerDecor {
@@ -11,6 +14,9 @@ export interface ExplorerDecor {
   claude: string[]
   errors: Record<string, number>
 }
+
+/** Nessun segno sui file: per le pagine che non sono una vista dell'Esplora file. */
+export const EMPTY_DECOR: ExplorerDecor = { git: {}, claude: [], errors: {} }
 
 /** Variabili CSS dell'app che la pagina del plugin riceve, per avere lo stesso tema (e il colore d'accento scelto). */
 const THEME_VARS = ['--cct-bg', '--cct-surface', '--cct-surface-2', '--cct-border', '--cct-border-strong', '--cct-text', '--cct-text-muted', '--cct-text-faint', '--cct-accent', '--cct-accent-soft', '--cct-on-accent', '--cct-ok', '--cct-warn', '--cct-danger', '--cct-info']
@@ -20,17 +26,14 @@ const themeNow = () => {
 }
 
 /**
- * Pagina di un plugin dentro l'app (contributi, docs/plugin-contributi.md). Gira in un iframe isolato: senza
- * `allow-same-origin`, quindi senza accesso all'app, ai cookie o alla rete. Parla solo con questi messaggi:
- *
- * - dalla pagina: `{cct:'ready'}` e `{cct:'rpc', id, method, params}` con metodi `files.index`, `editor.open`,
- *   `files.reveal`, `clipboard.copy` e `plugin.call {method, params}` (una richiesta all'adapter del proprio plugin);
- * - verso la pagina: `{cct:'init', win, cwd, theme}`, `{cct:'state', decor}`, `{cct:'event', event, data}` (dall'adapter
- *   del plugin) e `{cct:'rpc-result', id, ok, value|error}`.
+ * Pagina di un plugin dentro l'app (contributi). Gira in un iframe isolato: senza `allow-same-origin`, quindi senza
+ * accesso all'app, ai cookie o alla rete. Parla solo con messaggi; metodi, eventi e permessi sono in
+ * docs/PLUGIN_API_DOCS.md (§3–§6), che è il riferimento: se aggiungi un metodo qui, aggiorna il documento.
  *
  * L'app non sa cosa mostri il plugin: questi sono gli unici servizi che gli dà.
  */
 export function PluginFrame({ pluginId, entry, cwd, decor }: { pluginId: string; entry: string; cwd: string; decor: ExplorerDecor }) {
+  const initMsg = () => ({ cct: 'init', win: IS_WIN, cwd: cwdRef.current, theme: themeNow(), plugin: { id: pluginId, name: pluginName(pluginId) } })
   const frame = useRef<HTMLIFrameElement>(null)
   const decorRef = useRef(decor)
   decorRef.current = decor
@@ -48,7 +51,7 @@ export function PluginFrame({ pluginId, entry, cwd, decor }: { pluginId: string;
       const m = e.data as { cct?: string; id?: number; method?: string; params?: Record<string, unknown> }
       if (m.cct === 'ready') {
         ready.current = true
-        post({ cct: 'init', win: IS_WIN, cwd: cwdRef.current, theme: themeNow() })
+        post(initMsg())
         post({ cct: 'state', decor: decorRef.current })
         return
       }
@@ -56,16 +59,20 @@ export function PluginFrame({ pluginId, entry, cwd, decor }: { pluginId: string;
       const reply = (ok: boolean, value?: unknown, error?: string) => post({ cct: 'rpc-result', id: m.id, ok, value, error })
       try {
         const p = m.params ?? {}
+        const need = (perm: PluginPermission) => {
+          if (!hasPermission(pluginId, perm)) throw new Error(`Permesso «${perm}» non dichiarato nel manifest del plugin`)
+        }
+        const name = pluginName(pluginId)
         switch (m.method) {
           // Solo la cartella dell'Esplora file: il plugin non sceglie quale elenco leggere.
           case 'files.index':
             return reply(true, await api.files.index(cwdRef.current))
           case 'editor.open':
-            if (!inProject(p.path)) return reply(false, undefined, 'File fuori dal progetto')
-            openFile(p.path as string, undefined, cwdRef.current)
+            if (!inProject(p.path)) return reply(false, undefined, `File fuori dal progetto (${cwdRef.current || 'nessuna cartella'})`)
+            openFile(p.path as string, Number.isInteger(p.line) && (p.line as number) > 0 ? { line: p.line as number, column: Number.isInteger(p.column) ? (p.column as number) : 1 } : undefined, cwdRef.current)
             return reply(true)
           case 'files.reveal':
-            if (!inProject(p.path)) return reply(false, undefined, 'File fuori dal progetto')
+            if (!inProject(p.path)) return reply(false, undefined, `File fuori dal progetto (${cwdRef.current || 'nessuna cartella'})`)
             await api.files.reveal(p.path as string)
             return reply(true)
           // La pagina parla con l'adapter del proprio plugin, mai con quello di altri.
@@ -74,6 +81,37 @@ export function PluginFrame({ pluginId, entry, cwd, decor }: { pluginId: string;
           case 'clipboard.copy':
             await navigator.clipboard.writeText(String(p.text ?? '').slice(0, 10_000))
             return reply(true)
+          // Dati del progetto aperto: servono i permessi `files.read` / `files.write` e il file deve stare nel progetto.
+          case 'files.read':
+            need('files.read')
+            if (!inProject(p.path)) return reply(false, undefined, `File fuori dal progetto (${cwdRef.current || 'nessuna cartella'})`)
+            return reply(true, await api.files.read(p.path as string))
+          case 'files.write':
+            need('files.write')
+            if (!inProject(p.path)) return reply(false, undefined, `File fuori dal progetto (${cwdRef.current || 'nessuna cartella'})`)
+            return reply(true, await api.files.write(p.path as string, String(p.text ?? ''), typeof p.expectedMtime === 'number' ? p.expectedMtime : undefined))
+          // Terminale di una sessione avviata dall'adapter (`app.session.create`).
+          case 'terminal.show':
+            need('terminal')
+            return reply(true, showSessionTerminal(String(p.sessionId ?? '')))
+          // Impostazioni del plugin: nomi corti, l'app li mette nello spazio `plugin.<id>.`.
+          case 'settings.get':
+            return reply(true, (await api.settings.get(settingKey(pluginId, p.key))) ?? null)
+          case 'settings.set':
+            await api.settings.set(settingKey(pluginId, p.key), p.value ?? null)
+            return reply(true)
+          // Avvisi e dialoghi: li disegna l'app, con il nome del plugin.
+          case 'ui.notify':
+            pluginNotify(name, p.message, p.kind)
+            return reply(true)
+          case 'ui.confirm':
+            return reply(true, await pluginConfirm(name, p))
+          case 'ui.prompt':
+            return reply(true, await pluginPrompt(name, p))
+          case 'dialog.pickFolder':
+            return reply(true, await api.env.pickFolder(typeof p.defaultPath === 'string' ? p.defaultPath : cwdRef.current, typeof p.title === 'string' ? p.title : undefined))
+          case 'dialog.pickFile':
+            return reply(true, await api.env.pickFile({ title: p.title as string | undefined, defaultPath: (p.defaultPath as string | undefined) ?? cwdRef.current, filters: p.filters as { name: string; extensions: string[] }[] | undefined }))
           default:
             return reply(false, undefined, `Metodo sconosciuto: ${String(m.method)}`)
         }
@@ -91,14 +129,47 @@ export function PluginFrame({ pluginId, entry, cwd, decor }: { pluginId: string;
     [pluginId]
   )
 
+  // Eventi dell'app per la pagina (docs/PLUGIN_API_DOCS.md §3.2): file cambiati nel progetto e sessioni terminate.
+  useEffect(() => {
+    const send = (event: string, data: unknown) => ready.current && post({ cct: 'event', event, data })
+    const offFiles = api.files.onChanged((root, paths) => {
+      if (normPath(root) !== normPath(cwdRef.current)) return
+      send('app.file.changed', { paths })
+    })
+    const exited = new Set(Object.values(useSessions.getState().sessions).filter((x) => x.status === 'exited').map((x) => x.id))
+    const offSessions = useSessions.subscribe((s) => {
+      for (const x of Object.values(s.sessions)) {
+        if (x.status !== 'exited' || exited.has(x.id)) continue
+        exited.add(x.id)
+        send('app.session.exit', { sessionId: x.id, exitCode: x.exitCode ?? null })
+      }
+    })
+    return () => {
+      offFiles()
+      offSessions()
+    }
+  }, [pluginId])
+
   // Le novità (git, revisioni di Claude, errori) e il cambio di colore d'accento arrivano alla pagina già aperta.
   useEffect(() => {
     if (ready.current) post({ cct: 'state', decor })
   }, [decor])
   const accent = useAccent((s) => s.accent)
   useEffect(() => {
-    if (ready.current) post({ cct: 'init', win: IS_WIN, cwd, theme: themeNow() })
+    if (ready.current) post(initMsg())
   }, [accent, cwd])
+  const lastCwd = useRef(cwd)
+  useEffect(() => {
+    if (lastCwd.current === cwd) return
+    lastCwd.current = cwd
+    if (ready.current) post({ cct: 'event', event: 'app.workspace', data: { cwd } })
+  }, [cwd])
+  // Per `app.file.changed` la cartella dev'essere osservata (il conteggio dei riferimenti la condivide con l'Esplora file).
+  useEffect(() => {
+    if (!cwd) return
+    api.files.watch(cwd)
+    return () => api.files.unwatch(cwd)
+  }, [cwd])
 
   return (
     <iframe
