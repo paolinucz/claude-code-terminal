@@ -7,7 +7,8 @@ import { useMemo } from 'react'
 import { pluginUiUrl } from '@shared/plugins'
 import { EMPTY_DECOR, PluginFrame } from '@/plugins/PluginFrame'
 import { useEditor } from '@/state/editor'
-import { useSidebar } from '@/state/sidebar'
+import { rootForSheet, useSidebar } from '@/state/sidebar'
+import { useWorkspace } from '@/state/workspace'
 
 /**
  * Una vista della barra laterale fissa. Quelle dell'app sono qui sotto; i widget installati (fase 7, pacchetti
@@ -23,8 +24,8 @@ export interface SidebarView {
 }
 
 const BUILTIN: SidebarView[] = [
-  { id: 'explorer', title: 'Esplora file', icon: <FolderTree size={20} strokeWidth={1.6} />, shortcut: 'Ctrl+Maiusc+E', render: () => <ExplorerView /> },
-  { id: 'search', title: 'Cerca', icon: <Search size={20} strokeWidth={1.6} />, shortcut: 'Ctrl+Maiusc+F', render: () => <SearchView /> }
+  { id: 'explorer', title: 'Esplora file', icon: <FolderTree strokeWidth={1.8} />, shortcut: 'Ctrl+Maiusc+E', render: () => <ExplorerView /> },
+  { id: 'search', title: 'Cerca', icon: <Search strokeWidth={1.8} />, shortcut: 'Ctrl+Maiusc+F', render: () => <SearchView /> }
 ]
 
 interface ViewsStore {
@@ -39,9 +40,17 @@ export function registerSidebarView(view: SidebarView): () => void {
   return () => useExtraViews.setState((s) => ({ extra: s.extra.filter((v) => v.id !== view.id) }))
 }
 
-/** Pagina di un plugin nella barra laterale: lavora nella cartella dell'Esplora file. */
+/**
+ * Pagina di un plugin nella barra laterale: lavora nella cartella del progetto del foglio attivo (`rootForSheet`, la stessa di
+ * Esplora file, Cerca e palette). Non si usa `explorerCwd`: lo imposta l'Esplora file quando è visibile, quindi con una vista di
+ * plugin aperta all'avvio sarebbe vuoto finché non lo si apre.
+ */
 function PluginSidebarPage({ pluginId, entry }: { pluginId: string; entry: string }) {
-  const cwd = useSidebar((s) => s.explorerCwd)
+  const sheetId = useWorkspace((s) => s.activeSheetId)
+  // Solo per ridisegnare quando cambia la cartella del foglio o quella dell'Esplora file.
+  useSidebar((s) => s.cwdBySheet)
+  useSidebar((s) => s.explorerCwd)
+  const cwd = rootForSheet(sheetId)
   return <PluginFrame pluginId={pluginId} entry={entry} cwd={cwd} decor={EMPTY_DECOR} />
 }
 
@@ -57,7 +66,7 @@ export function usePluginSidebarViews(): SidebarView[] {
             id: `${p.manifest.id}:${v.id}`,
             title: v.title,
             shortcut: v.shortcut,
-            icon: v.icon ? <img src={pluginUiUrl(p.manifest.id, v.icon)} alt="" aria-hidden="true" className="size-6" draggable={false} /> : <FolderTree size={20} strokeWidth={1.6} />,
+            icon: v.icon ? <img src={pluginUiUrl(p.manifest.id, v.icon)} alt="" aria-hidden="true" draggable={false} /> : <FolderTree strokeWidth={1.8} />,
             render: () => <PluginSidebarPage pluginId={p.manifest.id} entry={v.entry} />
           }))
         ),

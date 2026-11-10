@@ -32,6 +32,10 @@
   --cct-danger: #ff8a8a;
   --cct-info: #6ea8fe;
 
+  /* Spazio tra le schede della finestra (barra in alto, sidebar, pannelli, linguette): una misura sola. Il gap di Dockview, in
+     workspace/theme.ts, dev'essere uguale (lì è un numero, non una variabile). */
+  --cct-gap: 10px;
+
   /* Variabili attese dai componenti shadcn / Animate UI */
   --radius: 0.75rem; /* come l'icona (angoli al 22%): era 0.625rem */
   --background: var(--cct-bg);
@@ -99,6 +103,12 @@
 @layer base {
   * {
     @apply border-border;
+    /* Barre di scorrimento sottili e scure in tutta l'app (non quelle bianche di sistema). */
+    scrollbar-width: thin;
+    scrollbar-color: var(--cct-border-strong) transparent;
+  }
+  html {
+    color-scheme: dark;
   }
   html,
   body,
@@ -241,6 +251,12 @@
 
   background: var(--cct-bg);
   font-family: var(--font-sans);
+}
+
+/* Lo sfondo della griglia di Dockview è lo sfondo scuro della finestra: lo spazio tra i gruppi si vede come spazio, non come
+   una riga tra due schede dello stesso colore. */
+.dockview-theme-cct .dv-dockview {
+  background-color: var(--cct-bg);
 }
 
 /* Gruppi come "carte" con bordo e angoli arrotondati, come nel mockup. */

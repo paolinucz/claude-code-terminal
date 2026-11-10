@@ -78,7 +78,7 @@ export function SheetView({ sheet, active }: { sheet: Sheet; active: boolean }) 
   return (
     // I fogli restano montati anche quando non sono visibili: così pannelli fluttuanti
     // e finestre staccate non si chiudono cambiando foglio.
-    <div className="absolute inset-0 p-1.5" style={{ display: active ? 'block' : 'none' }} aria-hidden={!active}>
+    <div className="absolute inset-0 p-(--cct-gap)" style={{ display: active ? 'block' : 'none' }} aria-hidden={!active}>
       <DockviewReact
         className="h-full"
         theme={cctDockTheme}

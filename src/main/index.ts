@@ -187,7 +187,8 @@ const darkWindow = {
   ...(WINDOW_ICON ? { icon: WINDOW_ICON } : {}),
   autoHideMenuBar: true,
   titleBarStyle: 'hidden' as const,
-  titleBarOverlay: { color: '#18181B', symbolColor: '#D4D4D8', height: 44 }
+  // Come la barra in alto è una scheda staccata dal bordo, i controlli della finestra stanno sullo sfondo scuro, centrati sulla scheda.
+  titleBarOverlay: { color: '#09090B', symbolColor: '#D4D4D8', height: 64 }
 }
 
 function createMainWindow(): BrowserWindow {
@@ -220,7 +221,8 @@ function createMainWindow(): BrowserWindow {
         action: 'allow',
         overrideBrowserWindowOptions: {
           ...darkWindow,
-          titleBarOverlay: { ...darkWindow.titleBarOverlay, height: 36 },
+          // Le finestre staccate hanno la loro barra piena, sullo sfondo del pannello.
+          titleBarOverlay: { ...darkWindow.titleBarOverlay, color: '#18181B', height: 36 },
           title: 'Magnolia – pannello staccato',
           minWidth: 320,
           minHeight: 200

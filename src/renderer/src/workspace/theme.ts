@@ -5,7 +5,8 @@ export const cctDockTheme: DockviewTheme = {
   name: 'cct',
   className: 'dockview-theme-cct',
   colorScheme: 'dark',
-  gap: 6,
+  // Uguale a --cct-gap (styles.css).
+  gap: 10,
   dndOverlayMounting: 'relative',
   dndPanelOverlay: 'group',
   dndTabIndicator: 'line',

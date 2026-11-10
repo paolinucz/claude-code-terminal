@@ -235,10 +235,10 @@ export function TopBar() {
   }, [activeSheet, layouts, update, appInfo, project, explainOn, presets, installedPlugins])
 
   return (
-    <header
-      className="app-drag flex h-11 shrink-0 items-center gap-3 border-b border-border bg-surface pl-3"
-      style={{ paddingRight: WINDOW_CONTROLS_WIDTH + 12 }}
-    >
+    // La barra è una scheda (angoli da 10 px, 6 px dal bordo) come sidebar, pannelli e linguette dei fogli. Il contenitore trascina
+    // la finestra anche nei margini; i controlli nativi di Windows stanno a destra, fuori dalla scheda.
+    <div className="app-drag shrink-0 pt-(--cct-gap) pl-(--cct-gap)" style={{ paddingRight: WINDOW_CONTROLS_WIDTH || 10 }}>
+    <header className="flex h-11 items-center gap-3 rounded-[10px] border border-border bg-surface px-3">
       <div className="flex items-center gap-2">
         <img src={appLogo} alt="Magnolia" title="Magnolia" draggable={false} className="size-7 shrink-0" />
       </div>
@@ -417,5 +417,6 @@ export function TopBar() {
         }}
       />
     </header>
+    </div>
   )
 }

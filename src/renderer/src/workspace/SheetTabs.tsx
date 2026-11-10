@@ -51,7 +51,7 @@ export function SheetTabs() {
   }
 
   return (
-    <footer className="flex min-h-10 items-stretch gap-0.5 border-t border-border bg-surface px-2" aria-label="Fogli">
+    <footer className="mx-(--cct-gap) mb-(--cct-gap) flex min-h-10 items-stretch gap-0.5 overflow-hidden rounded-[10px] border border-border bg-surface px-2" aria-label="Fogli">
       <div role="tablist" aria-label="Fogli" className="flex items-stretch gap-0.5" onDragLeave={() => setDropIndex(null)}>
         {sheets.map((sheet, index) => {
           const isActive = sheet.id === activeSheetId
