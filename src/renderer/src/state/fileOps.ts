@@ -75,7 +75,9 @@ function retargetEditors(items: MoveItem[]): void {
 
 function summary(items: MoveItem[], copy: boolean): string {
   const verb = copy ? 'Copiato' : items.length === 1 && parentOf(items[0].from).toLowerCase() === parentOf(items[0].to).toLowerCase() ? 'Rinominato' : 'Spostato'
-  return items.length === 1 ? `${verb}: ${baseName(items[0].from)} → ${baseName(items[0].to)}` : `${verb}: ${items.length} elementi`
+  if (items.length !== 1) return `${verb}: ${items.length} elementi in ${baseName(parentOf(items[0].to))}`
+  const same = parentOf(items[0].from).toLowerCase() === parentOf(items[0].to).toLowerCase()
+  return same ? `${verb}: ${baseName(items[0].from)} → ${baseName(items[0].to)}` : `${verb}: ${baseName(items[0].from)} → ${baseName(parentOf(items[0].to))}`
 }
 
 /** La sequenza completa. `root`: la cartella del progetto che contiene gli elementi. Restituisce `true` se l'operazione è stata eseguita. */

@@ -216,6 +216,8 @@ export class FileService {
           setTimeout(() => {
             const paths = [...(this.pending.get(key) ?? [])]
             this.pending.delete(key)
+            // L'elenco in memoria (palette, ricerca, vista Package) non è più valido.
+            this.indexCache.delete(key)
             this.onChange(root, paths)
           }, 300)
         )

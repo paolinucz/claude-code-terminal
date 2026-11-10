@@ -128,8 +128,13 @@ export function ExplorerView() {
     const off = api.files.onChanged((root, paths) => {
       if (!roots.some((r) => normPath(r.path) === normPath(root))) return
       // Si ricaricano solo le cartelle aperte che contengono qualcosa di cambiato.
-      const dirs = new Set(paths.map((p) => normPath(p.replace(/[\\/][^\\/]*$/, ''))))
-      for (const d of expandedRef.current) if (dirs.has(d)) void loadDir(d)
+      // Si usa il percorso reale della cartella (con le sue maiuscole), non la chiave normalizzata: altrimenti le voci
+      // ricaricate avrebbero percorsi in minuscolo.
+      const dirs = new Map(paths.map((p) => p.replace(/[\\/][^\\/]*$/, '')).map((d) => [normPath(d), d] as const))
+      for (const d of expandedRef.current) {
+        const real = dirs.get(d)
+        if (real) void loadDir(real)
+      }
       refreshGit()
     })
     return () => {

@@ -26,17 +26,15 @@ function RenameDialog({ d }: { d: Extract<FileOpsDialog, { kind: 'rename' }> }) 
   const [name, setName] = useState(current)
   const input = useRef<HTMLInputElement>(null)
   const error = name === current ? null : validateName(name)
-  useEffect(() => {
-    // Si seleziona il nome senza estensione, come negli IDE.
-    const t = window.setTimeout(() => {
-      const el = input.current
-      if (!el) return
-      el.focus()
-      const dot = d.dir ? -1 : current.lastIndexOf('.')
-      el.setSelectionRange(0, dot > 0 ? dot : current.length)
-    }, 30)
-    return () => window.clearTimeout(t)
-  }, [current, d.dir])
+  // All'apertura si seleziona il nome senza estensione, come negli IDE (il focus lo dà il dialogo: lo si prende al suo posto).
+  const focusName = (e: Event) => {
+    e.preventDefault()
+    const el = input.current
+    if (!el) return
+    el.focus()
+    const dot = d.dir ? -1 : current.lastIndexOf('.')
+    el.setSelectionRange(0, dot > 0 ? dot : current.length)
+  }
   const submit = () => {
     if (error || name === current) return
     close()
@@ -44,7 +42,7 @@ function RenameDialog({ d }: { d: Extract<FileOpsDialog, { kind: 'rename' }> }) 
   }
   return (
     <Dialog open onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent className="max-w-md" onInteractOutside={(e) => e.preventDefault()} onOpenAutoFocus={focusName}>
         <DialogHeader>
           <DialogTitle>Rinomina {d.dir ? 'la cartella' : 'il file'}</DialogTitle>
           <DialogDescription className="cct-selectable truncate">{relativeTo(d.root, d.path)}</DialogDescription>

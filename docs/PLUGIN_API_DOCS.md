@@ -107,6 +107,10 @@ Esempi completi: `plugins/java/ui/packages.html` (vista a package), `plugins/jav
 | `files.index` | | Elenco dei file della cartella dell'Esplora file (relativi, `.gitignore` rispettato) | no |
 | `files.read` | `{path}` | Contenuto del file (`FileContent`) | `files.read` (nel progetto) |
 | `files.write` | `{path, text, expectedMtime?}` | Esito del salvataggio; con `expectedMtime` rifiuta se il file è cambiato | `files.write` (nel progetto) |
+| `files.rename` | `{path, dir?}` | Apre la finestra «Rinomina» dell'app; se un adapter propone il refactoring (`refactor/willRename`) mostra l'anteprima prima di confermare | `files.write` (nel progetto) |
+| `files.move` | `{paths, toDir?, copy?}` | Sposta o copia; senza `toDir` apre la finestra «Sposta in…/Copia in…». Stessa anteprima del refactoring per gli spostamenti | `files.write` (nel progetto) |
+
+Adapter: `willRename({renames:[{from,to}]})` → `{files:[{path, edits:[{range, newText}]}]}` (percorsi di prima, righe e colonne da 1) e `didRename({renames})`; con `lspAdapter` si appoggiano a `workspace/willRenameFiles` del language server (solo per server già avviati che lo dichiarano).
 | `terminal.show` | `{sessionId}` | Apre il terminale di una sessione (per esempio avviata dall'adapter con `app.session.create`); `true` se l'ha trovata | `terminal` |
 | `terminal.hive` | `{key, title, sessionIds}` | Mostra più terminali insieme nella vista **alveare** (§3.3); `true` se l'ha aperta. La stessa `key` aggiorna lo stesso pannello con l'elenco nuovo (fino a 24 sessioni) | `terminal` |
 | `settings.get` | `{key}` | Valore salvato (`null` se manca) | no |
