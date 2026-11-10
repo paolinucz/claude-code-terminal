@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, shell, type WebContents } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { join, normalize, sep } from 'node:path'
+import { extname, join, normalize, sep } from 'node:path'
+import { PLUGIN_UI_HOST } from '@shared/plugins'
 import { pathToFileURL } from 'node:url'
 import type { SerializedLayout, Sheet } from '@shared/types'
 import type { ClaudeEffort, ClaudeModel, CreateSessionRequest, ProjectPrefs } from '@shared/sessions'
@@ -115,6 +116,20 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
 ])
 
+/** Tipi di file che la pagina di un plugin può caricare. */
+const PLUGIN_UI_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.json': 'application/json; charset=utf-8'
+}
+/** Come per le spiegazioni: niente rete né frame; script e stili del pacchetto stesso o incorporati. */
+const PLUGIN_UI_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'"
+
 /** Fase 14: spiegazioni smart delle modifiche (creato quando il database è pronto). */
 let explain: ExplainService | null = null
 
@@ -133,6 +148,18 @@ function serveRenderer(): void {
           'X-Content-Type-Options': 'nosniff',
           'Cache-Control': 'no-store'
         }
+      })
+    }
+    // Pagine dei plugin (contributi all'interfaccia): solo file statici dentro la cartella di un plugin attivo, in un
+    // iframe isolato (senza allow-same-origin) e con una politica che vieta rete e frame.
+    if (host === PLUGIN_UI_HOST) {
+      const [, pluginId = '', ...rest] = decodeURIComponent(pathname).split('/')
+      const dir = normalize(plugins?.pluginDir(pluginId) ?? '')
+      const file = normalize(join(dir, ...rest))
+      const type = PLUGIN_UI_TYPES[extname(file).toLowerCase()]
+      if (!plugins?.isActive(pluginId) || !type || !file.startsWith(dir + sep) || !existsSync(file)) return new Response('Non trovato', { status: 404 })
+      return new Response(readFileSync(file), {
+        headers: { 'Content-Type': type, 'Content-Security-Policy': PLUGIN_UI_CSP, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' }
       })
     }
     const file = normalize(join(root, decodeURIComponent(pathname)))
@@ -383,6 +410,11 @@ function registerIpc(store: AppDb): void {
   ipcMain.handle('lsp:completion', (_e, path: string, pos: ApiPosition) => lsp?.completion(path, pos).catch(() => null) ?? { items: [], incomplete: false })
   ipcMain.handle('lsp:hover', (_e, path: string, pos: ApiPosition) => lsp?.hover(path, pos).catch(() => null) ?? null)
   ipcMain.handle('lsp:definition', (_e, path: string, pos: ApiPosition) => lsp?.definition(path, pos).catch(() => []) ?? [])
+  // Pagine dei plugin → adapter: la pagina chiama solo l'adapter del proprio plugin, se è attivo.
+  ipcMain.handle('plugin:call', async (_e, pluginId: string, method: string, params?: Record<string, unknown>) => {
+    if (typeof pluginId !== 'string' || typeof method !== 'string' || !plugins?.isActive(pluginId)) throw new Error('Plugin non attivo')
+    return lsp?.call(pluginId, method, params && typeof params === 'object' ? params : {})
+  })
   ipcMain.handle('lsp:statuses', () => lsp?.statuses() ?? [])
 
   // ---- Plugin di linguaggio (X1–X9) ----
@@ -494,7 +526,7 @@ function registerIpc(store: AppDb): void {
   ipcMain.on('sessions:input', (_e, id: string, viewId: string, data: string) => sessions.input(id, viewId, data))
   // Tasti dalla vista grafica: solo Esc, Invio, frecce e cifre (risposte ai permessi, interruzione), mai testo libero.
   ipcMain.on('sessions:key', (_e, id: string, key: string) => {
-    const keys: Record<string, string> = { esc: '\x1b', enter: '\r', up: '\x1b[A', down: '\x1b[B' }
+    const keys: Record<string, string> = { esc: '\x1b', enter: '\r', up: '\x1b[A', down: '\x1b[B', space: ' ' }
     const data = keys[key] ?? (/^[1-9]$/.test(key) ? key : null)
     if (data) sessions.sendKeys(id, data)
   })
@@ -620,6 +652,15 @@ app.whenReady().then(async () => {
     (d) => sendToMain('lsp:diagnostics', d),
     (s) => sendToMain('lsp:status', s)
   )
+  lsp.setServices({
+    getSetting: (k) => db?.getSetting(k),
+    setSetting: (k, v) => db?.setSetting(k, v),
+    createTask: (req) => sessions.create(req as CreateSessionRequest),
+    killSession: (id) => sessions.kill(id),
+    sessionStatus: (id) => sessions.list().find((x) => x.id === id)?.status,
+    emit: (pluginId, event, data) => sendToMain('plugin:event', { pluginId, event, data }),
+    markers: (update) => sendToMain('plugin:markers', update)
+  })
   const packDataDir = join(app.getPath('userData'), 'plugin-data', JAVA_PACK_ID)
   javaDev = new JavaDevService({
     getSetting: (k) => db?.getSetting(k),

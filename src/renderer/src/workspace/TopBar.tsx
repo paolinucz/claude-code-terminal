@@ -249,10 +249,10 @@ export function TopBar() {
         </kbd>
       </button>
 
-      <div className="flex items-center gap-2">
+      <div className="app-no-drag flex items-center gap-2">
         <button
           type="button"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-[13px] font-semibold text-on-brand transition-opacity hover:opacity-90"
+          className="app-no-drag inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-[13px] font-semibold text-on-brand transition-opacity hover:opacity-90"
           onClick={() => setNewTerminal(true)}
           title="Nuovo terminale (Ctrl+Maiusc+T)"
         >

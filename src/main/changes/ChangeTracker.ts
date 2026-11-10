@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { diffLines } from 'diff'
 import { isOpen, type ChangeContents, type FileChange, type RejectManyResult, type RejectResult, type ReviewNote } from '@shared/changes'
 import type { AppDb, ChangeRow } from '../db'
@@ -14,6 +15,8 @@ const MAX_SNAPSHOT = 8 * 1024 * 1024
 interface SessionRef {
   title: string
   cwd: string
+  /** Cartelle aggiuntive della sessione (--add-dir): fanno parte del progetto. */
+  addDirs?: string[]
 }
 
 /**
@@ -74,7 +77,7 @@ export class ChangeTracker {
 
   private preTool(sessionId: string, session: SessionRef | undefined, e: HookEvent): void {
     const filePath = this.filePathOf(e, session?.cwd ?? '')
-    if (!filePath) return
+    if (!filePath || !this.inProject(filePath, session)) return
     // Se il file ha già una modifica in attesa, la versione «prima» resta quella originale.
     this.before.set(this.key(sessionId, e), { filePath, hash: this.snapshot(filePath), at: Date.now() })
     // Pulizia di eventuali PreToolUse rimasti senza risposta (strumento negato o interrotto).
@@ -87,7 +90,7 @@ export class ChangeTracker {
     const pre = this.before.get(key)
     this.before.delete(key)
     const filePath = pre?.filePath ?? this.filePathOf(e, session?.cwd ?? '')
-    if (!filePath) return
+    if (!filePath || !this.inProject(filePath, session)) return
     const afterHash = this.snapshot(filePath)
     const tool = String(e.tool_name)
     const now = new Date().toISOString()
@@ -129,6 +132,36 @@ export class ChangeTracker {
       })
     }
     this.changed()
+  }
+
+  /** Radice del repository git di una cartella (memorizzata): i file di tutto il repository fanno parte del progetto. */
+  private readonly gitRoots = new Map<string, string | null>()
+  private gitRootOf(cwd: string): string | null {
+    if (this.gitRoots.has(cwd)) return this.gitRoots.get(cwd)!
+    let root: string | null = null
+    try {
+      root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || null
+    } catch {
+      // non è un repository o git manca
+    }
+    this.gitRoots.set(cwd, root)
+    return root
+  }
+
+  /**
+   * Il file fa parte del progetto della sessione? Sì se sta nella cartella di lavoro, nelle cartelle aggiuntive o nello
+   * stesso repository git. Gli script di appoggio che Claude scrive altrove (cartelle temporanee, lo scratchpad, la
+   * home) non si registrano: non c'è niente da rivedere e restano com'erano.
+   */
+  private inProject(filePath: string, session: SessionRef | undefined): boolean {
+    if (!session?.cwd) return true
+    const roots = [session.cwd, ...(session.addDirs ?? [])]
+    const git = this.gitRootOf(session.cwd)
+    if (git) roots.push(git)
+    return roots.some((root) => {
+      const rel = relative(root, filePath)
+      return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+    })
   }
 
   /** Copia il contenuto attuale del file nell'archivio degli snapshot. `null` se il file non esiste. */

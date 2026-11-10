@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Package</title>
+<!--
+  Vista «Package» dell'Esplora file, contributo del plugin Java (docs/plugin-contributi.md).
+  Come «Packages» di IntelliJ: per ogni modulo Maven o Gradle, Sorgenti, Risorse e Test con i package compatti
+  (it.acme.app). Parla con l'app solo via postMessage (ready, rpc, init, state): l'app non sa nulla di Java.
+-->
+<style>
+  :root { --cct-bg:#09090b; --cct-surface:#18181b; --cct-surface-2:#1f1f23; --cct-border:#27272a; --cct-text:#fafafa; --cct-text-muted:#a1a1aa; --cct-text-faint:#71717a; --cct-accent:#e8875f; --cct-ok:#6fd39b; --cct-warn:#f5c46b; --cct-danger:#ff8a8a; --cct-info:#6ea8fe; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--cct-surface); color: var(--cct-text-muted); font: 12px/1.2 system-ui, sans-serif; overflow: hidden; }
+  #tree { height: 100%; overflow: auto; padding: 4px 0; }
+  .row { display: flex; align-items: center; gap: 4px; height: 22px; padding-right: 8px; cursor: pointer; white-space: nowrap; user-select: none; border-radius: 4px; }
+  .row:hover { background: var(--cct-surface-2); color: var(--cct-text); }
+  .row.bold { font-weight: 600; color: var(--cct-text); }
+  .caret { width: 12px; flex: none; text-align: center; color: var(--cct-text-faint); font-size: 9px; }
+  .ico { width: 14px; flex: none; text-align: center; }
+  .ico.mod { color: var(--cct-accent); } .ico.pkg { color: var(--cct-info); } .ico.dir { color: var(--cct-text-faint); }
+  .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .tags { margin-left: auto; display: flex; gap: 6px; font: 10px ui-monospace, monospace; flex: none; }
+  .tag-claude { background: color-mix(in srgb, var(--cct-info) 15%, transparent); color: var(--cct-info); border-radius: 3px; padding: 0 4px; }
+  .err { color: var(--cct-danger); }
+  .msg { padding: 12px; color: var(--cct-text-faint); line-height: 1.4; }
+  .warn { padding: 8px 12px; color: var(--cct-warn); font-size: 11px; }
+  #menu { position: fixed; z-index: 10; background: var(--cct-surface-2); border: 1px solid var(--cct-border); border-radius: 6px; padding: 4px; min-width: 170px; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: none; }
+  #menu div { padding: 5px 10px; border-radius: 4px; cursor: pointer; color: var(--cct-text); }
+  #menu div:hover { background: var(--cct-border); }
+</style>
+</head>
+<body>
+<div id="tree"><p class="msg">Caricamento…</p></div>
+<div id="menu"></div>
+<script>
+'use strict'
+// ---- Ponte con l'app ----
+let ctx = { win: false, cwd: '' }
+let decor = { git: {}, claude: [], errors: {} }
+let files = null
+let truncated = false
+const pending = new Map()
+let nextId = 1
+const rpc = (method, params) => new Promise((resolve, reject) => {
+  const id = nextId++
+  pending.set(id, { resolve, reject })
+  parent.postMessage({ cct: 'rpc', id, method, params }, '*')
+})
+window.addEventListener('message', (e) => {
+  const m = e.data
+  if (!m || typeof m !== 'object') return
+  if (m.cct === 'rpc-result') {
+    const p = pending.get(m.id)
+    pending.delete(m.id)
+    if (p) m.ok ? p.resolve(m.value) : p.reject(new Error(m.error || 'errore'))
+  } else if (m.cct === 'init') {
+    const cwdChanged = ctx.cwd !== m.cwd
+    ctx = { win: !!m.win, cwd: m.cwd }
+    for (const [k, v] of Object.entries(m.theme || {})) if (v) document.documentElement.style.setProperty(k, v)
+    if (cwdChanged) load()
+  } else if (m.cct === 'state') {
+    decor = m.decor || decor
+    // I file cambiano (git, Claude): si rilegge l'elenco e si ridisegna.
+    load()
+  }
+})
+
+// ---- Percorsi ----
+const SEP = () => (ctx.win ? '\\' : '/')
+const abs = (rel) => ctx.cwd.replace(/[\\/]+$/, '') + SEP() + rel.replace(/\\/g, SEP())
+const norm = (p) => { const n = p.replace(/\//g, '\\').replace(/\\+$/, ''); return ctx.win ? n.toLowerCase() : n }
+
+// ---- Costruzione dell'albero dai file (git ls-files, relativi, con \) ----
+const node = (name, rel) => ({ name, rel, dirs: new Map(), files: [] })
+function insert(root, parts, file) {
+  let n = root
+  for (let i = 0; i < parts.length - 1; i++) {
+    const rel = n.rel ? n.rel + '\\' + parts[i] : parts[i]
+    let next = n.dirs.get(parts[i])
+    if (!next) n.dirs.set(parts[i], (next = node(parts[i], rel)))
+    n = next
+  }
+  n.files.push(file)
+}
+// Package compatti come in IntelliJ: catena di cartelle senza file e con una sola sottocartella → «com.acme.app».
+function compact(n) {
+  let cur = n
+  const names = [n.name]
+  while (cur.files.length === 0 && cur.dirs.size === 1) { cur = [...cur.dirs.values()][0]; names.push(cur.name) }
+  return cur === n ? n : Object.assign({}, cur, { name: names.join('.') })
+}
+const ROOTS = [
+  { id: 'main-java', label: 'Sorgenti', kind: 'java', path: 'src\\main\\java' },
+  { id: 'main-kotlin', label: 'Sorgenti Kotlin', kind: 'java', path: 'src\\main\\kotlin' },
+  { id: 'main-res', label: 'Risorse', kind: 'plain', path: 'src\\main\\resources' },
+  { id: 'test-java', label: 'Test', kind: 'java', path: 'src\\test\\java' },
+  { id: 'test-kotlin', label: 'Test Kotlin', kind: 'java', path: 'src\\test\\kotlin' },
+  { id: 'test-res', label: 'Risorse test', kind: 'plain', path: 'src\\test\\resources' }
+]
+const BUILD = /^(pom\.xml|build\.gradle|build\.gradle\.kts)$/
+const HIDDEN = new Set(['target', 'build', 'node_modules', '.gradle', '.idea'])
+
+function buildModules(list, rootName) {
+  const split = list.map((f) => ({ f, parts: f.split('\\') }))
+  const dirs = new Set()
+  for (const { parts } of split) if (BUILD.test(parts[parts.length - 1])) dirs.add(parts.slice(0, -1).join('\\'))
+  if (!dirs.size && split.some(({ f }) => f.startsWith('src\\main\\java\\') || f.startsWith('src\\test\\java\\'))) dirs.add('')
+  if (!dirs.size) return []
+  const sorted = [...dirs].sort((a, b) => b.length - a.length) // le più profonde per prime
+  const modules = new Map(sorted.map((dir) => [dir, { dir, name: dir ? dir.split('\\').pop() : rootName, groups: [], other: node('', '') }]))
+  const trees = new Map()
+  for (const { f } of split) {
+    const dir = sorted.find((d) => d === '' || f.startsWith(d + '\\'))
+    if (dir === undefined) continue
+    const mod = modules.get(dir)
+    const inside = dir ? f.slice(dir.length + 1) : f
+    const src = ROOTS.find((s) => inside.startsWith(s.path + '\\'))
+    if (src) {
+      const key = dir + '|' + src.id
+      let tree = trees.get(key)
+      if (!tree) { tree = node(src.label, src.path); trees.set(key, tree); mod.groups.push({ id: src.id, label: src.label, kind: src.kind, tree }) }
+      insert(tree, inside.slice(src.path.length + 1).split('\\'), f)
+    } else {
+      if (HIDDEN.has(inside.split('\\')[0])) continue
+      insert(mod.other, inside.split('\\'), f)
+    }
+  }
+  const order = ROOTS.map((s) => s.id)
+  for (const m of modules.values()) m.groups.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+  return [...modules.values()].sort((a, b) => a.dir.localeCompare(b.dir))
+}
+
+// ---- Disegno ----
+const open = new Set()
+let seeded = ''
+const treeEl = document.getElementById('tree')
+const MARK = { M: 'var(--cct-warn)', A: 'var(--cct-ok)', D: 'var(--cct-danger)', R: 'var(--cct-info)', U: 'var(--cct-danger)' }
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const claude = () => new Set(decor.claude)
+
+function render() {
+  const top = treeEl.scrollTop
+  if (!files) return
+  const rootName = ctx.cwd.split(/[\\/]/).filter(Boolean).pop() || ctx.cwd
+  const modules = buildModules(files, rootName)
+  if (!modules.length) {
+    treeEl.innerHTML = '<p class="msg">Nessun modulo Maven o Gradle in questa cartella (pom.xml, build.gradle). Passa alla vista «File» per vedere le cartelle.</p>'
+    return
+  }
+  if (seeded !== ctx.cwd) {
+    seeded = ctx.cwd
+    open.clear()
+    for (const m of modules) { open.add('m:' + m.dir); for (const g of m.groups) open.add('g:' + m.dir + '|' + g.id) }
+  }
+  const cl = claude()
+  const out = []
+  const dirRow = (key, label, depth, icon, cls, bold) =>
+    `<div class="row${bold ? ' bold' : ''}" data-toggle="${esc(key)}" style="padding-left:${6 + depth * 14}px"><span class="caret">${open.has(key) ? '▼' : '▶'}</span><span class="ico ${cls}">${icon}</span><span class="name">${esc(label)}</span></div>`
+  const fileRow = (rel, depth) => {
+    const a = abs(rel)
+    const k = norm(a)
+    const mark = decor.git[k]
+    const errs = decor.errors[k]
+    return `<div class="row" data-file="${esc(rel)}" title="${esc(rel)}" style="padding-left:${6 + depth * 14}px"><span class="caret"></span><span class="ico dir">·</span><span class="name"${mark ? ` style="color:${MARK[mark]}"` : ''}>${esc(rel.split('\\').pop())}</span><span class="tags">${cl.has(k) ? '<span class="tag-claude">Claude</span>' : ''}${errs ? `<span class="err">${errs}</span>` : ''}${mark ? `<span style="color:${MARK[mark]}">${mark}</span>` : ''}</span></div>`
+  }
+  const tree = (prefix, n, depth, pkg) => {
+    const dirs = [...n.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
+    for (const d0 of pkg ? dirs.map(compact) : dirs) {
+      const key = prefix + '/' + d0.rel
+      out.push(dirRow(key, d0.name, depth, pkg ? '◈' : '▪', pkg ? 'pkg' : 'dir'))
+      if (open.has(key)) tree(prefix, d0, depth + 1, pkg)
+    }
+    for (const f of n.files.slice().sort((a, b) => a.localeCompare(b))) out.push(fileRow(f, depth))
+  }
+  for (const m of modules) {
+    const mk = 'm:' + m.dir
+    out.push(dirRow(mk, m.name, 0, '◼', 'mod', true))
+    if (!open.has(mk)) continue
+    for (const g of m.groups) {
+      const gk = 'g:' + m.dir + '|' + g.id
+      out.push(dirRow(gk, g.label, 1, '▪', 'dir'))
+      if (open.has(gk)) tree(gk, g.tree, 2, g.kind === 'java')
+    }
+    if (m.other.dirs.size + m.other.files.length) {
+      const ok = 'o:' + m.dir
+      out.push(dirRow(ok, 'Altri file', 1, '▪', 'dir'))
+      if (open.has(ok)) tree(ok, m.other, 2, false)
+    }
+  }
+  if (truncated) out.push('<p class="warn">Progetto molto grande: l\'elenco è stato tagliato, alcuni file potrebbero mancare.</p>')
+  treeEl.innerHTML = out.join('')
+  treeEl.scrollTop = top
+}
+
+let loading = false
+async function load() {
+  if (!ctx.cwd || loading) return
+  loading = true
+  try {
+    const idx = await rpc('files.index')
+    files = idx.files
+    truncated = idx.truncated
+    render()
+  } catch (err) {
+    treeEl.innerHTML = `<p class="msg">${esc(err.message)}</p>`
+  } finally {
+    loading = false
+  }
+}
+
+// ---- Interazione ----
+const menu = document.getElementById('menu')
+const hideMenu = () => (menu.style.display = 'none')
+treeEl.addEventListener('click', (e) => {
+  hideMenu()
+  const row = e.target.closest('.row')
+  if (!row) return
+  if (row.dataset.toggle) { const k = row.dataset.toggle; open.has(k) ? open.delete(k) : open.add(k); render() }
+  else if (row.dataset.file) rpc('editor.open', { path: abs(row.dataset.file) }).catch(() => {})
+})
+treeEl.addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('.row[data-file]')
+  if (!row) return
+  e.preventDefault()
+  const p = abs(row.dataset.file)
+  const items = [['Apri', () => rpc('editor.open', { path: p })], ['Mostra nel file manager', () => rpc('files.reveal', { path: p })], ['Copia percorso', () => rpc('clipboard.copy', { text: p })]]
+  menu.innerHTML = ''
+  for (const [label, fn] of items) { const d = document.createElement('div'); d.textContent = label; d.onclick = () => { hideMenu(); fn().catch(() => {}) }; menu.appendChild(d) }
+  menu.style.left = Math.min(e.clientX, innerWidth - 180) + 'px'
+  menu.style.top = Math.min(e.clientY, innerHeight - 100) + 'px'
+  menu.style.display = 'block'
+})
+window.addEventListener('blur', hideMenu)
+parent.postMessage({ cct: 'ready' }, '*')
+</script>
+</body>
+</html>

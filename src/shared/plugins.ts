@@ -30,8 +30,81 @@ export interface PluginManifest {
   downloads?: PluginDownload[]
   /** Runtime che il plugin mette a disposizione degli altri (es. «java»). */
   provides?: { runtimes?: Record<string, PluginRuntime> }
+  /** Punti dell'app a cui il plugin aggiunge cose (docs/plugin-contributi.md). */
+  contributes?: PluginContributions
+  /** Dati del plugin nelle impostazioni dell'app (la chiave deve iniziare con `plugin.<id>.` o con uno di questi prefissi). */
+  storage?: { settingsPrefixes?: string[] }
   /** Cosa fa il plugin, in frasi per l'utente: si mostra prima dell'installazione (X3). */
   activities?: string[]
+}
+
+/**
+ * Contributi di un plugin all'interfaccia. L'app offre i punti di aggancio e non sa cosa ci sia dentro: la pagina
+ * (HTML/JS/CSS) sta nel pacchetto e gira in un iframe isolato che parla con l'app via messaggi (PluginFrame).
+ */
+/** Indirizzo da cui l'iframe di un plugin carica la sua pagina: `app://plugin/<id-plugin>/<percorso>`. */
+export const PLUGIN_UI_HOST = 'plugin'
+export const pluginUiUrl = (pluginId: string, entry: string) => `app://${PLUGIN_UI_HOST}/${pluginId}/${entry.replace(/\\/g, '/')}`
+
+export interface PluginContributions {
+  /** Viste alternative dell'Esplora file (es. «Package» per Java). Compaiono solo con il plugin attivo. */
+  explorerViews?: PluginExplorerView[]
+  /** Segni nel margine dell'editor (breakpoint, riga fermata) per i file di certi linguaggi. */
+  editorGutter?: PluginEditorGutter
+  /** Voci della barra laterale (icona + pagina), per esempio «Esegui e debug» di Java. */
+  sidebarViews?: PluginSidebarView[]
+}
+
+/**
+ * Margine dell'editor: per i file dei linguaggi indicati l'app lascia lo spazio per i segni e, al clic su una riga,
+ * chiama il metodo dell'adapter. I segni (quali righe e di che tipo) li decide l'adapter con `app.editor.markers`.
+ */
+export interface PluginEditorGutter {
+  /** Id dei linguaggi (come in `languages`, anche di altri plugin). */
+  languages: string[]
+  /** Metodo dell'adapter chiamato al clic nel margine, con `{path, line}`. */
+  click: string
+}
+
+/** Aspetto di un segno nel margine: un vocabolario piccolo e fisso, scelto dall'app. */
+export type GutterKind = 'breakpoint' | 'breakpoint-disabled' | 'stopped'
+
+export interface GutterMarker {
+  /** Riga, da 1. */
+  line: number
+  kind: GutterKind
+  /** Suggerimento al passaggio del mouse. */
+  hint?: string
+  /** Apre il file e porta la riga in vista (per esempio la riga in cui il programma si ferma). */
+  reveal?: boolean
+}
+
+/** Segni di un file: sostituiscono i precedenti dello stesso plugin per quel file (`path: null` = tutti i file). */
+export interface GutterMarkersUpdate {
+  pluginId: string
+  path: string | null
+  markers: GutterMarker[]
+}
+
+export interface PluginSidebarView {
+  /** Unico dentro il plugin. */
+  id: string
+  title: string
+  /** Pagina HTML nel pacchetto. */
+  entry: string
+  /** Icona: file SVG nel pacchetto (es. «ui/run.svg»), mostrato come immagine. */
+  icon?: string
+  /** Scorciatoia da tastiera, per esempio «Ctrl+Maiusc+D» (la mostra nel suggerimento). */
+  shortcut?: string
+}
+
+export interface PluginExplorerView {
+  /** Unico dentro il plugin. */
+  id: string
+  /** Etichetta sul pulsante di scelta della vista. */
+  title: string
+  /** Pagina HTML nel pacchetto (percorso relativo, es. «ui/packages.html»). */
+  entry: string
 }
 
 export interface PluginLanguage {

@@ -42,6 +42,8 @@ export function SideBarPanel() {
   const width = useSidebar((s) => s.width)
   const dragging = useRef(false)
   const view = views.find((v) => v.id === active)
+  const viewsRef = useRef(views)
+  viewsRef.current = views
 
   // Scorciatoie: Ctrl+Maiusc+E mostra o nasconde l'Esplora file (Ctrl+B resterebbe al terminale), Ctrl+Maiusc+F la ricerca.
   useEffect(() => {
@@ -57,6 +59,20 @@ export function SideBarPanel() {
         if (!t?.closest?.('.monaco-editor, .xterm, input, textarea, [contenteditable=true]') && openMarkdownFind()) {
           e.preventDefault()
           e.stopPropagation()
+        }
+      }
+      // Scorciatoie dichiarate dai plugin per le loro viste (es. «Ctrl+Maiusc+D»): Ctrl/Maiusc/Alt + una lettera o cifra.
+      for (const v of viewsRef.current) {
+        const m = v.shortcut && /^((?:ctrl|maiusc|alt)\+)+([a-z0-9])$/i.exec(v.shortcut.trim())
+        if (!m) continue
+        const parts = v.shortcut!.toLowerCase().split('+')
+        const want = { ctrl: parts.includes('ctrl'), shift: parts.includes('maiusc'), alt: parts.includes('alt') }
+        const key = parts[parts.length - 1]
+        if (v.id.includes(':') && e.ctrlKey === want.ctrl && e.shiftKey === want.shift && e.altKey === want.alt && e.key.toLowerCase() === key) {
+          e.preventDefault()
+          e.stopPropagation()
+          useSidebar.getState().toggle(v.id)
+          return
         }
       }
       // Ctrl+Maiusc+D: Esegui e debug (solo con il pack Java).

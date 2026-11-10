@@ -6,6 +6,7 @@ Documenti di riferimento (da leggere prima di cambiamenti grossi):
 - [requisiti-claude-code-terminal.md](requisiti-claude-code-terminal.md): requisiti con ID (L1, S3, F4, X2…) e decisioni prese (§9).
 - [stack-tecnico.md](stack-tecnico.md): architettura, fasi di sviluppo (§5), rischi e decisioni aperte (§7).
 - [docs/plugin-api.md](docs/plugin-api.md): CCT Plugin API v1 per i plugin di linguaggio.
+- [docs/plugin-contributi.md](docs/plugin-contributi.md): contributi dei plugin all'interfaccia (viste, pagine in iframe isolato) e piano per portare Java fuori dal core. **Regola: niente di specifico di un linguaggio nel core dell'app, va nel plugin.**
 - [piano-release-2.md](piano-release-2.md): progetti, contesti, casella di input e output smart (J, B, O), decisioni e cosa è stato provato.
 - [README.md](README.md): stato per fase, comandi, installer e aggiornamenti.
 

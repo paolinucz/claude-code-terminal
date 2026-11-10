@@ -96,7 +96,7 @@ export class PluginManager {
     }
   }
 
-  private isActive(id: string): boolean {
+  isActive(id: string): boolean {
     const p = this.plugins.get(id)
     return Boolean(p && p.enabled && p.state !== 'modified')
   }
@@ -338,6 +338,22 @@ function validate(m: PluginManifest): string[] {
   }
   if (m.main !== undefined && (typeof m.main !== 'string' || /\.\.|^[\\/]|:/.test(m.main) || !/\.(mjs|cjs|js)$/.test(m.main))) {
     p.push('«main» deve essere un file .mjs, .cjs o .js dentro il pacchetto')
+  }
+  const rel = (v: unknown) => typeof v === 'string' && v !== '' && !/\.\.|^[\\/]|:/.test(v)
+  for (const v of m.contributes?.explorerViews ?? []) {
+    if (!v.id || !v.title || !rel(v.entry) || !/\.html?$/.test(v.entry)) p.push(`vista dell'Esplora file non valida: ${v.id ?? '?'} (serve id, title ed entry .html dentro il pacchetto)`)
+  }
+  const gut = m.contributes?.editorGutter
+  if (gut && (!Array.isArray(gut.languages) || !gut.languages.length || gut.languages.some((l) => typeof l !== 'string') || typeof gut.click !== 'string' || !gut.click)) {
+    p.push('«editorGutter» richiede languages (elenco di id) e click (nome del metodo dell\'adapter)')
+  }
+  for (const v of m.contributes?.sidebarViews ?? []) {
+    if (!v.id || !v.title || !rel(v.entry) || !/\.html?$/.test(v.entry) || (v.icon !== undefined && (!rel(v.icon) || !/\.svg$/.test(v.icon)))) {
+      p.push(`voce della barra laterale non valida: ${v.id ?? '?'} (serve id, title, entry .html ed eventuale icon .svg dentro il pacchetto)`)
+    }
+  }
+  if (m.storage?.settingsPrefixes !== undefined && (!Array.isArray(m.storage.settingsPrefixes) || m.storage.settingsPrefixes.some((x) => typeof x !== 'string' || !/^[a-z][\w.-]*\.$/.test(x)))) {
+    p.push('«storage.settingsPrefixes» deve essere un elenco di prefissi come «java.»')
   }
   if (m.handles !== undefined && (!Array.isArray(m.handles) || m.handles.some((h) => typeof h !== 'string'))) p.push('«handles» deve essere un elenco di id di linguaggio')
   for (const l of m.languages ?? []) if (!l.id || !l.monaco) p.push(`linguaggio incompleto: ${l.id ?? '?'}`)

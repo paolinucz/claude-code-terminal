@@ -16,6 +16,7 @@ import {
   type LogNotification,
   type StatusNotification
 } from '@shared/pluginApi'
+import type { GutterMarker, GutterMarkersUpdate } from '@shared/plugins'
 import type { AdapterSpec, PluginManager } from './PluginManager'
 
 /** Un adapter in esecuzione: un processo per plugin. */
@@ -50,6 +51,22 @@ interface Doc {
 const REQUEST_TIMEOUT = 20000
 
 /**
+ * Servizi dell'app a disposizione degli adapter dei plugin (CCT Plugin API, «host/…»): impostazioni, terminali in
+ * attività, richieste agli adapter di altri plugin, eventi verso le pagine del plugin. Li fornisce `index.ts`.
+ */
+export interface HostServices {
+  getSetting(key: string): unknown
+  setSetting(key: string, value: unknown): void
+  createTask(req: Record<string, unknown>): Promise<unknown>
+  killSession(id: string): void
+  sessionStatus(id: string): string | undefined
+  /** Evento dell'adapter per le pagine di quel plugin (le mostra l'interfaccia). */
+  emit(pluginId: string, event: string, data: unknown): void
+  /** Segni nel margine dell'editor mandati dall'adapter. */
+  markers(update: GutterMarkersUpdate): void
+}
+
+/**
  * Host dei plugin (X1–X9): avvia l'adapter di ogni plugin in un processo Node separato e ci parla
  * con la CCT Plugin API (docs/plugin-api.md). L'app non conosce i language server: le particolarità
  * di ciascuno stanno nel suo adapter. Un file può andare a più plugin (X6): completamento e
@@ -58,6 +75,11 @@ const REQUEST_TIMEOUT = 20000
 export class PluginHost {
   private hosts = new Map<string, Host>()
   private docs = new Map<string, Doc>()
+
+  private services: HostServices | null = null
+  setServices(s: HostServices): void {
+    this.services = s
+  }
 
   constructor(
     private readonly plugins: PluginManager,
@@ -111,6 +133,7 @@ export class PluginHost {
     })
     conn.onNotification('status', (p: StatusNotification) => this.setStatus(host, p))
     conn.onNotification('log', (p: LogNotification) => console.log(`[plugin ${spec.pluginId}] ${p.level}: ${p.message}`))
+    this.registerHostRequests(host)
     conn.onError(() => {})
     conn.onClose(() => {})
     conn.listen()
@@ -134,6 +157,46 @@ export class PluginHost {
       }
     })()
     return host
+  }
+
+  /**
+   * Richieste dall'adapter all'app. Ogni plugin vede solo le proprie impostazioni (chiavi `plugin.<id>.…` o i prefissi
+   * dichiarati nel manifest in `storage.settingsPrefixes`) e può chiedere un'azione a un altro plugin solo se lo richiede.
+   */
+  private registerHostRequests(host: Host): void {
+    const id = host.spec.pluginId
+    const svc = () => {
+      if (!this.services) throw new Error('Servizi dell\'app non pronti')
+      return this.services
+    }
+    const prefixes = () => [`plugin.${id}.`, ...(this.plugins.list().find((p) => p.manifest.id === id)?.manifest.storage?.settingsPrefixes ?? [])]
+    const keyOf = (p: unknown): string => {
+      const key = (p as { key?: unknown } | null)?.key
+      if (typeof key !== 'string' || !prefixes().some((x) => key.startsWith(x))) throw new Error(`Il plugin non può usare l'impostazione «${String(key)}»`)
+      return key
+    }
+    host.conn.onRequest('host/settings.get', (p: unknown) => svc().getSetting(keyOf(p)) ?? null)
+    host.conn.onRequest('host/settings.set', (p: unknown) => {
+      svc().setSetting(keyOf(p), (p as { value?: unknown }).value ?? null)
+      return null
+    })
+    host.conn.onRequest('host/session.create', (p: unknown) => svc().createTask(((p as { request?: Record<string, unknown> })?.request ?? {}) as Record<string, unknown>))
+    host.conn.onRequest('host/session.kill', (p: unknown) => (svc().killSession(String((p as { id?: unknown })?.id ?? '')), null))
+    host.conn.onRequest('host/session.status', (p: unknown) => svc().sessionStatus(String((p as { id?: unknown })?.id ?? '')) ?? null)
+    // Richiesta all'adapter di un altro plugin richiesto da questo (`requires` nel manifest).
+    host.conn.onRequest('host/plugin.call', (p: unknown) => {
+      const q = p as { plugin?: string; method?: string; params?: Record<string, unknown> }
+      const me = this.plugins.list().find((x) => x.manifest.id === id)
+      if (!q?.plugin || !q.method || !me?.manifest.requires?.includes(q.plugin)) throw new Error(`Il plugin non può chiamare «${String(q?.plugin)}»: manca in «requires»`)
+      return this.call(q.plugin, q.method, q.params ?? {})
+    })
+    host.conn.onNotification('editor/markers', (p: { path?: string | null; markers?: unknown }) => {
+      const markers = Array.isArray(p?.markers) ? (p.markers as GutterMarker[]).filter((m) => m && Number.isInteger(m.line) && m.line > 0 && ['breakpoint', 'breakpoint-disabled', 'stopped'].includes(m.kind)) : []
+      this.services?.markers({ pluginId: id, path: typeof p?.path === 'string' ? p.path : null, markers })
+    })
+    host.conn.onNotification('ui/event', (p: { event?: string; data?: unknown }) => {
+      if (p && typeof p.event === 'string') this.services?.emit(id, p.event, p.data ?? null)
+    })
   }
 
   private setStatus(host: Host, p: StatusNotification): void {

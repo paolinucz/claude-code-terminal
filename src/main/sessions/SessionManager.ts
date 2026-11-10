@@ -474,9 +474,9 @@ export class SessionManager {
   }
 
   /** Titolo e cartella di una sessione (per registrare le modifiche ai file). */
-  ref(id: string): { title: string; cwd: string } | undefined {
+  ref(id: string): { title: string; cwd: string; addDirs?: string[] } | undefined {
     const s = this.sessions.get(id)
-    return s ? { title: s.info.title, cwd: s.info.cwd } : undefined
+    return s ? { title: s.info.title, cwd: s.info.cwd, addDirs: s.info.addDirs } : undefined
   }
 
   handleStatusLine(id: string, payload: StatusLinePayload): void {

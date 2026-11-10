@@ -6,6 +6,7 @@ import { useSessions } from '@/state/sessions'
 import { useTerminalSettings } from '@/state/terminalSettings'
 import { useWorkspace } from '@/state/workspace'
 import { startJavaDev } from '@/state/javaFollow'
+import { startPluginGutter } from '@/state/pluginGutter'
 import { useRecent } from '@/state/recent'
 import { useSidebar } from '@/state/sidebar'
 import { ActivityBar, SideBarPanel } from '@/workspace/SideBar'
@@ -24,6 +25,7 @@ export function App() {
     void useSidebar.getState().load()
     void useRecent.getState().load()
     startJavaDev()
+    startPluginGutter()
     useEditor.getState().init()
   }, [load])
 

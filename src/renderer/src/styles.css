@@ -248,3 +248,14 @@
 .cct-chat .cct-md > :first-child { margin-top: 0; }
 .cct-chat .cct-md > :last-child { margin-bottom: 0; }
 .cct-chat .cct-md h1, .cct-chat .cct-md h2, .cct-chat .cct-md h3 { font-size: 1rem; border: 0; padding: 0; margin: 1em 0 0.4em; }
+/* Monaco mette il menu contestuale fuori dall'editor (nel body) e le sue variabili di colore non lo raggiungono:
+   le ridefiniamo qui, per averlo opaco e nel tema dell'app. */
+:root {
+  --vscode-menu-background: #18181b;
+  --vscode-menu-foreground: #e4e4e7;
+  --vscode-menu-selectionBackground: #3f3f46;
+  --vscode-menu-selectionForeground: #fafafa;
+  --vscode-menu-separatorBackground: #3f3f46;
+  --vscode-menu-border: #3f3f46;
+  --vscode-widget-shadow: rgba(0, 0, 0, 0.5);
+}

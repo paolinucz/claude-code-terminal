@@ -10,7 +10,7 @@ import type {
   LspStatus,
   SaveFileResult
 } from './files'
-import type { InstalledPlugin, PluginInstallProgress, PluginLanguageInfo, PluginPreview } from './plugins'
+import type { GutterMarkersUpdate, InstalledPlugin, PluginInstallProgress, PluginLanguageInfo, PluginPreview } from './plugins'
 import type { ApiCompletionList, ApiHover, ApiLocation, ApiPosition } from './pluginApi'
 import type {
   ClaudeCliInfo,
@@ -133,6 +133,12 @@ export interface AppApi {
     uninstall(id: string): Promise<{ ok: boolean; error?: string }>
     onChanged(cb: (list: InstalledPlugin[], languages: PluginLanguageInfo[]) => void): () => void
     onProgress(cb: (p: PluginInstallProgress) => void): () => void
+    /** Una pagina del plugin chiama l'adapter del proprio plugin (contributi). */
+    call(pluginId: string, method: string, params?: Record<string, unknown>): Promise<unknown>
+    /** Eventi mandati dall'adapter di un plugin alle sue pagine. */
+    onEvent(cb: (e: { pluginId: string; event: string; data: unknown }) => void): () => void
+    /** Segni nel margine dell'editor mandati dagli adapter (contributo `editorGutter`). */
+    onMarkers(cb: (u: GutterMarkersUpdate) => void): () => void
   }  /** Permessi di Claude Code nei tre file di impostazioni (P1–P6). */
   permissions: {
     /** Legge i tre ambiti e inizia a osservarne i file (una cartella di progetto alla volta). */
@@ -197,7 +203,7 @@ export interface AppApi {
     /** Segna la sessione come ferma (Claude interrotto con Esc non lo comunica): sblocca la revisione. */
     markIdle(sessionId: string): Promise<void>
     /** Casella di input dell'app (B1–B3): manda un messaggio a una sessione Claude Code (incolla + Invio). Rifiuta se Claude aspetta una risposta. */
-    /** Un tasto al terminale: esc, enter, up, down o una cifra 1–9 (risposte ai permessi, interruzione). */
+    /** Un tasto al terminale: esc, enter, up, down, space o una cifra 1–9 (risposte ai permessi, interruzione). */
     key(sessionId: string, key: string): void
     sendPrompt(sessionId: string, text: string): Promise<{ ok: boolean; error?: string }>
     onChanged(cb: (sessions: SessionInfo[]) => void): () => void

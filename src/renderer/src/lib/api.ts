@@ -4,7 +4,7 @@ import type { SessionAttention, SessionInfo } from '@shared/sessions'
 import { emptyProjectFile } from '@shared/project'
 import { isOpen, type FileChange, type RevisionRequest } from '@shared/changes'
 import type { FileDiagnostics, LspStatus } from '@shared/files'
-import type { InstalledPlugin, PluginLanguageInfo, PluginManifest } from '@shared/plugins'
+import type { GutterMarker, InstalledPlugin, PluginLanguageInfo, PluginManifest } from '@shared/plugins'
 import type {
   Decision,
   ExternalChange,
@@ -288,6 +288,7 @@ function createDemoPlugins(): AppApi['plugins'] {
     id: 'cct.java', name: 'Java', version: '1.0.0', publisher: 'Claude Code Terminal', license: 'EPL-2.0',
     description: 'Eclipse JDT Language Server con un JRE 25 Temurin.',
     languages: [{ id: 'java', extensions: ['.java'], monaco: 'java' }],
+    contributes: { editorGutter: { languages: ['java'], click: 'gutter.click' } },
     provides: { runtimes: { java: { command: '${downloads}/jre/bin/java.exe' } } },
     downloads: [
       { id: 'jre', url: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_windows_hotspot_25.0.5_8.zip', sha256: 'a'.repeat(64), size: 58720256, type: 'zip', to: 'jre', strip: true },
@@ -341,7 +342,16 @@ function createDemoPlugins(): AppApi['plugins'] {
       return { ok: true }
     },
     onChanged: (cb) => (listeners.add(cb), () => listeners.delete(cb)),
-    onProgress: () => () => {}
+    onProgress: () => () => {},
+    async call() {
+      throw new Error('Gli adapter dei plugin girano solo nell’app')
+    },
+    onEvent: () => () => {},
+    // Nel browser i segni si provano da console: window.__demoMarkers('<percorso>', [{ line: 3, kind: 'breakpoint' }])
+    onMarkers: (cb) => {
+      ;(window as unknown as Record<string, unknown>).__demoMarkers = (path: string, markers: GutterMarker[]) => cb({ pluginId: 'cct.java', path, markers })
+      return () => {}
+    }
   }
 }
 /**

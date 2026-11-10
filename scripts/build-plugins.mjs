@@ -82,6 +82,8 @@ function pack(staging, source, manifest) {
   if (source) {
     cpSync(join(ROOT, 'plugins', source, 'adapter.mjs'), join(staging, 'adapter.mjs'))
     cpSync(join(ROOT, 'plugins', 'sdk', 'cct-plugin-sdk.mjs'), join(staging, 'cct-plugin-sdk.mjs'))
+    // Pagine dell'interfaccia del plugin (contributi, docs/plugin-contributi.md): plugins/<nome>/ui → ui/ nel pacchetto.
+    if (existsSync(join(ROOT, 'plugins', source, 'ui'))) cpSync(join(ROOT, 'plugins', source, 'ui'), join(staging, 'ui'), { recursive: true })
     manifest = { ...manifest, apiVersion: 1, main: 'adapter.mjs' }
   } else {
     manifest = { ...manifest, apiVersion: 1 }
@@ -176,11 +178,13 @@ const PLUGINS = {
     pack(dir, 'java', {
       id: 'cct.java',
       name: 'Java',
-      version: '1.1.0',
+      version: '1.2.0',
       publisher: PUBLISHER,
       license: 'EPL-2.0 (jdtls), GPLv2 con Classpath Exception (Temurin)',
       description: `Eclipse JDT Language Server ${version} con un JRE ${jre.version.semver} (Eclipse Temurin). Importa i progetti Maven e Gradle. Fornisce Java ai plugin Maven e Gradle.`,
       languages: [{ id: 'java', extensions: ['.java'], monaco: 'java' }],
+      // Vista «Package» dell'Esplora file (come IntelliJ): la pagina sta nel pacchetto, l'app non sa nulla di Java.
+      contributes: { explorerViews: [{ id: 'packages', title: 'Package', entry: 'ui/packages.html' }] },
       downloads: [
         { id: 'jre', url: jre.binary.package.link, sha256: jre.binary.package.checksum, size: jre.binary.package.size, type: 'zip', to: 'jre', strip: true },
         { id: 'jdtls', url: base + name, sha256: jdtlsSha, size: readFileSync(tgz).length, type: 'tar.gz', to: 'jdtls' }
@@ -194,6 +198,7 @@ const PLUGINS = {
       activities: [
         `Avvia Eclipse JDT Language Server ${version} con il JRE del plugin, uno per progetto (il più esterno con pom.xml o build.gradle)`,
         'Importa i progetti Maven e Gradle: può scaricare le loro dipendenze da Maven Central',
+        'Aggiunge all\'Esplora file la vista «Package» (moduli, sorgenti, test e package compatti)',
         'Tiene le sue cache nella cartella dati dell\'app'
       ]
     })

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { diffLines } from 'diff'
-import { ArrowDown, Check, Copy, Hand, Square } from 'lucide-react'
+import { ArrowDown, Check, ChevronLeft, ChevronRight, Copy, Hand, Square } from 'lucide-react'
 import type { SessionInfo } from '@shared/sessions'
-import type { ChatItem, FileEdit as Edit } from '@shared/transcript'
+import type { AskQuestion, ChatItem, FileEdit as Edit } from '@shared/transcript'
 import { renderMarkdown } from '@/docs/markdown'
 import { MarkdownView } from '@/docs/MarkdownView'
 import { api } from '@/lib/api'
@@ -22,7 +22,7 @@ type Block = { kind: 'item'; item: ChatItem } | { kind: 'tools'; items: ToolItem
 function toBlocks(items: ChatItem[]): Block[] {
   const out: Block[] = []
   for (const item of items) {
-    if (item.kind === 'tool' && !EDIT_TOOLS.has(item.name)) {
+    if (item.kind === 'tool' && !EDIT_TOOLS.has(item.name) && !item.questions) {
       const last = out.at(-1)
       if (last?.kind === 'tools') last.items.push(item)
       else out.push({ kind: 'tools', items: [item] })
@@ -104,7 +104,9 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
   const blocks = useMemo(() => toBlocks(items.slice(Math.max(0, items.length - shown))), [items, shown])
   const hidden = Math.max(0, items.length - shown)
   const working = session.status === 'working'
-  const waiting = session.status === 'waiting'
+  // Una domanda interattiva di Claude senza risposta: ha la sua scheda e sostituisce la barra dei permessi.
+  const pendingQuestion = useMemo(() => items.some((it) => it.kind === 'tool' && it.questions && it.result === undefined), [items])
+  const waiting = session.status === 'waiting' && !pendingQuestion
 
   return (
     <div className="cct-chat absolute inset-0 z-10 flex flex-col bg-surface">
@@ -136,6 +138,8 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
               <UserBubble key={b.item.id} text={b.item.text} ts={b.item.ts} />
             ) : b.item.kind === 'assistant' ? (
               <AssistantBlock key={b.item.id} text={b.item.text} ts={b.item.ts} />
+            ) : b.item.questions ? (
+              <QuestionCard key={b.item.id} item={b.item} sessionId={session.id} live={session.status !== 'exited'} onShowTerminal={onShowTerminal} />
             ) : (
               <EditCard key={b.item.id + i} item={b.item} />
             )
@@ -382,6 +386,162 @@ function EditCard({ item }: { item: ToolItem }) {
           </button>
         )}
         {item.isError && item.result && <pre className="mt-1 font-mono text-[11.5px] whitespace-pre-wrap text-danger">{item.result}</pre>}
+      </div>
+    </div>
+  )
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const STEP_MS = 140
+
+/**
+ * Domanda interattiva di Claude (AskUserQuestion). Si scelgono le opzioni qui e l'app le «digita» nel terminale come
+ * farebbe l'utente: frecce per arrivare all'opzione, spazio per le scelte multiple, Invio per confermare. La risposta
+ * libera («Altro») resta nel terminale. Risposta data: la domanda resta, con l'esito di Claude.
+ */
+function QuestionCard({ item, sessionId, live, onShowTerminal }: { item: ToolItem; sessionId: string; live: boolean; onShowTerminal(): void }) {
+  const questions = item.questions ?? []
+  const answered = item.result !== undefined
+  // Una scelta per domanda (singola) o più (multipla), come indici delle opzioni.
+  const [picked, setPicked] = useState<number[][]>(() => questions.map(() => []))
+  const [sending, setSending] = useState(false)
+  const [step, setStep] = useState(0)
+  const ready = questions.every((_q, i) => picked[i].length > 0)
+
+  const toggle = (qi: number, oi: number, q: AskQuestion) =>
+    setPicked((p) => p.map((sel, i) => (i !== qi ? sel : q.multiSelect ? (sel.includes(oi) ? sel.filter((x) => x !== oi) : [...sel, oi].sort((a, b) => a - b)) : [oi])))
+
+  const send = async () => {
+    setSending(true)
+    const key = (k: string) => api.sessions.key(sessionId, k)
+    try {
+      for (let qi = 0; qi < questions.length; qi++) {
+        let cursor = 0
+        for (const oi of picked[qi]) {
+          for (; cursor < oi; cursor++) {
+            key('down')
+            await sleep(STEP_MS)
+          }
+          if (questions[qi].multiSelect) {
+            key('space')
+            await sleep(STEP_MS)
+          }
+        }
+        key('enter')
+        await sleep(STEP_MS * 2)
+      }
+      // Con più domande Claude Code chiede una conferma finale («Submit»).
+      if (questions.length > 1) key('enter')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const last = questions.length - 1
+  const goTo = (i: number) => setStep(Math.max(0, Math.min(last, i)))
+  // Scelta singola: dopo il clic si passa da soli alla domanda successiva (l'ultima resta, per «Invia»).
+  const pick = (qi: number, oi: number, q: AskQuestion) => {
+    toggle(qi, oi, q)
+    if (!q.multiSelect && qi < last) window.setTimeout(() => setStep((cur) => (cur === qi ? qi + 1 : cur)), 260)
+  }
+
+  return (
+    <div className="flex gap-2">
+      <span aria-hidden className={cn('mt-[3px] w-4 shrink-0 text-center leading-none select-none', answered ? 'text-ok' : 'animate-pulse text-warn')}>
+        ●
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="overflow-hidden rounded-xl border border-border bg-surface-2">
+          {/* Carosello: le domande stanno in fila e la fila scorre di una larghezza per volta. */}
+          <div className="flex transition-transform duration-300 ease-out" style={{ transform: `translateX(-${step * 100}%)` }}>
+            {questions.map((q, qi) => (
+              <section key={qi} aria-hidden={qi !== step} aria-label={`Domanda ${qi + 1} di ${questions.length}`} className="w-full shrink-0 p-4" inert={qi !== step}>
+                <div className="flex items-center gap-2">
+                  {q.header && <span className="rounded bg-border px-1.5 py-0.5 text-[11px] text-text-subtle">{q.header}</span>}
+                  {questions.length > 1 && <span className="ml-auto text-[11px] text-text-faint">{qi + 1} / {questions.length}</span>}
+                </div>
+                <p className="mt-1.5 text-[14px] font-semibold text-foreground">{q.question}</p>
+                {q.multiSelect && !answered && <p className="text-[11px] text-text-faint">Puoi sceglierne più d'una.</p>}
+                <div className="mt-3 flex flex-col gap-1.5">
+                  {q.options.map((o, oi) => {
+                    const on = picked[qi]?.includes(oi)
+                    return (
+                      <button
+                        key={oi}
+                        type="button"
+                        disabled={answered || !live || sending}
+                        aria-pressed={on}
+                        onClick={() => pick(qi, oi, q)}
+                        className={cn(
+                          'flex items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors disabled:cursor-default',
+                          on ? 'border-brand bg-brand/10 text-foreground' : 'border-border text-text-muted hover:bg-border hover:text-foreground disabled:hover:bg-transparent'
+                        )}
+                      >
+                        <span
+                          aria-hidden
+                          className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center border text-[10px]', q.multiSelect ? 'rounded' : 'rounded-full', on ? 'border-brand bg-brand text-on-brand' : 'border-strong')}
+                        >
+                          {on && '✓'}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="font-medium">{o.label}</span>
+                          {o.description && <span className="block text-[12px] text-text-subtle">{o.description}</span>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+
+          {/* Barra del carosello: indietro, puntini (colorati se la domanda ha una risposta), avanti o invio. */}
+          <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+            {questions.length > 1 && (
+              <button type="button" aria-label="Domanda precedente" disabled={step === 0} onClick={() => goTo(step - 1)} className="inline-flex size-7 items-center justify-center rounded-md text-text-subtle hover:bg-border hover:text-foreground disabled:opacity-30">
+                <ChevronLeft size={15} />
+              </button>
+            )}
+            {questions.length > 1 && (
+              <div className="flex items-center gap-1.5" role="tablist" aria-label="Domande">
+                {questions.map((_q, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    role="tab"
+                    aria-selected={i === step}
+                    aria-label={`Vai alla domanda ${i + 1}`}
+                    onClick={() => goTo(i)}
+                    className={cn('h-2 rounded-full transition-all', i === step ? 'w-5 bg-brand' : picked[i].length || answered ? 'w-2 bg-ok' : 'w-2 bg-strong hover:bg-text-faint')}
+                  />
+                ))}
+              </div>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              {!answered && (
+                <button type="button" onClick={onShowTerminal} className="h-7 rounded-md px-2 text-[12px] text-text-subtle hover:bg-border hover:text-foreground" title="Per una risposta libera («Altro») o se qualcosa non va come previsto">
+                  Nel terminale
+                </button>
+              )}
+              {!answered && step < last && (
+                <button type="button" onClick={() => goTo(step + 1)} className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-[12px] text-text-muted hover:bg-border hover:text-foreground">
+                  Avanti <ChevronRight size={13} />
+                </button>
+              )}
+              {!answered && step === last && (
+                <button type="button" disabled={!ready || sending || !live} onClick={() => void send()} title={ready ? undefined : 'Rispondi a tutte le domande'} className="h-7 rounded-md bg-brand px-3 text-[12px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-40">
+                  {sending ? 'Invio…' : questions.length > 1 && !ready ? `Rispondi a tutte (${picked.filter((p) => p.length).length}/${questions.length})` : 'Invia risposta'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        {answered && (
+          <div className="mt-1.5 flex gap-1.5 font-mono text-[12px] text-text-faint">
+            <span aria-hidden>⎿</span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap">{(item.result ?? '').replace(/^User has answered your questions:\s*/i, 'Risposta: ').slice(0, 400)}</span>
+          </div>
+        )}
       </div>
     </div>
   )

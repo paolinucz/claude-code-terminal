@@ -2,13 +2,21 @@
 export type ChatItem =
   | { id: string; kind: 'user'; text: string; ts?: string }
   | { id: string; kind: 'assistant'; text: string; ts?: string; model?: string }
-  | { id: string; kind: 'tool'; name: string; summary: string; input: string; result?: string; isError?: boolean; ts?: string; edits?: FileEdit[] }
+  | { id: string; kind: 'tool'; name: string; summary: string; input: string; result?: string; isError?: boolean; ts?: string; edits?: FileEdit[]; questions?: AskQuestion[] }
 
 /** Parte di un file cambiata da Edit, MultiEdit o Write (per mostrare il diff nella conversazione). Per Write `old` è vuoto. */
 export interface FileEdit {
   file: string
   old: string
   new: string
+}
+
+/** Domanda interattiva di Claude (strumento AskUserQuestion): scelte tra opzioni. */
+export interface AskQuestion {
+  question: string
+  header?: string
+  multiSelect: boolean
+  options: { label: string; description?: string }[]
 }
 
 export interface TranscriptUpdate {
@@ -45,6 +53,22 @@ function editsOf(name: string, input: Record<string, unknown>): FileEdit[] | und
     return input.edits.slice(0, 20).map((e) => ({ file, old: s((e as Record<string, unknown>).old_string), new: s((e as Record<string, unknown>).new_string) }))
   }
   return undefined
+}
+
+/** Domande di una chiamata ad AskUserQuestion. */
+function questionsOf(name: string, input: Record<string, unknown>): AskQuestion[] | undefined {
+  if (name !== 'AskUserQuestion' || !Array.isArray(input.questions)) return undefined
+  const s = (v: unknown) => (typeof v === 'string' ? v : '')
+  const out = input.questions
+    .map((q) => q as Record<string, unknown>)
+    .filter((q) => typeof q.question === 'string' && Array.isArray(q.options))
+    .map((q) => ({
+      question: s(q.question),
+      header: s(q.header) || undefined,
+      multiSelect: q.multiSelect === true,
+      options: (q.options as Record<string, unknown>[]).map((o) => ({ label: s(o.label), description: s(o.description) || undefined }))
+    }))
+  return out.length ? out : undefined
 }
 
 const toText = (content: unknown): string => {
@@ -89,7 +113,7 @@ export function parseTranscriptLine(line: string, tools: Map<string, ChatItem & 
     } else if (b.type === 'tool_use' && typeof b.id === 'string') {
       const input = (b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown>
       const name = typeof b.name === 'string' ? b.name : 'Strumento'
-      const item = { id, kind: 'tool' as const, name, summary: summarize(name, input), input: clip(JSON.stringify(input, null, 2), MAX_INPUT), ts, edits: editsOf(name, input) }
+      const item = { id, kind: 'tool' as const, name, summary: summarize(name, input), input: clip(JSON.stringify(input, null, 2), MAX_INPUT), ts, edits: editsOf(name, input), questions: questionsOf(name, input) }
       tools.set(b.id, item)
       out.push(item)
     } else if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {

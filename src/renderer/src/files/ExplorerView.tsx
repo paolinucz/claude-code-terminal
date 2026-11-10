@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, FolderOpen, GitBranch, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, FolderOpen, FolderTree, GitBranch, LayoutList, RefreshCw } from 'lucide-react'
 import { normPath, type DirEntry, type GitMark, type GitStatus } from '@shared/files'
 import { isOpen } from '@shared/changes'
 import { api } from '@/lib/api'
@@ -11,6 +11,7 @@ import { workdirForSheet } from '@/state/project'
 import { useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
 import { FileIcon } from '@/lib/fileIcons'
+import { PluginFrame, type ExplorerDecor } from '@/plugins/PluginFrame'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui-kit'
 
 const MARK_COLORS: Record<GitMark, string> = {
@@ -46,6 +47,26 @@ export function ExplorerView() {
   const sessions = useSessions((s) => s.sessions)
   const changes = useChanges((s) => s.changes)
   const diagnostics = useEditor((s) => s.diagnostics)
+  // Viste alternative portate dai plugin attivi (es. «Package» del plugin Java): l'app non sa cosa siano, mostra
+  // la pagina del plugin in un iframe isolato. Senza plugin con viste, l'Esplora file è solo l'albero delle cartelle.
+  const plugins = useEditor((s) => s.plugins)
+  const contributed = useMemo(
+    () =>
+      plugins
+        .filter((p) => p.enabled && p.state === 'ok')
+        .flatMap((p) => (p.manifest.contributes?.explorerViews ?? []).map((v) => ({ key: `${p.manifest.id}:${v.id}`, pluginId: p.manifest.id, title: v.title, entry: v.entry }))),
+    [plugins]
+  )
+  const [view, setViewState] = useState<string | null>(null)
+  useEffect(() => {
+    void api.settings.get('explorer.view').then((v) => typeof v === 'string' && setViewState(v))
+  }, [])
+  const setView = (v: string) => {
+    setViewState(v)
+    void api.settings.set('explorer.view', v)
+  }
+  // Scelta salvata se esiste ancora; altrimenti la prima vista dei plugin (se ce ne sono) o l'albero.
+  const active = view === 'files' ? null : (contributed.find((c) => c.key === view) ?? (view === null ? contributed[0] : undefined) ?? null)
   const expandedRef = useRef(expanded)
   expandedRef.current = expanded
 
@@ -205,6 +226,11 @@ export function ExplorerView() {
     )
   }
 
+  // Stato dei file per le viste dei plugin: le stesse informazioni dell'albero, in chiavi normalizzate.
+  const decorForPlugin = useMemo<ExplorerDecor>(
+    () => ({ git: git?.files ?? {}, claude: [...pendingByClaude], errors: Object.fromEntries(errorsByFile) }),
+    [git, pendingByClaude, errorsByFile]
+  )
   const errorTotal = [...errorsByFile.values()].reduce((a, b) => a + b, 0)
   const warnTotal = Object.values(diagnostics).reduce((a, d) => a + d.diagnostics.filter((x) => x.severity === 2).length, 0)
 
@@ -242,6 +268,29 @@ export function ExplorerView() {
           <RefreshCw size={13} />
         </button>
       </div>
+      {contributed.length > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1" role="group" aria-label="Vista dell'Esplora file">
+          {[...contributed.map((c) => ({ key: c.key, title: c.title, icon: LayoutList })), { key: 'files', title: 'File', icon: FolderTree }].map(({ key, title, icon: Icon }) => {
+            const on = key === 'files' ? active === null : active?.key === key
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setView(key)}
+                className={cn('inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px]', on ? 'bg-border text-foreground' : 'text-text-subtle hover:text-foreground')}
+              >
+                <Icon size={12} /> {title}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {active && cwd ? (
+        <div className="min-h-0 flex-1">
+          <PluginFrame pluginId={active.pluginId} entry={active.entry} cwd={cwd} decor={decorForPlugin} />
+        </div>
+      ) : (
       <div className="min-h-0 flex-1 overflow-auto py-1" role="tree" aria-label="File del progetto">
         {roots.map((r) => {
           const key = normPath(r.path)
@@ -263,6 +312,7 @@ export function ExplorerView() {
           )
         })}
       </div>
+      )}
       <div className="flex shrink-0 items-center gap-2 border-t border-border px-2.5 py-1.5 text-[11px] text-text-subtle">
         {git?.branch && (
           <span className="inline-flex min-w-0 items-center gap-1 truncate">

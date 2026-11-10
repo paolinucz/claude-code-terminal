@@ -10,6 +10,7 @@ import { useExplainSettings } from '@/state/explain'
 import { useSnippetExplain } from '@/state/snippetExplain'
 import { breakpointsOf, useJavaDev } from '@/state/javaDev'
 import { stoppedLineIn } from '@/state/javaFollow'
+import { usePluginGutter } from '@/state/pluginGutter'
 import { normPath } from '@shared/files'
 import { api } from '@/lib/api'
 import { languageOf, monaco } from '@/lib/monaco'
@@ -94,6 +95,17 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
   const onDirtyRef = useRef(onDirty)
   onDirtyRef.current = onDirty
 
+  // Un plugin attivo che chiede il margine per il linguaggio di questo file (contributo `editorGutter`).
+  const allPlugins = useEditor((s) => s.plugins)
+  const gutter = useMemo(() => {
+    if (!lang) return null
+    for (const p of allPlugins) {
+      const g = p.manifest.contributes?.editorGutter
+      if (p.enabled && p.state === 'ok' && g?.languages.includes(lang.id)) return { pluginId: p.manifest.id, click: g.click }
+    }
+    return null
+  }, [allPlugins, lang?.id])
+
   // Apertura: modello condiviso ed editor.
   useEffect(() => {
     const host = hostRef.current
@@ -142,11 +154,34 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
         tabSize: 4,
         detectIndentation: true,
         fixedOverflowWidgets: true,
-        // Margine per i breakpoint (solo file Java).
-        glyphMargin: /\.java$/i.test(filePath)
+        // Margine per i segni dei plugin (breakpoint, riga fermata) se un plugin li chiede per questo linguaggio.
+        glyphMargin: Boolean(gutter) || /\.java$/i.test(filePath)
       })
       editorRef.current = editor
-      if (/\.java$/i.test(filePath)) {
+      if (gutter) {
+        // Contributo `editorGutter` di un plugin: i segni li decide l'adapter, il clic nel margine va all'adapter.
+        const marks = editor.createDecorationsCollection()
+        const k = normPath(filePath)
+        const paint = () => {
+          const list = usePluginGutter.getState().markers[gutter.pluginId]?.[k] ?? []
+          marks.set(
+            list.map((m) =>
+              m.kind === 'stopped'
+                ? { range: new monaco.Range(m.line, 1, m.line, 1), options: { isWholeLine: true, className: 'cct-debug-line', glyphMarginClassName: 'cct-debug-arrow', glyphMarginHoverMessage: m.hint ? { value: m.hint } : undefined } }
+                : { range: new monaco.Range(m.line, 1, m.line, 1), options: { glyphMarginClassName: m.kind === 'breakpoint-disabled' ? 'cct-bp cct-bp-off' : 'cct-bp', glyphMarginHoverMessage: m.hint ? { value: m.hint } : undefined } }
+            )
+          )
+        }
+        paint()
+        subs.push({ dispose: usePluginGutter.subscribe(paint) })
+        subs.push(
+          editor.onMouseDown((e) => {
+            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position) {
+              void api.plugins.call(gutter.pluginId, gutter.click, { path: filePath, line: e.target.position.lineNumber }).catch(() => {})
+            }
+          })
+        )
+      } else if (/\.java$/i.test(filePath)) {
         // Breakpoint (clic nel margine) e riga in cui il programma è fermo.
         const marks = editor.createDecorationsCollection()
         const paint = () => {

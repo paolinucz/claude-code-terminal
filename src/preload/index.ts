@@ -66,7 +66,10 @@ const api: AppApi = {
     setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, enabled),
     uninstall: (id) => ipcRenderer.invoke('plugins:uninstall', id),
     onChanged: (cb) => on('plugins:changed', cb),
-    onProgress: (cb) => on('plugins:progress', cb)
+    onProgress: (cb) => on('plugins:progress', cb),
+    call: (pluginId, method, params) => ipcRenderer.invoke('plugin:call', pluginId, method, params),
+    onEvent: (cb) => on('plugin:event', cb),
+    onMarkers: (cb) => on('plugin:markers', cb)
   },  permissions: {
     read: (cwd) => ipcRenderer.invoke('permissions:read', cwd),
     save: (cwd, scope, data) => ipcRenderer.invoke('permissions:save', cwd, scope, data),

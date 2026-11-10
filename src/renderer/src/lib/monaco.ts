@@ -39,7 +39,15 @@ monaco.editor.defineTheme('cct-dark', {
     'scrollbarSlider.background': '#3f3f4680',
     'scrollbarSlider.hoverBackground': '#52525b',
     'editorWidget.background': '#18181b',
-    'editorWidget.border': '#3f3f46'
+    'editorWidget.border': '#3f3f46',
+    // Menu contestuale (tasto destro) e menu a tendina: senza questi colori restava trasparente.
+    'menu.background': '#18181b',
+    'menu.foreground': '#e4e4e7',
+    'menu.selectionBackground': '#3f3f46',
+    'menu.selectionForeground': '#fafafa',
+    'menu.separatorBackground': '#3f3f46',
+    'menu.border': '#3f3f46',
+    'widget.shadow': '#00000080'
   }
 })
 

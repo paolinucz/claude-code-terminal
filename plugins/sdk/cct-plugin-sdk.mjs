@@ -153,7 +153,9 @@ export class Connection {
  * - call(method, params): richieste proprie del plugin (l'app le manda con `PluginHost.call`)
  * - shutdown()
  *
- * `app` serve per mandare all'app: app.diagnostics(path, source, items), app.status(s), app.log(level, message).
+ * `app` serve per mandare all'app: app.diagnostics(path, source, items), app.status(s), app.log(level, message), e per
+ * usare i servizi dell'app (Plugin API «host/…»): app.settings.get/set, app.session.create/kill/status,
+ * app.plugin(idPlugin, metodo, parametri) verso un plugin richiesto, app.emit(evento, dati) verso le pagine del plugin.
  */
 export function runAdapter(handlers) {
   // stdout è il canale del protocollo.
@@ -162,7 +164,26 @@ export function runAdapter(handlers) {
   const app = {
     diagnostics: (path, source, items) => conn.notify('diagnostics', { path, source, items }),
     status: (s) => conn.notify('status', s),
-    log: (level, message) => conn.notify('log', { level, message })
+    log: (level, message) => conn.notify('log', { level, message }),
+    // Servizi dell'app. Le impostazioni valgono solo per le chiavi «plugin.<id>.…» o per i prefissi dichiarati nel manifest.
+    settings: {
+      get: (key) => conn.request('host/settings.get', { key }, 15000),
+      set: (key, value) => conn.request('host/settings.set', { key, value }, 15000)
+    },
+    session: {
+      create: (request) => conn.request('host/session.create', { request }, 60000),
+      kill: (id) => conn.request('host/session.kill', { id }, 15000),
+      status: (id) => conn.request('host/session.status', { id }, 15000)
+    },
+    plugin: (plugin, method, params = {}) => conn.request('host/plugin.call', { plugin, method, params }),
+    // Segni nel margine dell'editor (contributo `editorGutter`): tipi 'breakpoint', 'breakpoint-disabled', 'stopped'.
+    // `markers(path, [{line, kind, hint?, reveal?}])` sostituisce i segni di quel file; `clearMarkers()` li toglie tutti.
+    editor: {
+      markers: (path, markers) => conn.notify('editor/markers', { path, markers }),
+      clearMarkers: () => conn.notify('editor/markers', { path: null, markers: [] })
+    },
+    /** Evento per le pagine di questo plugin (le mostra l'interfaccia): avanzamento, stato del debug… */
+    emit: (event, data) => conn.notify('ui/event', { event, data })
   }
   process.on('uncaughtException', (err) => app.log('error', `Errore nell'adapter: ${err?.stack ?? err}`))
   process.on('unhandledRejection', (err) => app.log('error', `Errore nell'adapter: ${err?.stack ?? err}`))
