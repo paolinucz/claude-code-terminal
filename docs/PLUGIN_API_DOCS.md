@@ -107,11 +107,15 @@ Esempi completi: `plugins/java/ui/packages.html` (vista a package), `plugins/jav
 | `files.read` | `{path}` | Contenuto del file (`FileContent`) | `files.read` (nel progetto) |
 | `files.write` | `{path, text, expectedMtime?}` | Esito del salvataggio; con `expectedMtime` rifiuta se il file è cambiato | `files.write` (nel progetto) |
 | `terminal.show` | `{sessionId}` | Apre il terminale di una sessione (per esempio avviata dall'adapter con `app.session.create`); `true` se l'ha trovata | `terminal` |
+| `terminal.hive` | `{key, title, sessionIds}` | Mostra più terminali insieme nella vista **alveare** (§3.3); `true` se l'ha aperta. La stessa `key` aggiorna lo stesso pannello con l'elenco nuovo (fino a 24 sessioni) | `terminal` |
 | `settings.get` | `{key}` | Valore salvato (`null` se manca) | no |
 | `settings.set` | `{key, value}` | | no |
 | `ui.notify` | `{message, kind?}` | Avviso (toast) nell'app. `kind`: `info` `ok` `warn` `error` | no |
 | `ui.confirm` | `{message, title?, okLabel?, danger?}` | `true` se l'utente conferma | no |
 | `ui.prompt` | `{message, title?, value?, placeholder?, okLabel?}` | Testo inserito, `null` se annulla | no |
+| `system.openUrl` | `{url}` | Apre un indirizzo `http` o `https` nel browser predefinito | `openUrl` |
+| `ui.openPage` | `{entry, title?, width?, height?, params?}` | Apre una pagina del plugin (`.html` nel pacchetto) in una finestra grande dell'app; `params` (JSON, max 20 KB) arriva alla pagina nel messaggio `init` (`params`). Una finestra per pagina, al massimo due insieme | no |
+| `ui.close` | | Chiude la finestra in cui sta la pagina (solo per le pagine aperte con `ui.openPage`) | no |
 | `dialog.pickFolder` | `{title?, defaultPath?}` | Percorso scelto o `null` | no |
 | `dialog.pickFile` | `{title?, defaultPath?, filters?: [{name, extensions}]}` | Percorso scelto o `null` | no |
 | `clipboard.copy` | `{text}` | Copia negli appunti (max 10.000 caratteri) | no |
@@ -126,7 +130,7 @@ Note:
 
 | Messaggio | Contenuto | Quando |
 | --- | --- | --- |
-| `{cct:'init', win, cwd, theme, plugin:{id, name}}` | `win`: è Windows; `cwd`: cartella del progetto; `theme`: variabili CSS (`--cct-bg`, `--cct-surface`, `--cct-surface-2`, `--cct-border`, `--cct-border-strong`, `--cct-text`, `--cct-text-muted`, `--cct-text-faint`, `--cct-accent`, `--cct-accent-soft`, `--cct-on-accent`, `--cct-ok`, `--cct-warn`, `--cct-danger`, `--cct-info`) | Dopo `ready`; di nuovo se cambia la cartella o l'accento |
+| `{cct:'init', win, cwd, theme, plugin:{id, name}, params}` | `params`: i dati di `ui.openPage` (`null` per le altre pagine); `win`: è Windows; `cwd`: cartella del progetto; `theme`: variabili CSS (`--cct-bg`, `--cct-surface`, `--cct-surface-2`, `--cct-border`, `--cct-border-strong`, `--cct-text`, `--cct-text-muted`, `--cct-text-faint`, `--cct-accent`, `--cct-accent-soft`, `--cct-on-accent`, `--cct-ok`, `--cct-warn`, `--cct-danger`, `--cct-info`) | Dopo `ready`; di nuovo se cambia la cartella o l'accento |
 | `{cct:'state', decor:{git, claude, errors}}` | Segni sui file (percorsi normalizzati) | Dopo `ready` e a ogni cambiamento |
 | `{cct:'event', event, data}` | Evento dell'adapter (`app.emit`) o dell'app (sotto) | Quando accade |
 | `{cct:'rpc-result', id, ok, value \| error}` | Risposta a una `rpc` | |
@@ -140,6 +144,11 @@ Eventi dell'app (nome sempre con prefisso `app.`, quindi non confondibili con qu
 | `app.session.exit` | `{sessionId, exitCode}` | Una sessione (terminale, task) è terminata |
 
 Per applicare il tema: `for (const [k, v] of Object.entries(m.theme)) document.documentElement.style.setProperty(k, v)`.
+
+### 3.3 Vista alveare e pagine in finestra
+
+- **Alveare**: un pannello dell'app che mostra più terminali in un mosaico che si riorganizza da solo in base al numero di celle e alle dimensioni del pannello (celle simili a un terminale, senza spazi vuoti inutili). Ogni cella ha una testata con nome, stato (verde in esecuzione, grigio terminato, rosso uscito con errore), «Ferma» e «Ingrandisci»; si ingrandisce anche con il doppio clic sulla testata. Con una cella ingrandita le altre restano in esecuzione, nascoste, e si passa dall'una all'altra con le linguette in alto; «Mosaico» le rimette tutte. «Ferma tutti» chiude le sessioni. Il pannello non sopravvive al riavvio (le sessioni nemmeno). Lo apre il plugin con `terminal.hive` / `app.terminal.hive`; il plugin sceglie `key` (che l'app prefissa con l'id del plugin, così due plugin non si prendono il gruppo a vicenda) e l'elenco delle sessioni, e può aggiornarlo mentre le sessioni partono.
+- **Pagine in finestra** (`ui.openPage`): per interfacce che non entrano nella barra laterale (modali di configurazione, editor di preset…). La pagina è isolata come le altre, ha lo stesso protocollo e si chiude con `ui.close`, con Esc o con la X; un clic fuori non la chiude. L'app mostra sempre il nome del plugin nell'intestazione. Per far arrivare alla pagina aperta le novità, usa gli eventi dell'adapter (`app.emit`): li ricevono tutte le pagine aperte del plugin. Esempio: `plugins/java-dev/ui/combo.html` (avvio combo con trascinamento).
 
 ## 4. Adapter: ciclo di vita e SDK
 
@@ -165,6 +174,7 @@ L'adapter parte quando serve (primo uso, un file del suo linguaggio, una chiamat
 | `app.settings.get(key)` / `set(key, value)` | Impostazioni dell'app. Valgono solo chiavi `plugin.<id>.…` o dei `storage.settingsPrefixes` | no |
 | `app.session.create(request)` / `kill(id)` / `status(id)` | Terminali «task»: un comando in un PTY (avviare un'applicazione, un build) | no |
 | `app.terminal.show(sessionId)` | Mostra in un pannello il terminale di una sessione | `terminal` |
+| `app.terminal.hive(key, title, sessionIds)` | Mostra più terminali insieme nella vista **alveare**; si può richiamare man mano che le sessioni partono (la stessa `key` aggiorna lo stesso pannello) | `terminal` |
 | `app.notify(message, kind?)` | Avviso (toast) nell'app, con il nome del plugin | no |
 | `app.emit(event, data)` | Evento per le pagine di questo plugin (`{cct:'event'}`) | no |
 | `app.plugin(idPlugin, metodo, parametri)` | Richiesta all'adapter di un plugin dichiarato in `requires` | no (ma serve `requires`) |
@@ -172,7 +182,7 @@ L'adapter parte quando serve (primo uso, un file del suo linguaggio, una chiamat
 
 Il clic nel margine arriva all'adapter come `call(<editorGutter.click>, {path, line})`. I tipi sono in `plugins/java-dev/src/cct-plugin-sdk.d.mts` (se scrivi l'adapter in TypeScript).
 
-Gli eventi `app.notify` e `app.terminal.show` viaggiano come eventi riservati (`$ui.notify`, `$terminal.show`) gestiti dall'app: non arrivano mai alle pagine.
+Gli eventi `app.notify`, `app.terminal.show` e `app.terminal.hive` viaggiano come eventi riservati (`$ui.notify`, `$terminal.show`, `$terminal.hive`) gestiti dall'app: non arrivano mai alle pagine.
 
 ## 6. Permessi
 
@@ -180,7 +190,8 @@ Dichiarati in `permissions`, mostrati all'utente prima dell'installazione («Per
 
 | Permesso | Consente |
 | --- | --- |
-| `terminal` | `terminal.show` (pagine) e `app.terminal.show` (adapter) |
+| `terminal` | `terminal.show` e `terminal.hive` (pagine), `app.terminal.show` e `app.terminal.hive` (adapter) |
+| `openUrl` | `system.openUrl` (pagine) |
 | `files.read` | `files.read` dalle pagine, nel progetto |
 | `files.write` | `files.write` dalle pagine, nel progetto |
 

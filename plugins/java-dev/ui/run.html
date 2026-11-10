@@ -9,7 +9,7 @@
   (debug, output, progress, state, breakpoints). L'app non sa nulla di Java.
 -->
 <style>
-  :root { --cct-bg:#09090b; --cct-surface:#18181b; --cct-surface-2:#1f1f23; --cct-border:#27272a; --cct-border-strong:#3f3f46; --cct-text:#fafafa; --cct-text-muted:#a1a1aa; --cct-text-faint:#71717a; --cct-accent:#e8875f; --cct-on-accent:#1a0f0a; --cct-ok:#6fd39b; --cct-warn:#f5c46b; --cct-danger:#ff8a8a; --cct-info:#6ea8fe; }
+  :root { --cct-bg:#09090b; --cct-surface:#18181b; --cct-surface-2:#1f1f23; --cct-border:#27272a; --cct-border-strong:#3f3f46; --cct-text:#fafafa; --cct-text-muted:#a1a1aa; --cct-text-faint:#71717a; --cct-accent:#168294; --cct-on-accent:#ffffff; --cct-ok:#6fd39b; --cct-warn:#f5c46b; --cct-danger:#ff8a8a; --cct-info:#6ea8fe; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--cct-surface); color: var(--cct-text-muted); font: 12px/1.35 system-ui, sans-serif; }
   body { overflow-y: auto; }
@@ -59,6 +59,7 @@
     <p id="status" style="margin:0;min-height:16px;font-size:11px" role="status"></p>
   </div>
   <div id="progress" style="display:none;border-bottom:1px solid var(--cct-border);padding:6px 12px;font-size:11px"></div>
+  <div id="comborun" style="display:none;border-bottom:1px solid var(--cct-border);padding:6px 0 4px;font-size:11.5px"></div>
   <div id="debugsecs" style="display:none">
     <section id="s-stack"><div class="sh"><button class="title" data-sec="stack">▾ Stack</button></div><div class="sb" id="stack"></div></section>
     <section id="s-vars"><div class="sh"><button class="title" data-sec="vars">▾ Variabili</button></div><div class="sb" id="vars"></div></section>
@@ -67,8 +68,10 @@
     <div id="log" class="mono"></div><div style="padding:6px 8px 0"><input id="expr" class="inp mono" style="width:100%" spellcheck="false" aria-label="Espressione da valutare"></div></div></section>
   <section><div class="sh"><button class="title" data-sec="bps">▾ Breakpoint</button><button class="ibtn" id="clearbps" title="Togli tutti">🗑︎</button></div><div class="sb" id="bps"></div></section>
   <section><div class="sh"><button class="title" data-sec="cfgs">▾ Configurazioni</button><button class="ibtn" id="import" title="Importa da IntelliJ IDEA">⇪</button><button class="ibtn" id="newcfg" title="Nuova configurazione">＋</button></div><div class="sb" id="cfgs"></div></section>
+  <section><div class="sh"><button class="title" data-sec="combos">▾ Combo</button><button class="ibtn" id="newcombo" title="Avvia più servizi insieme (nuova combo)">＋</button></div><div class="sb" id="combos"></div></section>
   <section><div class="sh"><button class="title" data-sec="svcs">▾ Servizi Java</button><button class="ibtn" id="refresh" title="Cerca di nuovo">↻</button></div><div class="sb" id="svcs"></div></section>
   <section><div class="sh"><button class="title" data-sec="jdks">▾ JDK</button></div><div class="sb" id="jdks"></div></section>
+  <section><div class="sh"><button class="title" data-sec="tools">▾ Maven e Gradle</button></div><div class="sb" id="tools"></div></section>
 </div>
 <p id="loading" class="note" style="padding:16px">Caricamento…</p>
 <div id="modal"></div>
@@ -93,7 +96,7 @@ window.addEventListener('message', (e) => {
 
 // ---- Stato ----
 const TEMURIN = [8, 11, 17, 21, 25]
-const S = { state: null, debug: { status: 'idle', frames: [], verified: {} }, bps: {}, progress: null, output: [], evals: [], selected: '', frameIdx: 0, note: '', closed: new Set() }
+const S = { state: null, debug: { status: 'idle', frames: [], verified: {} }, bps: {}, progress: null, output: [], evals: [], selected: '', frameIdx: 0, note: '', closed: new Set(), openEnv: new Set(), envDraft: {}, comboRun: null }
 const $ = (id) => document.getElementById(id)
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const base = (p) => String(p).split(/[\\/]/).pop()
@@ -107,7 +110,7 @@ async function boot() {
   await refresh()
 }
 async function refresh(fresh) {
-  try { S.state = await call('state', { root: ctx.cwd, fresh: !!fresh }) } catch (e) { S.note = e.message }
+  try { S.state = await call('state', { root: ctx.cwd, fresh: !!fresh }); S.comboRun = S.state.comboRun || null } catch (e) { S.note = e.message }
   renderAll()
 }
 function onEvent(ev, data) {
@@ -120,13 +123,14 @@ function onEvent(ev, data) {
   } else if (ev === 'output') { say(String(data.text).replace(/\r?\n$/, '')) }
   else if (ev === 'progress') {
     S.progress = data; renderProgress()
-    if (data.done || data.error) setTimeout(() => { S.progress = null; renderProgress(); renderJdks() }, data.error ? 6000 : 1500)
+    if (data.done || data.error) setTimeout(() => { S.progress = null; renderProgress(); renderJdks(); renderTools() }, data.error ? 6000 : 1500)
   } else if (ev === 'breakpoints') { S.bps = data || {}; renderBps() }
+  else if (ev === 'combo') { S.comboRun = data; renderComboRun() }
 }
 function say(line) { S.output = [...S.output, line].slice(-1000); renderLog() }
 
 // ---- Disegno ----
-function renderAll() { renderBar(); renderProgress(); renderDebug(); renderBps(); renderCfgs(); renderSvcs(); renderJdks() }
+function renderAll() { renderBar(); renderProgress(); renderDebug(); renderBps(); renderCfgs(); renderCombos(); renderComboRun(); renderSvcs(); renderJdks(); renderTools() }
 function section(id, bodyId, show) { const body = $(bodyId); const sec = body.closest('section'); const t = sec.querySelector('.title'); const closed = S.closed.has(id); body.style.display = closed ? 'none' : ''; t.textContent = (closed ? '▸ ' : '▾ ') + t.textContent.slice(2) }
 function configs() { return S.state?.configs ?? [] }
 function current() { const c = configs(); return c.find((x) => x.id === S.selected) ?? c[0] }
@@ -203,10 +207,68 @@ function renderCfgs() {
   section('cfgs', 'cfgs')
 }
 function jdkOptions(sel) { return (S.state?.jdks ?? []).map((j) => `<option value="${esc(j.id)}"${sel === j.id ? ' selected' : ''}>${esc(jdkLabel(j))}</option>`).join('') }
+// ---- Combo: più servizi avviati insieme ----
+const COMBO_ICON = { waiting: '○', starting: '◔', started: '●', failed: '✕', skipped: '–' }
+const COMBO_CLS = { waiting: 'faint', starting: 'info', started: 'ok', failed: 'danger', skipped: 'faint' }
+function comboRunning() { return S.comboRun?.status === 'running' }
+function renderCombos() {
+  const list = S.state?.combos ?? []
+  $('combos').innerHTML = list.length
+    ? list.map((c) => `<div class="row" style="min-height:26px"><button class="ibtn ok" data-runcombo="${esc(c.id)}" ${comboRunning() ? 'disabled' : ''} title="Avvia la combo" aria-label="Avvia ${esc(c.name)}">▶</button><span class="grow strong" title="${esc(c.steps.length)} servizi">${esc(c.name)} <span class="faint" style="font-size:10.5px">${c.steps.length} ${c.steps.length === 1 ? 'servizio' : 'servizi'}</span></span><button class="ibtn hov" data-editcombo="${esc(c.id)}" title="Modifica" aria-label="Modifica ${esc(c.name)}">✎︎</button></div>`).join('')
+    : '<p class="note">Avvia più servizi insieme, nell\'ordine che scegli, in una vista ad alveare. Con «＋» ne prepari una e puoi salvarla come preset.</p>'
+  section('combos', 'combos')
+}
+function renderComboRun() {
+  const r = S.comboRun; const el = $('comborun')
+  if (!r) { el.style.display = 'none'; return }
+  el.style.display = ''
+  const state = r.status === 'running' ? 'in avvio' : r.status === 'stopped' ? 'fermata' : 'avviata'
+  const detail = (s) => s.state === 'failed' ? esc(s.error || 'errore') : s.state === 'starting' ? 'in avvio…' : s.state === 'started' ? (s.wait ? `prossimo tra ${s.wait} s` : 'avviato') : s.state === 'skipped' ? 'saltato' : 'in attesa'
+  el.innerHTML = `<div class="row" style="min-height:24px"><span class="strong" style="font-weight:600">${esc(r.name)}</span><span class="faint" style="font-size:10.5px">${state}</span><span class="grow"></span>${r.status === 'running' ? '<button class="pill danger" style="height:22px;padding:0 8px" data-stopcombo>Ferma tutto</button>' : '<button class="ibtn" data-dismisscombo title="Chiudi" aria-label="Chiudi l\'avanzamento">✕</button>'}</div>` +
+    r.steps.map((s) => `<div class="row" style="min-height:20px"><span class="${COMBO_CLS[s.state]}" style="width:12px;text-align:center">${COMBO_ICON[s.state]}</span><span class="grow">${esc(s.name)}</span><span class="${s.state === 'failed' ? 'danger' : 'faint'}" style="font-size:10.5px" title="${esc(s.error || '')}">${detail(s)}</span></div>`).join('')
+}
+const toolName = (k) => (k === 'maven' ? 'Maven' : 'Gradle')
+// Versioni tra cui scegliere per un servizio: il wrapper del progetto (predefinito), quelle scaricate dall'app e il comando per scaricarne altre.
+function toolOptions(kind, sel, wrapperVer) {
+  const inst = (S.state.tools || []).filter((t) => t.kind === kind)
+  const opts = [`<option value="">${esc(wrapperVer ? `Wrapper del progetto (${wrapperVer})` : 'Wrapper del progetto o PATH')}</option>`]
+  for (const t of inst) opts.push(`<option value="${esc(t.version)}"${sel === t.version ? ' selected' : ''}>${toolName(kind)} ${esc(t.version)} (scaricato)</option>`)
+  if (sel && !inst.some((t) => t.version === sel)) opts.push(`<option value="${esc(sel)}" selected>${toolName(kind)} ${esc(sel)} (da scaricare)</option>`)
+  opts.push('<option value="__get">Scarica un\'altra versione…</option>')
+  return opts.join('')
+}
+function svcHtml(s) {
+  const head = `<div class="line"><span class="strong" style="font-weight:500;overflow:hidden;text-overflow:ellipsis" title="${esc(s.root)}">${esc(s.name)}</span><span class="pill">${esc(s.build)}</span>${s.framework !== 'plain' ? `<span class="pill fw">${esc(s.framework)}</span>` : ''}${s.aggregator ? '<span class="faint" style="font-size:10px">contenitore</span>' : ''}${s.javaVersion ? `<span class="faint" style="margin-left:auto;font-size:10px">Java ${esc(s.javaVersion)}</span>` : ''}</div>`
+  const pad = `padding:4px 12px 4px ${s.parent ? 22 : 12}px`
+  if (s.aggregator) return `<div style="${pad}">${head}</div>`
+  const st = S.state
+  const stg = st.serviceSettings[s.id] || {}
+  const kind = s.build
+  const envN = Object.keys(stg.env || {}).length
+  const open = S.openEnv.has(s.id)
+  const draft = S.envDraft[s.root]
+  return `<div style="${pad}">${head}
+    <select class="sel" style="width:100%;margin-top:4px" data-svcjdk="${esc(s.root)}" aria-label="JDK di ${esc(s.name)}"><option value="">JDK predefinito</option>${jdkOptions(st.serviceJdk[s.id])}</select>
+    <select class="sel" style="width:100%;margin-top:4px" data-svctool="${esc(s.root)}" data-kind="${kind}" aria-label="${toolName(kind)} di ${esc(s.name)}">${toolOptions(kind, stg[kind], (st.wrappers[s.id] || {})[kind])}</select>
+    <button class="pill" style="height:22px;margin-top:4px" data-svcenv="${esc(s.id)}" aria-expanded="${open}">${open ? '▾' : '▸'} Variabili d'ambiente${envN ? ` (${envN})` : ''}</button>
+    ${open ? `<textarea class="inp" style="width:100%;margin-top:4px;height:90px" data-envfor="${esc(s.root)}" spellcheck="false" placeholder="NOME=valore, una per riga" aria-label="Variabili d'ambiente di ${esc(s.name)}">${esc(draft ?? envToText(stg.env))}</textarea>
+      <div class="line" style="margin-top:4px"><span class="faint" style="font-size:10.5px;flex:1">Valgono per tutte le configurazioni del servizio; una configurazione può sovrascriverle. JAVA_HOME e PATH li imposta il plugin in base al JDK scelto.</span><button class="btn pri" style="height:26px;padding:0 10px" data-saveenv="${esc(s.root)}">Salva</button></div>` : ''}
+    ${(st.compat[s.id] || []).map((m) => `<div class="warn" style="margin-top:6px">${esc(m)}</div>`).join('')}
+  </div>`
+}
 function renderSvcs() {
   const sv = S.state?.services ?? []
-  $('svcs').innerHTML = sv.length ? sv.map((s) => `<div style="padding:4px 12px 4px ${s.parent ? 22 : 12}px"><div class="line"><span class="strong" style="font-weight:500;overflow:hidden;text-overflow:ellipsis" title="${esc(s.root)}">${esc(s.name)}</span><span class="pill">${esc(s.build)}</span>${s.framework !== 'plain' ? `<span class="pill fw">${esc(s.framework)}</span>` : ''}${s.aggregator ? '<span class="faint" style="font-size:10px">contenitore</span>' : ''}${s.javaVersion ? `<span class="faint" style="margin-left:auto;font-size:10px">Java ${esc(s.javaVersion)}</span>` : ''}</div>${s.aggregator ? '' : `<select class="sel" style="width:100%;margin-top:4px" data-svcjdk="${esc(s.root)}"><option value="">JDK predefinito</option>${jdkOptions(S.state.serviceJdk[s.id])}</select>`}</div>`).join('') : '<p class="note">Nessun pom.xml o build.gradle in questa cartella.</p>'
+  $('svcs').innerHTML = sv.length ? sv.map(svcHtml).join('') : '<p class="note">Nessun pom.xml o build.gradle in questa cartella.</p>'
   section('svcs', 'svcs')
+}
+function renderTools() {
+  const st = S.state; if (!st) return
+  const busy = S.progress && !S.progress.done && !S.progress.error
+  $('tools').innerHTML = (st.tools.length
+    ? st.tools.map((t) => `<div class="row" style="min-height:24px"><span class="grow" title="${esc(t.path)}">${toolName(t.kind)} ${esc(t.version)}</span><span class="faint" style="font-size:10px">app</span><button class="ibtn hov" data-rmtool="${t.kind}:${esc(t.version)}" title="Rimuovi" aria-label="Rimuovi ${toolName(t.kind)} ${esc(t.version)}">🗑︎</button></div>`).join('')
+    : '<p class="note">Nessuna versione scaricata: i servizi usano il wrapper del progetto. Se un Gradle nuovo non va d\'accordo con un JDK vecchio, scarica la versione che serve e sceglila nella scheda del servizio.</p>') +
+    `<div style="display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px 0"><button class="pill" style="height:24px;padding:0 8px" data-gettool="maven" ${busy ? 'disabled' : ''}>＋ Maven…</button><button class="pill" style="height:24px;padding:0 8px" data-gettool="gradle" ${busy ? 'disabled' : ''}>＋ Gradle…</button></div>`
+  section('tools', 'tools')
 }
 function renderJdks() {
   const st = S.state; if (!st) return
@@ -231,6 +293,18 @@ document.addEventListener('click', async (e) => {
   if (d.del) { await call('deleteConfig', { id: d.del }); return }
   if (d.rmjdk) { await call('removeJdk', { id: d.rmjdk }); return }
   if (d.dl) { act(call('downloadJdk', { major: Number(d.dl) })); return }
+  if (d.svcenv) { S.openEnv.has(d.svcenv) ? S.openEnv.delete(d.svcenv) : S.openEnv.add(d.svcenv); renderSvcs(); return }
+  if (d.saveenv) {
+    const box = document.querySelector(`[data-envfor="${CSS.escape(d.saveenv)}"]`)
+    if (box) { await act(call('setServiceSettings', { root: d.saveenv, env: textToEnv(box.value) })); if (!S.note) delete S.envDraft[d.saveenv] }
+    return
+  }
+  if (d.runcombo) { const c = (S.state.combos || []).find((x) => x.id === d.runcombo); if (c) act(call('runCombo', { steps: c.steps, name: c.name, id: c.id, workspace: ctx.cwd })); return }
+  if (d.editcombo) { rpc('ui.openPage', { entry: 'ui/combo.html', title: 'Avvio combo', width: 920, height: 620, params: { comboId: d.editcombo } }).catch((err) => { S.note = err.message; renderBar() }); return }
+  if (d.stopcombo !== undefined) { act(call('stopCombo')); return }
+  if (d.dismisscombo !== undefined) { act(call('dismissCombo')); return }
+  if (d.rmtool) { const [kind, version] = d.rmtool.split(':'); act(call('removeTool', { kind, version })); return }
+  if (d.gettool) { openToolPicker(d.gettool); return }
 })
 async function act(p) { try { const r = await p; S.note = r && r.ok === false && r.error ? r.error : '' } catch (e) { S.note = e.message } renderBar() }
 function removeBp(file, line) { const list = (S.bps[file] || []).filter((b) => b.line !== line); return call('setBreakpoints', { file, list }) }
@@ -240,6 +314,7 @@ $('restart').onclick = () => act(call('restart'))
 $('stop').onclick = () => act(call('stop'))
 $('cfgsel').onchange = (e) => { S.selected = e.target.value; renderCfgs(); renderBar() }
 $('refresh').onclick = () => refresh(true)
+$('newcombo').onclick = () => rpc('ui.openPage', { entry: 'ui/combo.html', title: 'Avvio combo', width: 920, height: 620 }).catch((err) => { S.note = err.message; renderBar() })
 $('newcfg').onclick = () => openConfig(null)
 $('clearbps').onclick = async () => { for (const [file] of Object.entries(S.bps)) await call('setBreakpoints', { file, list: [] }) }
 $('import').onclick = async () => { try { showImport(await call('importIdea', { root: ctx.cwd })) } catch (e) { S.note = e.message; renderBar() } }
@@ -247,7 +322,14 @@ document.addEventListener('change', (e) => {
   const t = e.target
   if (t.dataset.svcjdk !== undefined) call('setServiceJdk', { root: t.dataset.svcjdk, id: t.value || null })
   else if (t.id === 'defjdk') call('setDefaultJdk', { id: t.value || null })
+  else if (t.dataset.svctool !== undefined) {
+    const kind = t.dataset.kind
+    // «Scarica un'altra versione…» non è una scelta: si apre l'elenco e il menu torna com'era.
+    if (t.value === '__get') { renderSvcs(); openToolPicker(kind) } else act(call('setServiceSettings', { root: t.dataset.svctool, [kind]: t.value || null }))
+  }
 })
+// Il testo delle variabili non salvato resta anche se la pagina si ridisegna (un evento di stato, un download…).
+document.addEventListener('input', (e) => { const t = e.target; if (t.dataset && t.dataset.envfor !== undefined) S.envDraft[t.dataset.envfor] = t.value })
 $('expr').addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return
   const ex = e.target.value.trim(); if (!ex) return
@@ -295,6 +377,23 @@ function openConfig(initial) {
     $('save').onclick = async () => { const env = $('envtxt') ? textToEnv($('envtxt').value) : cfg.env; const saved = await call('saveConfig', { config: { ...cfg, name: cfg.name.trim(), env } }); S.selected = saved.id; closeModal() }
   }
   draw()
+}
+// Elenco delle versioni di Maven o Gradle che si possono scaricare (dal sito ufficiale, con verifica del checksum).
+async function openToolPicker(kind) {
+  const draw = (versions, err) => {
+    const have = new Set((S.state.tools || []).filter((t) => t.kind === kind).map((t) => t.version))
+    $('modal').innerHTML = `<div class="modal"><div class="dlg" role="dialog"><h3>Scarica ${toolName(kind)}</h3><div class="faint">Dal sito ufficiale (${kind === 'gradle' ? 'services.gradle.org' : 'Maven Central'}), solo se il checksum pubblicato corrisponde. Si installa nella cartella dell'app e poi si sceglie per ogni servizio.</div>
+      ${versions === null ? '<p class="note">Cerco le versioni…</p>' : ''}${err ? `<div class="warn">${esc(err)}</div>` : ''}
+      ${versions ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px">${versions.map((v) => `<button class="pill" style="height:26px;padding:0 10px" data-pickver="${esc(v)}" ${have.has(v) ? 'disabled title="Già scaricata"' : ''}>${esc(v)}</button>`).join('')}</div>` : ''}
+      <label class="fld"><span>Un'altra versione (per esempio ${kind === 'gradle' ? '7.6.4' : '3.8.8'})</span><input class="inp mono" id="verTxt" placeholder="numero di versione" spellcheck="false"></label>
+      <div class="acts"><button class="btn sec" id="cancel">Chiudi</button><button class="btn pri" id="getver">Scarica</button></div></div></div>`
+    const get = (version) => { closeModal(); act(call('downloadTool', { kind, version })) }
+    for (const b of $('modal').querySelectorAll('[data-pickver]')) b.onclick = () => get(b.dataset.pickver)
+    $('cancel').onclick = closeModal
+    $('getver').onclick = () => { const v = $('verTxt').value.trim(); if (v) get(v) }
+  }
+  draw(null)
+  try { draw(await call('toolVersions', { kind })) } catch (e) { draw([], `Non riesco a leggere l'elenco (${e.message}): puoi scrivere a mano la versione.`) }
 }
 function showImport(res) {
   const picked = new Set(res.configs.map((c) => c.id))

@@ -4,9 +4,9 @@ import { pluginUiUrl, type PluginPermission } from '@shared/plugins'
 import { api } from '@/lib/api'
 import { openFile } from '@/state/editor'
 import { useAccent } from '@/state/accent'
-import { pluginConfirm, pluginNotify, pluginPrompt } from '@/state/pluginUi'
+import { openPluginPage, pluginConfirm, pluginNotify, pluginPrompt, usePluginUi } from '@/state/pluginUi'
 import { useSessions } from '@/state/sessions'
-import { hasPermission, pluginName, settingKey, showSessionTerminal } from './pluginBridge'
+import { hasPermission, parseHive, pluginName, settingKey, showHive, showSessionTerminal } from './pluginBridge'
 
 /** Cosa l'Esplora file sa dei file, in percorsi normalizzati (stessa regola di `normPath`): git, Claude, errori. */
 export interface ExplorerDecor {
@@ -32,8 +32,8 @@ const themeNow = () => {
  *
  * L'app non sa cosa mostri il plugin: questi sono gli unici servizi che gli dà.
  */
-export function PluginFrame({ pluginId, entry, cwd, decor }: { pluginId: string; entry: string; cwd: string; decor: ExplorerDecor }) {
-  const initMsg = () => ({ cct: 'init', win: IS_WIN, cwd: cwdRef.current, theme: themeNow(), plugin: { id: pluginId, name: pluginName(pluginId) } })
+export function PluginFrame({ pluginId, entry, cwd, decor, modalId, params }: { pluginId: string; entry: string; cwd: string; decor: ExplorerDecor; modalId?: number; params?: unknown }) {
+  const initMsg = () => ({ cct: 'init', win: IS_WIN, cwd: cwdRef.current, theme: themeNow(), plugin: { id: pluginId, name: pluginName(pluginId) }, params: params ?? null })
   const frame = useRef<HTMLIFrameElement>(null)
   const decorRef = useRef(decor)
   decorRef.current = decor
@@ -94,6 +94,29 @@ export function PluginFrame({ pluginId, entry, cwd, decor }: { pluginId: string;
           case 'terminal.show':
             need('terminal')
             return reply(true, showSessionTerminal(String(p.sessionId ?? '')))
+          // Gruppo di terminali nella vista «alveare» (stessa cosa di `app.terminal.hive` per gli adapter).
+          case 'terminal.hive': {
+            need('terminal')
+            const hive = parseHive(pluginId, p)
+            if (!hive) return reply(false, undefined, 'Gruppo di terminali non valido')
+            return reply(true, showHive(hive))
+          }
+          // Indirizzo web nel browser predefinito (per esempio http://localhost:8080 di un container): solo http e https.
+          case 'system.openUrl': {
+            need('openUrl')
+            const url = String(p.url ?? '')
+            if (url.length > 2000 || !/^https?:\/\/[^\s]+$/i.test(url)) return reply(false, undefined, 'Indirizzo non valido: servono http o https')
+            window.open(url, '_blank', 'noopener')
+            return reply(true)
+          }
+          // Una pagina del plugin in una finestra grande; la pagina aperta si chiude da sola con `ui.close`.
+          case 'ui.openPage':
+            openPluginPage(pluginId, name, p)
+            return reply(true)
+          case 'ui.close':
+            if (modalId === undefined) return reply(false, undefined, 'Questa pagina non è in una finestra')
+            usePluginUi.getState().closePage(modalId)
+            return reply(true)
           // Impostazioni del plugin: nomi corti, l'app li mette nello spazio `plugin.<id>.`.
           case 'settings.get':
             return reply(true, (await api.settings.get(settingKey(pluginId, p.key))) ?? null)

@@ -12,7 +12,7 @@ export interface AdapterApp {
   plugin(plugin: string, method: string, params?: Record<string, unknown>): Promise<unknown>
   emit(event: string, data: unknown): void
   notify(message: string, kind?: 'info' | 'ok' | 'warn' | 'error'): void
-  terminal: { show(sessionId: string): void }
+  terminal: { show(sessionId: string): void; hive(key: string, title: string, sessionIds: string[]): void }
   editor: { markers(path: string, markers: GutterMarkerOut[]): void; clearMarkers(): void }
 }
 export interface AdapterContext {

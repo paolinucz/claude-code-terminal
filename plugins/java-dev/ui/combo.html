@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Avvio combo</title>
+<!--
+  Modale «Avvio combo» del plugin Java Dev: si scelgono le configurazioni da avviare insieme e, trascinandole, l'ordine in cui
+  partono (con la pausa da aspettare dopo ciascuna). La combo si può salvare come preset. È una pagina del plugin aperta dall'app
+  in una finestra grande (`ui.openPage`); parla con l'adapter con `plugin.call` e si chiude con `ui.close`.
+-->
+<style>
+  :root { --cct-bg:#09090b; --cct-surface:#18181b; --cct-surface-2:#1f1f23; --cct-border:#27272a; --cct-border-strong:#3f3f46; --cct-text:#fafafa; --cct-text-muted:#a1a1aa; --cct-text-faint:#71717a; --cct-accent:#168294; --cct-accent-soft:#459ba9; --cct-on-accent:#ffffff; --cct-ok:#6fd39b; --cct-warn:#f5c46b; --cct-danger:#ff8a8a; --cct-info:#6ea8fe; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--cct-surface); color: var(--cct-text-muted); font: 13px/1.4 system-ui, sans-serif; }
+  button, select, input { font: inherit; color: var(--cct-text); }
+  button { cursor: pointer; background: none; border: 0; padding: 0; }
+  button:disabled { opacity: .4; cursor: default; }
+  .inp, .sel { height: 32px; border: 1px solid var(--cct-border-strong); border-radius: 8px; background: var(--cct-bg); padding: 0 8px; outline: none; min-width: 0; }
+  .inp:focus, .sel:focus { border-color: var(--cct-accent); }
+  :focus-visible { outline: 2px solid var(--cct-accent); outline-offset: 1px; }
+  .faint { color: var(--cct-text-faint); } .strong { color: var(--cct-text); } .danger { color: var(--cct-danger); } .ok { color: var(--cct-ok); } .warn { color: var(--cct-warn); }
+  .app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 12px; gap: 10px; }
+  .top { display: flex; gap: 8px; align-items: center; }
+  .top .inp { flex: 1; } .top .sel { width: 210px; }
+  .cols { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; flex: 1; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--cct-border); border-radius: 12px; background: var(--cct-bg); }
+  .col h4 { margin: 0; padding: 9px 12px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--cct-text-muted); border-bottom: 1px solid var(--cct-border); display: flex; align-items: center; gap: 8px; }
+  .col h4 .n { margin-left: auto; color: var(--cct-text-faint); letter-spacing: 0; text-transform: none; font-size: 11px; }
+  .list { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; position: relative; }
+  .item { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; border: 1px solid var(--cct-border); border-radius: 10px; background: var(--cct-surface); user-select: none; }
+  .item[draggable=true] { cursor: grab; }
+  .item:hover { border-color: var(--cct-border-strong); }
+  .item.dragging { opacity: .4; }
+  .item.used { opacity: .45; }
+  .grip { color: var(--cct-text-faint); letter-spacing: -2px; font-size: 14px; cursor: grab; width: 14px; text-align: center; }
+  .num { width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--cct-accent) 25%, transparent); color: var(--cct-text); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nm small { display: block; font-size: 10.5px; color: var(--cct-text-faint); overflow: hidden; text-overflow: ellipsis; }
+  .pill { border: 1px solid var(--cct-border); border-radius: 5px; padding: 0 5px; font-size: 10px; color: var(--cct-text-muted); flex: none; }
+  .ibtn { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; border-radius: 6px; color: var(--cct-text-muted); }
+  .ibtn:hover:not(:disabled) { background: var(--cct-border); color: var(--cct-text); }
+  .delay { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--cct-text-faint); flex: none; }
+  .delay input { width: 52px; height: 26px; text-align: right; padding: 0 4px; }
+  .drop-line { position: absolute; left: 8px; right: 8px; height: 3px; border-radius: 2px; background: var(--cct-accent); box-shadow: 0 0 8px var(--cct-accent); pointer-events: none; }
+  .list.over { outline: 2px dashed color-mix(in srgb, var(--cct-accent) 60%, transparent); outline-offset: -4px; }
+  .empty { margin: auto; text-align: center; padding: 20px; color: var(--cct-text-faint); }
+  .foot { display: flex; align-items: center; gap: 8px; }
+  .foot .msg { flex: 1; min-width: 0; font-size: 12px; }
+  .btn { height: 34px; padding: 0 16px; border-radius: 10px; }
+  .btn.pri { background-color: var(--cct-accent); background-image: linear-gradient(180deg, rgb(255 255 255 / .14), rgb(255 255 255 / 0) 55%, rgb(0 0 0 / .07)); color: var(--cct-on-accent); font-weight: 600; box-shadow: inset 0 1px 0 rgb(255 255 255 / .2), 0 1px 2px rgb(0 0 0 / .28), 0 6px 14px -6px var(--cct-accent); }
+  .btn.pri:hover:not(:disabled) { filter: brightness(1.07); } .btn.pri:active:not(:disabled) { transform: scale(.98); }
+  .btn.sec { border: 1px solid var(--cct-border-strong); color: var(--cct-text-muted); } .btn.sec:hover:not(:disabled) { background: var(--cct-border); color: var(--cct-text); }
+  .btn.del { color: var(--cct-danger); }
+  .hint { font-size: 11.5px; color: var(--cct-text-faint); }
+</style>
+</head>
+<body>
+<div class="app" id="app" style="visibility:hidden">
+  <div class="top">
+    <select id="preset" class="sel" aria-label="Preset salvati"></select>
+    <input id="name" class="inp" placeholder="Nome della combo (per salvarla come preset)" spellcheck="false" maxlength="60" aria-label="Nome della combo">
+  </div>
+  <div class="cols">
+    <section class="col" aria-label="Configurazioni disponibili">
+      <h4>Servizi disponibili <span class="n" id="poolN"></span></h4>
+      <div class="list" id="pool"></div>
+    </section>
+    <section class="col" aria-label="Ordine di avvio">
+      <h4>Ordine di avvio <span class="n" id="orderN"></span></h4>
+      <div class="list" id="order"></div>
+    </section>
+  </div>
+  <p class="hint">Trascina i servizi nella colonna di destra (o usa «＋») e cambia l'ordine trascinandoli o con le frecce. La <b>pausa</b> è il tempo che si aspetta dopo l'avvio di un servizio, prima di far partire il successivo. I terminali compaiono insieme nella vista ad alveare.</p>
+  <div class="foot">
+    <span class="msg" id="msg" role="status"></span>
+    <button class="btn sec del" id="del" style="display:none">Elimina preset</button>
+    <button class="btn sec" id="save">Salva preset</button>
+    <button class="btn sec" id="cancel">Annulla</button>
+    <button class="btn pri" id="go">▶ Avvia combo</button>
+  </div>
+</div>
+<script>
+'use strict'
+// ---- Ponte con l'app ----
+let ctx = { cwd: '', params: null }
+let booted = false
+const pending = new Map(); let nextId = 1
+const rpc = (method, params) => new Promise((res, rej) => { const id = nextId++; pending.set(id, { res, rej }); parent.postMessage({ cct: 'rpc', id, method, params }, '*') })
+const call = (method, params = {}) => rpc('plugin.call', { method, params })
+window.addEventListener('message', (e) => {
+  const m = e.data
+  if (!m || typeof m !== 'object') return
+  if (m.cct === 'rpc-result') { const p = pending.get(m.id); pending.delete(m.id); if (p) m.ok ? p.res(m.value) : p.rej(new Error(m.error || 'errore')) }
+  else if (m.cct === 'init') {
+    ctx = { cwd: m.cwd, params: m.params }
+    for (const [k, v] of Object.entries(m.theme || {})) if (v) document.documentElement.style.setProperty(k, v)
+    if (!booted) { booted = true; boot() }
+  } else if (m.cct === 'event' && m.event === 'state') refresh()
+})
+
+// ---- Stato ----
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const base = (p) => String(p).split(/[\\/]/).pop()
+const S = { configs: [], combos: [], order: [], editing: '', drag: null, drop: -1 }
+const cfgOf = (id) => S.configs.find((c) => c.id === id)
+
+async function boot() {
+  $('app').style.visibility = ''
+  await refresh()
+  const p = ctx.params || {}
+  if (p.comboId) loadPreset(p.comboId)
+  else if (Array.isArray(p.configIds)) { S.order = p.configIds.map((id) => ({ configId: id, delay: 0 })).filter((s) => cfgOf(s.configId)); render() }
+}
+async function refresh() {
+  try {
+    const st = await call('state', { root: ctx.cwd })
+    S.configs = st.configs.filter((c) => c.type !== 'attach')
+    S.combos = st.combos || []
+    // Se un servizio dell'elenco in costruzione è stato cancellato nel frattempo, si toglie.
+    S.order = S.order.filter((s) => cfgOf(s.configId))
+  } catch (e) { say(e.message, 'danger') }
+  render()
+}
+function say(text, cls = 'faint') { const m = $('msg'); m.className = 'msg ' + cls; m.textContent = text || '' }
+
+// ---- Disegno ----
+function render() {
+  const used = new Set(S.order.map((s) => s.configId))
+  $('poolN').textContent = S.configs.length ? `${S.configs.length - used.size} da aggiungere` : ''
+  $('pool').innerHTML = S.configs.length ? S.configs.map((c) => `<div class="item ${used.has(c.id) ? 'used' : ''}" draggable="${used.has(c.id) ? 'false' : 'true'}" data-pool="${esc(c.id)}" title="${esc(c.root)}">
+      <span class="grip" aria-hidden="true">⋮⋮</span><span class="nm"><span class="strong">${esc(c.name)}</span><small>${esc(base(c.root))}</small></span><span class="pill">${esc(c.type)}</span>
+      <button class="ibtn" data-add="${esc(c.id)}" ${used.has(c.id) ? 'disabled' : ''} title="Aggiungi alla combo" aria-label="Aggiungi ${esc(c.name)} alla combo">＋</button></div>`).join('')
+    : '<p class="empty">Nessuna configurazione. Creane qualcuna dal pannello «Esegui e debug» (o importale da IntelliJ), poi torna qui.</p>'
+  $('orderN').textContent = S.order.length ? `${S.order.length} ${S.order.length === 1 ? 'servizio' : 'servizi'}` : ''
+  $('order').innerHTML = S.order.length ? S.order.map((s, i) => {
+    const c = cfgOf(s.configId); const last = i === S.order.length - 1
+    return `<div class="item" draggable="true" data-step="${i}" title="${esc(c.root)}"><span class="grip" aria-hidden="true">⋮⋮</span><span class="num">${i + 1}</span>
+      <span class="nm"><span class="strong">${esc(c.name)}</span><small>${esc(base(c.root))}</small></span><span class="pill">${esc(c.type)}</span>
+      <label class="delay" title="${last ? 'È l\'ultimo: non c\'è niente da aspettare dopo' : 'Secondi da aspettare dopo l\'avvio, prima del servizio successivo'}">pausa <input class="inp" type="number" min="0" max="600" step="1" value="${s.delay}" data-delay="${i}" ${last ? 'disabled' : ''} aria-label="Pausa dopo ${esc(c.name)}"> s</label>
+      <button class="ibtn" data-up="${i}" ${i === 0 ? 'disabled' : ''} title="Sposta su" aria-label="Sposta ${esc(c.name)} su">↑</button><button class="ibtn" data-down="${i}" ${last ? 'disabled' : ''} title="Sposta giù" aria-label="Sposta ${esc(c.name)} giù">↓</button>
+      <button class="ibtn" data-rm="${i}" title="Togli dalla combo" aria-label="Togli ${esc(c.name)} dalla combo">✕</button></div>`
+  }).join('') : '<p class="empty">Trascina qui i servizi da avviare,<br>nell\'ordine in cui devono partire.</p>'
+  $('preset').innerHTML = `<option value="">Preset salvati${S.combos.length ? '' : ' (nessuno)'}</option>` + S.combos.map((c) => `<option value="${esc(c.id)}"${c.id === S.editing ? ' selected' : ''}>${esc(c.name)} · ${c.steps.length}</option>`).join('')
+  $('del').style.display = S.editing ? '' : 'none'
+  const ok = S.order.length > 0
+  $('go').disabled = !ok; $('save').disabled = !ok || !$('name').value.trim()
+  drawDrop()
+}
+function drawDrop() {
+  const list = $('order'); for (const l of list.querySelectorAll('.drop-line')) l.remove()
+  if (S.drop < 0 || !S.order.length) return
+  const items = [...list.querySelectorAll('.item')]
+  const y = S.drop >= items.length ? items[items.length - 1].offsetTop + items[items.length - 1].offsetHeight + 3 : items[S.drop].offsetTop - 5
+  const line = document.createElement('div'); line.className = 'drop-line'; line.style.top = `${y}px`; list.appendChild(line)
+}
+
+// ---- Modifiche all'ordine ----
+function addStep(id, at) { if (S.order.some((s) => s.configId === id) || !cfgOf(id)) return; S.order.splice(at ?? S.order.length, 0, { configId: id, delay: 0 }); say(''); render() }
+function moveStep(from, to) { const [s] = S.order.splice(from, 1); S.order.splice(Math.min(to, S.order.length), 0, s); render() }
+function loadPreset(id) {
+  const c = S.combos.find((x) => x.id === id)
+  if (!c) { S.editing = ''; render(); return }
+  const kept = c.steps.filter((s) => cfgOf(s.configId))
+  S.editing = c.id; S.order = kept.map((s) => ({ ...s })); $('name').value = c.name
+  say(kept.length < c.steps.length ? `${c.steps.length - kept.length} servizi non esistono più e sono stati tolti: salva per aggiornare il preset.` : '', 'warn')
+  render()
+}
+const steps = () => S.order.map((s, i) => ({ configId: s.configId, delay: i === S.order.length - 1 ? 0 : Math.max(0, Math.min(600, Math.round(Number(s.delay) || 0))) }))
+
+// ---- Trascinamento ----
+// Dove cadrebbe il servizio: tra gli elementi della colonna di destra, in base all'altezza del puntatore.
+function dropIndex(clientY) {
+  const items = [...$('order').querySelectorAll('.item')]
+  let idx = 0
+  for (const it of items) { const r = it.getBoundingClientRect(); if (clientY > r.top + r.height / 2) idx++ }
+  return idx
+}
+document.addEventListener('dragstart', (e) => {
+  const item = e.target.closest?.('.item'); if (!item) return
+  S.drag = item.dataset.pool ? { from: 'pool', id: item.dataset.pool } : { from: 'order', index: Number(item.dataset.step) }
+  e.dataTransfer.effectAllowed = 'copyMove'; e.dataTransfer.setData('text/plain', item.dataset.pool || String(item.dataset.step))
+  item.classList.add('dragging')
+})
+document.addEventListener('dragend', () => { S.drag = null; S.drop = -1; for (const el of document.querySelectorAll('.dragging, .over')) el.classList.remove('dragging', 'over'); drawDrop() })
+$('order').addEventListener('dragover', (e) => { if (!S.drag) return; e.preventDefault(); e.dataTransfer.dropEffect = S.drag.from === 'pool' ? 'copy' : 'move'; S.drop = dropIndex(e.clientY); $('order').classList.add('over'); drawDrop() })
+$('order').addEventListener('dragleave', (e) => { if (!$('order').contains(e.relatedTarget)) { S.drop = -1; $('order').classList.remove('over'); drawDrop() } })
+$('order').addEventListener('drop', (e) => {
+  if (!S.drag) return; e.preventDefault()
+  const at = dropIndex(e.clientY); const d = S.drag; S.drag = null; S.drop = -1; $('order').classList.remove('over')
+  if (d.from === 'pool') addStep(d.id, at)
+  else moveStep(d.index, at > d.index ? at - 1 : at)
+})
+// Trascinare un servizio dalla colonna di destra a quella di sinistra lo toglie dalla combo.
+$('pool').addEventListener('dragover', (e) => { if (S.drag?.from === 'order') { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; $('pool').classList.add('over') } })
+$('pool').addEventListener('dragleave', () => $('pool').classList.remove('over'))
+$('pool').addEventListener('drop', (e) => { if (S.drag?.from !== 'order') return; e.preventDefault(); const i = S.drag.index; S.drag = null; $('pool').classList.remove('over'); S.order.splice(i, 1); render() })
+
+// ---- Comandi ----
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return
+  const d = b.dataset
+  if (d.add) addStep(d.add)
+  else if (d.rm !== undefined) { S.order.splice(Number(d.rm), 1); render() }
+  else if (d.up !== undefined) moveStep(Number(d.up), Number(d.up) - 1)
+  else if (d.down !== undefined) moveStep(Number(d.down), Number(d.down) + 1)
+})
+document.addEventListener('input', (e) => {
+  const t = e.target
+  if (t.dataset.delay !== undefined) S.order[Number(t.dataset.delay)].delay = Math.max(0, Math.min(600, Math.round(Number(t.value) || 0)))
+  else if (t.id === 'name') $('save').disabled = !S.order.length || !t.value.trim()
+})
+$('preset').onchange = (e) => { S.editing = ''; if (e.target.value) loadPreset(e.target.value); else { $('name').value = ''; S.order = []; render() } }
+$('cancel').onclick = () => rpc('ui.close')
+$('save').onclick = async () => {
+  try { const saved = await call('saveCombo', { combo: { id: S.editing, name: $('name').value.trim(), steps: steps() } }); S.editing = saved.id; await refresh(); say(`Preset «${saved.name}» salvato.`, 'ok') } catch (e) { say(e.message, 'danger') }
+}
+$('del').onclick = async () => {
+  const c = S.combos.find((x) => x.id === S.editing); if (!c) return
+  if (!(await rpc('ui.confirm', { title: 'Eliminare il preset?', message: `«${c.name}» verrà tolto dai preset salvati. Le configurazioni dei servizi non cambiano.`, okLabel: 'Elimina', danger: true }))) return
+  try { await call('deleteCombo', { id: c.id }); S.editing = ''; $('name').value = ''; S.order = []; await refresh(); say('Preset eliminato.') } catch (e) { say(e.message, 'danger') }
+}
+$('go').onclick = async () => {
+  try {
+    const r = await call('runCombo', { steps: steps(), name: $('name').value.trim() || 'Combo', id: S.editing || undefined, workspace: ctx.cwd })
+    if (r && r.ok === false) return say(r.error, 'danger')
+    await rpc('ui.close')
+  } catch (e) { say(e.message, 'danger') }
+}
+parent.postMessage({ cct: 'ready' }, '*')
+</script>
+</body>
+</html>

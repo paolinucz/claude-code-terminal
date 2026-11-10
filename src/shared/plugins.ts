@@ -46,6 +46,7 @@ export interface PluginManifest {
  */
 export const PLUGIN_PERMISSIONS = {
   terminal: 'Mostrare i terminali delle sessioni che avvia',
+  openUrl: 'Aprire indirizzi web (http e https) nel browser',
   'files.read': 'Leggere i file del progetto aperto',
   'files.write': 'Scrivere i file del progetto aperto'
 } as const
@@ -57,6 +58,7 @@ export const APP_EVENTS = ['app.workspace', 'app.file.changed', 'app.session.exi
 /** Eventi riservati che l'adapter manda all'app tramite `app.notify` e `app.terminal.show`: non arrivano alle pagine. */
 export const HOST_EVENT_NOTIFY = '$ui.notify'
 export const HOST_EVENT_TERMINAL = '$terminal.show'
+export const HOST_EVENT_HIVE = '$terminal.hive'
 
 /**
  * Contributi di un plugin all'interfaccia. L'app offre i punti di aggancio e non sa cosa ci sia dentro: la pagina

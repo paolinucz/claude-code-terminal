@@ -6,6 +6,7 @@ import { EditorPanel } from '@/files/EditorPanel'
 import { ProblemsPanel } from '@/files/ProblemsPanel'
 import { PermissionsPanel } from '@/permissions/PermissionsPanel'
 import { PluginsPanel } from '@/plugins/PluginsPanel'
+import { HivePanel } from '@/terminal/HivePanel'
 import { TerminalPanel } from '@/terminal/TerminalPanel'
 import type { PanelParams } from './kinds'
 import { PanelErrorBoundary } from './PanelErrorBoundary'
@@ -29,6 +30,8 @@ export function PanelHost(props: IDockviewPanelProps<PanelParams>) {
         return <PluginsPanel />
       case 'docs':
         return <DocsPanel {...props} />
+      case 'hive':
+        return <HivePanel {...props} />
       default:
         return <PlaceholderPanel {...props} />
     }

@@ -38,6 +38,61 @@ export interface JdkInfo {
   source: 'temurin' | 'env' | 'path' | 'system' | 'intellij'
 }
 
+export type BuildToolKind = 'maven' | 'gradle'
+
+/** Maven o Gradle scaricato dall'app (una cartella per versione). */
+export interface BuildTool {
+  kind: BuildToolKind
+  version: string
+  path: string
+}
+
+/**
+ * Impostazioni di un servizio, valide per tutte le sue run configuration (una configurazione può sovrascrivere le variabili).
+ * `maven` / `gradle`: versione scaricata dall'app da usare al posto del wrapper del progetto (assente = wrapper, poi PATH).
+ */
+export interface ServiceSettings {
+  maven?: string
+  gradle?: string
+  env?: Record<string, string>
+}
+
+/** Un passo di una combo: la run configuration da avviare e quanti secondi aspettare prima del passo successivo. */
+export interface ComboStep {
+  configId: string
+  /** Secondi di pausa dopo l'avvio, prima del passo successivo (0 = subito). */
+  delay: number
+}
+
+/** Più servizi avviati insieme, nell'ordine scelto. Si salva come preset. */
+export interface Combo {
+  id: string
+  name: string
+  steps: ComboStep[]
+}
+
+export type ComboStepState = 'waiting' | 'starting' | 'started' | 'failed' | 'skipped'
+
+/** Avanzamento di una combo in avvio (o appena finita), per mostrarlo nella pagina. */
+export interface ComboRun {
+  id: string
+  /** Preset da cui viene, se è un preset. */
+  comboId?: string
+  name: string
+  status: 'running' | 'done' | 'stopped'
+  startedAt: number
+  steps: {
+    configId: string
+    name: string
+    delay: number
+    state: ComboStepState
+    sessionId?: string
+    error?: string
+    /** Secondi che mancano al passo successivo. */
+    wait?: number
+  }[]
+}
+
 export type RunConfigType = 'maven' | 'gradle' | 'quarkus' | 'application' | 'attach'
 
 export interface RunConfig {
@@ -143,6 +198,18 @@ export interface JavaState {
   defaultJdk?: string
   /** JDK per servizio (id servizio → id JDK). */
   serviceJdk: Record<string, string>
+  /** Maven e Gradle scaricati dall'app. */
+  tools: BuildTool[]
+  /** Versioni e variabili per servizio (id servizio → impostazioni). */
+  serviceSettings: Record<string, ServiceSettings>
+  /** Versione di Maven e di Gradle dichiarata dal wrapper di ogni servizio, se c'è. */
+  wrappers: Record<string, Partial<Record<BuildToolKind, string>>>
+  /** Preset di combo salvati. */
+  combos: Combo[]
+  /** Combo in avvio o appena finita. */
+  comboRun: ComboRun | null
+  /** Incompatibilità tra la versione dello strumento e il JDK che il servizio userebbe (id servizio → messaggi). */
+  compat: Record<string, string[]>
 }
 
 export interface IdeaImportResult {

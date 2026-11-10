@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { AlertTriangle, Check, Info, X } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui-kit'
-import { usePluginUi, type PluginDialogRequest, type PluginNotice } from '@/state/pluginUi'
+import { EMPTY_DECOR, PluginFrame } from '@/plugins/PluginFrame'
+import { usePluginUi, type PluginDialogRequest, type PluginNotice, type PluginPageRequest } from '@/state/pluginUi'
+import { rootForSheet, useSidebar } from '@/state/sidebar'
+import { useWorkspace } from '@/state/workspace'
 
 const ICONS = {
   info: { icon: Info, color: 'var(--cct-info)' },
@@ -15,8 +18,12 @@ const ICONS = {
 export function PluginUi() {
   const notices = usePluginUi((s) => s.notices)
   const dialogs = usePluginUi((s) => s.dialogs)
+  const pages = usePluginUi((s) => s.pages)
   return (
     <>
+      {pages.map((p) => (
+        <PageDialog key={p.id} page={p} />
+      ))}
       <div className="pointer-events-none fixed bottom-14 left-14 z-40 flex w-[340px] flex-col gap-2" aria-live="polite">
         <AnimatePresence initial={false}>
           {notices.map((n) => (
@@ -27,6 +34,36 @@ export function PluginUi() {
       {/* Una finestra alla volta: le altre aspettano il loro turno. */}
       {dialogs[0] && <RequestDialog key={dialogs[0].id} req={dialogs[0]} />}
     </>
+  )
+}
+
+/**
+ * Pagina di un plugin in una finestra grande (`ui.openPage`): stessa pagina isolata delle altre, con il nome del plugin sempre
+ * in vista. Si chiude con Esc, con la X o con `ui.close` dalla pagina; un clic fuori non la chiude (si perderebbe il lavoro).
+ */
+function PageDialog({ page }: { page: PluginPageRequest }) {
+  const close = usePluginUi((s) => s.closePage)
+  const sheetId = useWorkspace((s) => s.activeSheetId)
+  // Solo per ridisegnare quando cambia la cartella del progetto.
+  useSidebar((s) => s.cwdBySheet)
+  useSidebar((s) => s.explorerCwd)
+  const cwd = rootForSheet(sheetId)
+  return (
+    <Dialog open onOpenChange={(o) => !o && close(page.id)}>
+      <DialogContent
+        className="flex flex-col gap-0 p-0 sm:max-w-none"
+        style={{ width: `min(${page.width}px, 94vw)`, height: `min(${page.height}px, 88vh)` }}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
+          <DialogTitle>{page.title}</DialogTitle>
+          <DialogDescription>Plugin «{page.pluginName}»</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-b-xl">
+          <PluginFrame pluginId={page.pluginId} entry={page.entry} cwd={cwd} decor={EMPTY_DECOR} modalId={page.id} params={page.params} />
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

@@ -4,11 +4,11 @@
 import { dirname } from 'node:path'
 import { runAdapter, type AdapterApp, type GutterMarkerOut } from './cct-plugin-sdk.mjs'
 import { JavaDevService } from './JavaDevService.mts'
-import type { DebugState, JavaBreakpoint, RunConfig } from './types.mts'
+import type { Combo, ComboStep, DebugState, JavaBreakpoint, RunConfig } from './types.mts'
 
 const LANGUAGE_SERVER = 'cct.java'
 /** Impostazioni del plugin: tutte con il prefisso «java.» dichiarato nel manifest (i dati già salvati restano). */
-const KEYS = ['java.runConfigs', 'java.defaultJdk', 'java.serviceJdk', 'java.breakpoints']
+const KEYS = ['java.runConfigs', 'java.defaultJdk', 'java.serviceJdk', 'java.serviceSettings', 'java.combos', 'java.breakpoints']
 
 const norm = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
 
@@ -79,13 +79,13 @@ runAdapter({
       packDataDir: () => ctx.plugin.dataDir,
       packActive: () => true,
       lsp: (method, params) => app.plugin(LANGUAGE_SERVER, method, params),
-      // Il programma lanciato da una run configuration va mostrato subito in un terminale: senza una vista la sessione
-      // sparirebbe appena finisce e non si vedrebbero l'avvio, gli errori né i log (permesso `terminal`).
-      createTask: async (req) => {
-        const s = await app.session.create({ ...req })
-        app.terminal.show(s.id)
-        return s
-      },
+      createTask: (req) => app.session.create({ ...req }),
+      // Un programma lanciato da una run configuration va mostrato subito in un terminale: senza una vista la sessione
+      // sparirebbe appena finisce e non si vedrebbero l'avvio, gli errori né i log. Le combo li raccolgono nell'alveare
+      // (permesso `terminal`).
+      showTerminal: (id) => app.terminal.show(id),
+      showHive: (key, title, ids) => app.terminal.hive(key, title, ids),
+      emitCombo: (run) => app.emit('combo', run),
       killSession: (id) => void app.session.kill(id).catch(() => {}),
       sessionStatus: async (id) => (await app.session.status(id)) ?? undefined,
       emitDebug: (s) => {
@@ -106,6 +106,17 @@ runAdapter({
       case 'setDefaultJdk': return svc.setDefaultJdk((p.id as string | null) ?? null)
       case 'setServiceJdk': return svc.setServiceJdk(String(p.root), (p.id as string | null) ?? null)
       case 'downloadJdk': return svc.downloadJdk(Number(p.major))
+      // Combo: più servizi avviati insieme, nell'ordine scelto, con i preset.
+      case 'saveCombo': return svc.saveCombo(p.combo as Combo)
+      case 'deleteCombo': return svc.deleteCombo(String(p.id))
+      case 'runCombo': return svc.runCombo({ steps: p.steps as ComboStep[], name: p.name as string | undefined, id: p.id as string | undefined, workspace: String(p.workspace ?? '') })
+      case 'stopCombo': return svc.stopCombo()
+      case 'dismissCombo': return svc.dismissCombo()
+      // Maven, Gradle e variabili d'ambiente per servizio.
+      case 'setServiceSettings': return svc.setServiceSettings(String(p.root), { maven: p.maven as string | null | undefined, gradle: p.gradle as string | null | undefined, env: p.env as Record<string, string> | null | undefined })
+      case 'toolVersions': return svc.toolVersions(p.kind as 'maven' | 'gradle')
+      case 'downloadTool': return svc.downloadBuildTool(p.kind as 'maven' | 'gradle', String(p.version))
+      case 'removeTool': return svc.removeBuildTool(p.kind as 'maven' | 'gradle', String(p.version))
       case 'removeJdk': return svc.removeJdk(String(p.id))
       case 'saveConfig': return svc.saveConfig(p.config as RunConfig)
       case 'deleteConfig': return svc.deleteConfig(String(p.id))

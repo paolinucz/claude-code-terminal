@@ -11,6 +11,7 @@ export type PanelKind =
   | 'permissions'
   | 'plugins'
   | 'docs'
+  | 'hive'
 
 export interface PanelKindInfo {
   kind: PanelKind
@@ -82,6 +83,15 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     phase: 0,
     requirements: 'J3, J4, J6, J8'
   },
+  hive: {
+    kind: 'hive',
+    title: 'Alveare',
+    description: 'Più terminali insieme in un mosaico, ognuno ingrandibile. Lo apre un plugin (per esempio le combo di Java).',
+    phase: 0,
+    requirements: '',
+    // Le sessioni non sopravvivono al riavvio: il pannello si toglie dai layout salvati e non compare nei menu.
+    hidden: true
+  },
   widgets: {
     kind: 'widgets',
     title: 'Widget',
@@ -118,4 +128,6 @@ export interface PanelParams {
   cwd?: string
   /** Solo editor: file aperto. */
   filePath?: string
+  /** Solo alveare: chiave del gruppo di terminali (`state/hives.ts`). */
+  hiveKey?: string
 }

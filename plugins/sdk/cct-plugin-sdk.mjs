@@ -156,7 +156,8 @@ export class Connection {
  * `app` serve per mandare all'app: app.diagnostics(path, source, items), app.status(s), app.log(level, message), e per
  * usare i servizi dell'app (Plugin API «host/…»): app.settings.get/set, app.session.create/kill/status,
  * app.plugin(idPlugin, metodo, parametri) verso un plugin richiesto, app.emit(evento, dati) verso le pagine del plugin,
- * app.notify(messaggio, tipo) per un avviso, app.terminal.show(idSessione) per mostrare il terminale di una sessione.
+ * app.notify(messaggio, tipo) per un avviso, app.terminal.show(idSessione) per mostrare il terminale di una sessione,
+ * app.terminal.hive(chiave, titolo, idSessioni) per mostrarne più insieme in un mosaico.
  */
 export function runAdapter(handlers) {
   // stdout è il canale del protocollo.
@@ -186,7 +187,12 @@ export function runAdapter(handlers) {
     // Avviso nell'app (toast). `kind`: 'info' (predefinito), 'ok', 'warn', 'error'.
     notify: (message, kind = 'info') => conn.notify('ui/notify', { message, kind }),
     // Mostra in un pannello il terminale di una sessione avviata con `session.create` (serve il permesso `terminal`).
-    terminal: { show: (sessionId) => conn.notify('ui/terminal.show', { sessionId }) },
+    terminal: {
+      show: (sessionId) => conn.notify('ui/terminal.show', { sessionId }),
+      // Vista «alveare»: un pannello con più terminali in un mosaico. `key` è stabile (la stessa chiave aggiorna lo stesso
+      // pannello, con l'elenco nuovo); si può richiamare man mano che le sessioni partono (serve il permesso `terminal`).
+      hive: (key, title, sessionIds) => conn.notify('ui/terminal.hive', { key, title, sessionIds })
+    },
     /** Evento per le pagine di questo plugin (le mostra l'interfaccia): avanzamento, stato del debug… */
     emit: (event, data) => conn.notify('ui/event', { event, data })
   }

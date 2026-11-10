@@ -1,5 +1,7 @@
-import { HOST_EVENT_NOTIFY, HOST_EVENT_TERMINAL, type InstalledPlugin, type PluginCommand, type PluginPermission } from '@shared/plugins'
+import { HOST_EVENT_HIVE, HOST_EVENT_NOTIFY, HOST_EVENT_TERMINAL, type InstalledPlugin, type PluginCommand, type PluginPermission } from '@shared/plugins'
 import { api } from '@/lib/api'
+import type { PanelParams } from '@/panels/kinds'
+import { useHives } from '@/state/hives'
 import { pluginNotify } from '@/state/pluginUi'
 import { useEditor } from '@/state/editor'
 import { useSessions } from '@/state/sessions'
@@ -42,6 +44,30 @@ export function showSessionTerminal(sessionId: string): boolean {
   return true
 }
 
+/** Dati di un gruppo di terminali da un plugin: chiave, titolo ed elenco di sessioni, controllati. */
+export function parseHive(pluginId: string, d: Record<string, unknown>): { key: string; title: string; sessionIds: string[]; pluginId: string } | null {
+  if (typeof d.key !== 'string' || !/^[\w.:-]{1,80}$/.test(d.key)) return null
+  const ids = Array.isArray(d.sessionIds) ? d.sessionIds.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 80).slice(0, 24) : []
+  // La chiave sta nello spazio del plugin: due plugin non possono prendersi il gruppo l'uno dell'altro.
+  return { key: `${pluginId}/${d.key}`, title: typeof d.title === 'string' && d.title ? d.title.slice(0, 80) : 'Terminali', sessionIds: ids, pluginId }
+}
+
+/**
+ * Mostra un gruppo di terminali nella vista «alveare». Se il pannello c'è già (in qualunque foglio) si aggiorna da solo
+ * dall'elenco nuovo; altrimenti se ne apre uno sotto il pannello attivo del foglio attivo.
+ */
+export function showHive(h: { key: string; title: string; sessionIds: string[]; pluginId?: string }): boolean {
+  useHives.getState().set(h)
+  const has = (api: ReturnType<typeof dockRegistry.all>[number]) => api.panels.some((p) => (p.params as PanelParams | undefined)?.hiveKey === h.key)
+  if (dockRegistry.all().some(has)) return true
+  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  if (!dock) return false
+  const ref = dock.activePanel
+  const id = addPanel(dock, 'hive', { title: h.title, params: { hiveKey: h.key }, position: ref ? { referencePanel: ref.id, direction: 'below' } : undefined })
+  dock.getPanel(id)?.group.api.setSize({ height: 460 })
+  return true
+}
+
 /** Esegue un comando della palette contribuito da un plugin. */
 export function runPluginCommand(pluginId: string, cmd: PluginCommand): void {
   if (cmd.openView) {
@@ -68,5 +94,9 @@ export function startPluginBridge(): void {
     const d = (e.data ?? {}) as Record<string, unknown>
     if (e.event === HOST_EVENT_NOTIFY) pluginNotify(pluginName(e.pluginId), d.message, d.kind)
     else if (e.event === HOST_EVENT_TERMINAL && hasPermission(e.pluginId, 'terminal')) showWhenKnown(String(d.sessionId ?? ''))
+    else if (e.event === HOST_EVENT_HIVE && hasPermission(e.pluginId, 'terminal')) {
+      const hive = parseHive(e.pluginId, d)
+      if (hive) showHive(hive)
+    }
   })
 }

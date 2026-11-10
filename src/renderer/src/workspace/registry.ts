@@ -15,5 +15,9 @@ export const dockRegistry = {
   },
   get(sheetId: string): DockviewApi | undefined {
     return apis.get(sheetId)
+  },
+  /** Tutti i fogli montati (anche quelli nascosti). */
+  all(): DockviewApi[] {
+    return [...apis.values()]
   }
 }

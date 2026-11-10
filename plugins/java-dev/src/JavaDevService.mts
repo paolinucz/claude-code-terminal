@@ -1,6 +1,6 @@
 import net from 'node:net'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   emptyDebugState,
@@ -9,19 +9,26 @@ import {
   type DebugScope,
   type DebugState,
   type DebugVariable,
+  type BuildTool,
+  type BuildToolKind,
+  type Combo,
+  type ComboRun,
+  type ComboStep,
   type IdeaImportResult,
   type JavaBreakpoint,
   type JavaProgress,
   type JavaService,
   type JavaState,
   type JdkInfo,
-  type RunConfig
+  type RunConfig,
+  type ServiceSettings
 } from './types.mts'
 import { DapClient, type DapEvent } from './dap.mts'
 import { readIdeaProject } from './ideaImport.mts'
 import { detectJdks, downloadTemurin, removeManagedJdk, whichOnPath } from './jdks.mts'
 import { buildLaunch, type LaunchContext } from './runConfig.mts'
 import { detectServices, nodeDisk, type Disk } from './services.mts'
+import { availableVersions, compatIssue, detectTools, downloadTool, isValidVersion, removeTool, toolScript, wrapperDir, wrapperVersion } from './tools.mts'
 
 /** Richiesta di una sessione «task» (un comando in un terminale dell'app, senza shell). */
 export interface TaskRequest {
@@ -52,11 +59,21 @@ export interface JavaDevDeps {
   emitOutput(o: DebugOutput): void
   emitProgress(p: JavaProgress): void
   emitState(): void
+  /** Mostra il terminale di un programma avviato (un pannello a parte). */
+  showTerminal(sessionId: string): void
+  /** Mostra più terminali insieme nella vista «alveare»; la stessa chiave aggiorna lo stesso pannello. */
+  showHive(key: string, title: string, sessionIds: string[]): void
+  /** Avanzamento della combo. */
+  emitCombo(run: ComboRun | null): void
 }
 
 const K_CONFIGS = 'java.runConfigs'
 const K_DEFAULT_JDK = 'java.defaultJdk'
 const K_SERVICE_JDK = 'java.serviceJdk'
+const K_SERVICE_SETTINGS = 'java.serviceSettings'
+const K_COMBOS = 'java.combos'
+const MAX_COMBO_STEPS = 24
+const MAX_COMBO_DELAY = 600
 const K_BREAKPOINTS = 'java.breakpoints'
 
 const key = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
@@ -91,11 +108,18 @@ export class JavaDevService {
   private launched = false
   private cancelStart = false
   private lastCfg: { cfg: RunConfig; workspace: string } | null = null
+  private comboRun: ComboRun | null = null
+  private comboCancel = false
 
   constructor(private readonly d: JavaDevDeps) {}
 
   private get managedDir(): string {
     return join(this.d.userDataDir, 'jdks')
+  }
+
+  /** Maven e Gradle scaricati dall'app (una cartella per versione). */
+  private get toolsDir(): string {
+    return join(this.d.userDataDir, 'build-tools')
   }
 
   // ---------------------------------------------------------------- stato
@@ -117,9 +141,30 @@ export class JavaDevService {
 
   async state(root: string, fresh = false): Promise<JavaState> {
     const services = root ? await this.services(root, fresh) : []
+    const settings = this.serviceSettingsAll()
+    const wrappers: JavaState['wrappers'] = {}
+    const compat: JavaState['compat'] = {}
+    for (const sv of services) {
+      if (sv.aggregator) continue
+      const w: JavaState['wrappers'][string] = {}
+      for (const kind of ['maven', 'gradle'] as const) {
+        const script = this.findWrapperScript(sv.root, root, kind)
+        const v = script ? wrapperVersion(kind, wrapperDir(script)) : undefined
+        if (v) w[kind] = v
+      }
+      wrappers[sv.id] = w
+      const issues = this.compatFor(sv, services, settings[sv.id] ?? {}, w)
+      if (issues.length) compat[sv.id] = issues
+    }
     return {
       enabled: this.d.packActive(),
       services,
+      tools: detectTools(this.toolsDir),
+      combos: this.combos(),
+      comboRun: this.comboRun,
+      serviceSettings: settings,
+      wrappers,
+      compat,
       jdks: detectJdks(this.managedDir),
       configs: this.configs().filter((c) => !root || inside(c.root, root) || services.some((s) => inside(c.root, s.root))),
       defaultJdk: (this.d.getSetting(K_DEFAULT_JDK) as string | undefined) || undefined,
@@ -158,6 +203,88 @@ export class JavaDevService {
     else delete map[key(serviceRoot)]
     this.d.setSetting(K_SERVICE_JDK, map)
     this.d.emitState()
+  }
+
+  // ---------------------------------------------------------------- Maven, Gradle e variabili per servizio
+
+  private serviceSettingsAll(): Record<string, ServiceSettings> {
+    const raw = this.d.getSetting(K_SERVICE_SETTINGS)
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, ServiceSettings>) : {}
+  }
+
+  /** Il servizio più specifico che contiene la cartella. */
+  private serviceFor(root: string, services: JavaService[]): JavaService | undefined {
+    return services.filter((s) => inside(root, s.root)).sort((a, b) => b.root.length - a.root.length)[0]
+  }
+
+  /** Problemi di compatibilità tra Maven/Gradle del servizio (scelto o del wrapper) e il JDK che userebbe. */
+  private compatFor(sv: JavaService, services: JavaService[], st: ServiceSettings, wrapper: Partial<Record<BuildToolKind, string>>): string[] {
+    const version = st[sv.build] ?? wrapper[sv.build]
+    if (!version) return []
+    try {
+      const major = this.jdkFor({ root: sv.root } as RunConfig, services).major
+      const issue = compatIssue(sv.build, version, major)
+      return issue ? [issue] : []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Cambia le impostazioni di un servizio. Una chiave assente non si tocca; `null` la toglie (Maven/Gradle tornano al
+   * wrapper del progetto). `env`: variabili valide per tutte le run configuration del servizio.
+   */
+  setServiceSettings(serviceRoot: string, patch: { maven?: string | null; gradle?: string | null; env?: Record<string, string> | null }): void {
+    const all = { ...this.serviceSettingsAll() }
+    const k = key(serviceRoot)
+    const cur: ServiceSettings = { ...(all[k] ?? {}) }
+    for (const kind of ['maven', 'gradle'] as const) {
+      const v = patch[kind]
+      if (v === undefined) continue
+      if (v === null || v === '') delete cur[kind]
+      else if (isValidVersion(v)) cur[kind] = v
+      else throw new Error(`Versione non valida: ${String(v)}`)
+    }
+    if (patch.env !== undefined) {
+      const env: Record<string, string> = {}
+      for (const [name, value] of Object.entries(patch.env ?? {}).slice(0, 100)) {
+        if (!/^[A-Za-z_][\w()]*$/.test(name) || typeof value !== 'string') throw new Error(`Variabile non valida: ${name}`)
+        env[name] = value.slice(0, 8192)
+      }
+      if (Object.keys(env).length) cur.env = env
+      else delete cur.env
+    }
+    if (Object.keys(cur).length) all[k] = cur
+    else delete all[k]
+    this.d.setSetting(K_SERVICE_SETTINGS, all)
+    this.d.emitState()
+  }
+
+  /** Versioni stabili di Maven o Gradle che si possono scaricare (dai siti ufficiali). */
+  async toolVersions(kind: BuildToolKind): Promise<string[]> {
+    if (kind !== 'maven' && kind !== 'gradle') throw new Error(`Strumento non valido: ${String(kind)}`)
+    return availableVersions(kind)
+  }
+
+  async downloadBuildTool(kind: BuildToolKind, version: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      if (kind !== 'maven' && kind !== 'gradle') throw new Error(`Strumento non valido: ${String(kind)}`)
+      await downloadTool(kind, version, this.toolsDir, (p) => this.d.emitProgress(p))
+      this.d.emitState()
+      return { ok: true }
+    } catch (e) {
+      const error = (e as Error).message
+      this.d.emitProgress({ step: 'Errore', progress: 0, error })
+      return { ok: false, error }
+    }
+  }
+
+  removeBuildTool(kind: BuildToolKind, version: string): { ok: boolean; error?: string } {
+    const used = Object.entries(this.serviceSettingsAll()).find(([, st]) => st[kind] === version)
+    if (used) return { ok: false, error: `${kind === 'maven' ? 'Maven' : 'Gradle'} ${version} è scelto da un servizio (${used[0]}): cambia prima la sua impostazione.` }
+    const ok = removeTool(this.toolsDir, kind, version)
+    this.d.emitState()
+    return { ok, error: ok ? undefined : 'Non sono riuscito a cancellarlo.' }
   }
 
   async downloadJdk(major: number): Promise<{ ok: boolean; error?: string }> {
@@ -234,27 +361,63 @@ export class JavaDevService {
 
   // ---------------------------------------------------------------- avvio
 
-  private findScript(from: string, workspace: string, names: string[], fallbackNames: string[]): string | null {
+  /** Cerca uno script dalla cartella verso l'alto (fino sopra la cartella di lavoro). */
+  private findUp(from: string, workspace: string, names: string[]): string | null {
     for (let dir = from; ; dir = dirname(dir)) {
       for (const n of names) if (existsSync(join(dir, n))) return join(dir, n)
       if (dirname(dir) === dir || (workspace && key(dir) === key(dirname(workspace)))) break
     }
-    return whichOnPath(fallbackNames)
+    return null
   }
 
-  private async launchContext(cfg: RunConfig, services: JavaService[], mode: 'run' | 'debug', workspace: string): Promise<{ ctx: LaunchContext; jdk: JdkInfo }> {
+  private findScript(from: string, workspace: string, names: string[], fallbackNames: string[]): string | null {
+    return this.findUp(from, workspace, names) ?? whichOnPath(fallbackNames)
+  }
+
+  /** Wrapper del progetto (mvnw.cmd / gradlew.bat), se c'è. */
+  private findWrapperScript(from: string, workspace: string, kind: BuildToolKind): string | null {
+    return this.findUp(from, workspace, kind === 'gradle' ? ['gradlew.bat'] : ['mvnw.cmd'])
+  }
+
+  /**
+   * Cosa serve per avviare una configurazione: il JDK, Maven e Gradle (la versione scelta per il servizio, altrimenti il
+   * wrapper del progetto, altrimenti quello nel PATH) e le variabili d'ambiente del servizio sotto quelle della configurazione.
+   * `cfg` è la configurazione con le variabili già unite; `warnings` dice se la versione dello strumento non va d'accordo col JDK.
+   */
+  private async launchContext(cfg: RunConfig, services: JavaService[], mode: 'run' | 'debug', workspace: string): Promise<{ ctx: LaunchContext; jdk: JdkInfo; cfg: RunConfig; warnings: string[] }> {
     const jdk = this.jdkFor(cfg, services)
+    const svc = this.serviceFor(cfg.root, services)
+    const st: ServiceSettings = (svc && this.serviceSettingsAll()[svc.id]) || {}
+    const managed = (kind: BuildToolKind): string | undefined => {
+      const version = st[kind]
+      if (!version) return undefined
+      const tool: BuildTool | undefined = detectTools(this.toolsDir).find((t) => t.kind === kind && t.version === version)
+      if (!tool) throw new Error(`${kind === 'maven' ? 'Maven' : 'Gradle'} ${version} è scelto per «${svc?.name ?? cfg.root}» ma non è scaricato: scaricalo dalla sezione «Maven e Gradle».`)
+      return toolScript(tool)
+    }
+    const mavenCmd = managed('maven') ?? this.findScript(cfg.root, workspace, ['mvnw.cmd'], ['mvn.cmd', 'mvn.bat']) ?? undefined
+    const gradleCmd = managed('gradle') ?? this.findScript(cfg.root, workspace, ['gradlew.bat'], ['gradle.bat', 'gradle.cmd']) ?? undefined
+
+    const warnings: string[] = []
+    const kind: BuildToolKind | null = cfg.type === 'gradle' || (cfg.type === 'quarkus' && cfg.tool === 'gradle') ? 'gradle' : cfg.type === 'maven' || cfg.type === 'quarkus' ? 'maven' : null
+    if (kind) {
+      const script = kind === 'gradle' ? gradleCmd : mavenCmd
+      const version = st[kind] ?? (script && /^(mvnw|gradlew)\./i.test(basename(script)) ? wrapperVersion(kind, dirname(script)) : undefined)
+      const issue = version ? compatIssue(kind, version, jdk.major) : null
+      if (issue) warnings.push(issue)
+    }
+    const effective: RunConfig = { ...cfg, env: { ...(st.env ?? {}), ...cfg.env } }
     const ctx: LaunchContext = {
       mode,
       jdkHome: jdk.path,
-      mavenCmd: this.findScript(cfg.root, workspace, ['mvnw.cmd'], ['mvn.cmd', 'mvn.bat']) ?? undefined,
-      gradleCmd: this.findScript(cfg.root, workspace, ['gradlew.bat'], ['gradle.bat', 'gradle.cmd']) ?? undefined,
+      mavenCmd,
+      gradleCmd,
       path: process.env.PATH ?? process.env.Path ?? '',
       userEnv: { JAVA_TOOL_OPTIONS: process.env.JAVA_TOOL_OPTIONS, MAVEN_OPTS: process.env.MAVEN_OPTS, GRADLE_OPTS: process.env.GRADLE_OPTS },
       windowsRootCerts: process.platform === 'win32'
     }
     if (cfg.type === 'application') ctx.classpath = await this.resolveClasspath(cfg, services, workspace)
-    return { ctx, jdk }
+    return { ctx, jdk, cfg: effective, warnings }
   }
 
   private async lsp(command: string, args: unknown[], workspace: string, root: string, timeout = 60000): Promise<unknown> {
@@ -294,19 +457,144 @@ export class JavaDevService {
   }
 
   /** Esegui senza debug: il comando parte in un terminale dell'app. */
-  async run(configId: string, workspace: string): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
+  async run(configId: string, workspace: string, opts: { inHive?: boolean } = {}): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
     try {
       const cfg = this.configs().find((c) => c.id === configId)
       if (!cfg) throw new Error('Configurazione non trovata.')
       if (cfg.type === 'attach') throw new Error('«Attach» si usa solo con Debug.')
       const services = await this.services(workspace || cfg.root)
-      const { ctx } = await this.launchContext(cfg, services, 'run', workspace)
-      const launch = buildLaunch(cfg, ctx)
+      const { ctx, cfg: effective, warnings } = await this.launchContext(cfg, services, 'run', workspace)
+      for (const w of warnings) this.d.emitOutput({ category: 'console', text: `⚠ ${w}` })
+      const launch = buildLaunch(effective, ctx)
       const session = await this.d.createTask({ kind: 'task', title: launch.title, cwd: launch.cwd, file: launch.file, args: launch.args, env: launch.env })
+      // Nelle combo i terminali non si aprono uno per uno: li raccoglie la vista «alveare».
+      if (!opts.inHive) this.d.showTerminal(session.id)
       return { ok: true, sessionId: session.id }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
+  }
+
+  // ---------------------------------------------------------------- combo
+
+  private combos(): Combo[] {
+    const raw = this.d.getSetting(K_COMBOS)
+    return Array.isArray(raw) ? (raw as Combo[]).filter((c) => c && typeof c.id === 'string' && typeof c.name === 'string' && Array.isArray(c.steps)) : []
+  }
+
+  /** Passi validi: configurazioni diverse, pausa da 0 a 10 minuti, al massimo 24. */
+  private cleanSteps(raw: unknown): ComboStep[] {
+    const seen = new Set<string>()
+    const out: ComboStep[] = []
+    for (const s of Array.isArray(raw) ? raw : []) {
+      const configId = typeof s?.configId === 'string' ? s.configId : ''
+      if (!configId || seen.has(configId)) continue
+      seen.add(configId)
+      const delay = Math.min(MAX_COMBO_DELAY, Math.max(0, Math.round(Number(s?.delay) || 0)))
+      out.push({ configId, delay })
+    }
+    return out.slice(0, MAX_COMBO_STEPS)
+  }
+
+  /** Salva (o aggiorna, se ha già un id) un preset. */
+  saveCombo(combo: Combo): Combo {
+    const name = String(combo?.name ?? '').trim().slice(0, 60)
+    if (!name) throw new Error('Dai un nome alla combo.')
+    const steps = this.cleanSteps(combo.steps)
+    if (!steps.length) throw new Error('Aggiungi almeno un servizio alla combo.')
+    const list = this.combos()
+    const next: Combo = { id: combo.id || randomUUID(), name, steps }
+    const i = list.findIndex((c) => c.id === next.id)
+    if (i >= 0) list[i] = next
+    else list.push(next)
+    this.d.setSetting(K_COMBOS, list)
+    this.d.emitState()
+    return next
+  }
+
+  deleteCombo(id: string): void {
+    this.d.setSetting(K_COMBOS, this.combos().filter((c) => c.id !== id))
+    this.d.emitState()
+  }
+
+  /**
+   * Avvia più servizi uno dopo l'altro, nell'ordine dato: ogni passo parte, poi si aspettano i suoi secondi di pausa e parte il
+   * successivo. I terminali si vedono insieme nella vista «alveare». Risponde subito; l'avanzamento arriva con `emitCombo`.
+   */
+  runCombo(p: { steps: ComboStep[]; name?: string; id?: string; workspace: string }): { ok: boolean; error?: string } {
+    if (this.comboRun?.status === 'running') return { ok: false, error: 'C\'è già una combo in avvio: fermala prima.' }
+    const steps = this.cleanSteps(p.steps)
+    if (!steps.length) return { ok: false, error: 'Aggiungi almeno un servizio alla combo.' }
+    const configs = this.configs()
+    for (const s of steps) {
+      const cfg = configs.find((c) => c.id === s.configId)
+      if (!cfg) return { ok: false, error: 'Una delle configurazioni della combo non esiste più: aprila e togli il servizio mancante.' }
+      if (cfg.type === 'attach') return { ok: false, error: `«${cfg.name}» è un attach: si usa solo con il debug, non si può avviare in una combo.` }
+    }
+    const run: ComboRun = {
+      id: randomUUID(),
+      comboId: p.id || undefined,
+      name: String(p.name ?? '').trim().slice(0, 60) || 'Combo',
+      status: 'running',
+      startedAt: Date.now(),
+      steps: steps.map((s) => ({ configId: s.configId, name: configs.find((c) => c.id === s.configId)!.name, delay: s.delay, state: 'waiting' as const }))
+    }
+    this.comboRun = run
+    this.comboCancel = false
+    this.d.emitCombo(run)
+    void this.comboLoop(run, p.workspace)
+    return { ok: true }
+  }
+
+  private async comboLoop(run: ComboRun, workspace: string): Promise<void> {
+    const key = `combo-${run.comboId ?? 'libera'}`
+    const ids: string[] = []
+    try {
+      for (let i = 0; i < run.steps.length && !this.comboCancel; i++) {
+        const st = run.steps[i]
+        st.state = 'starting'
+        this.d.emitCombo(run)
+        const r = await this.run(st.configId, workspace, { inHive: true })
+        if (r.ok && r.sessionId) {
+          st.state = 'started'
+          st.sessionId = r.sessionId
+          ids.push(r.sessionId)
+          this.d.showHive(key, run.name, ids)
+        } else {
+          st.state = 'failed'
+          st.error = r.error ?? 'Avvio non riuscito.'
+        }
+        this.d.emitCombo(run)
+        // Pausa prima del servizio successivo (solo se questo è partito: se è fallito si prosegue).
+        if (i < run.steps.length - 1 && st.delay > 0 && st.state === 'started') {
+          for (let left = st.delay; left > 0 && !this.comboCancel; left--) {
+            st.wait = left
+            this.d.emitCombo(run)
+            await sleep(1000)
+          }
+          st.wait = undefined
+        }
+      }
+    } finally {
+      for (const st of run.steps) if (st.state === 'waiting' || st.state === 'starting') st.state = 'skipped'
+      run.status = this.comboCancel ? 'stopped' : 'done'
+      this.d.emitCombo(run)
+    }
+  }
+
+  /** Ferma l'avvio e i servizi già partiti dalla combo. */
+  stopCombo(): void {
+    const run = this.comboRun
+    if (!run || run.status !== 'running') return
+    this.comboCancel = true
+    for (const st of run.steps) if (st.sessionId) this.d.killSession(st.sessionId)
+  }
+
+  /** Toglie dalla pagina l'avanzamento di una combo finita. */
+  dismissCombo(): void {
+    if (this.comboRun?.status === 'running') return
+    this.comboRun = null
+    this.d.emitCombo(null)
   }
 
   // ---------------------------------------------------------------- debug
@@ -406,11 +694,13 @@ export class JavaDevService {
       let port = cfg.type === 'attach' ? (cfg.port ?? cfg.debugPort) : cfg.debugPort
       if (cfg.type !== 'attach') {
         say('Avvio il programma…')
-        const { ctx } = await this.launchContext(cfg, services, 'debug', workspace)
-        const launch = buildLaunch(cfg, ctx)
+        const { ctx, cfg: effective, warnings } = await this.launchContext(cfg, services, 'debug', workspace)
+        for (const w of warnings) this.d.emitOutput({ category: 'console', text: `⚠ ${w}` })
+        const launch = buildLaunch(effective, ctx)
         port = launch.debugPort ?? port
         host = '127.0.0.1'
         const session = await this.d.createTask({ kind: 'task', title: launch.title, cwd: launch.cwd, file: launch.file, args: launch.args, env: launch.env })
+        this.d.showTerminal(session.id)
         this.launched = true
         this.setDbg({ sessionId: session.id })
         say(`Aspetto che l'applicazione apra la porta di debug ${port}…`)

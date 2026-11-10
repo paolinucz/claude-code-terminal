@@ -16,7 +16,7 @@ import {
   type LogNotification,
   type StatusNotification
 } from '@shared/pluginApi'
-import { HOST_EVENT_NOTIFY, HOST_EVENT_TERMINAL, type GutterMarker, type GutterMarkersUpdate } from '@shared/plugins'
+import { HOST_EVENT_HIVE, HOST_EVENT_NOTIFY, HOST_EVENT_TERMINAL, type GutterMarker, type GutterMarkersUpdate } from '@shared/plugins'
 import type { AdapterSpec, PluginManager } from './PluginManager'
 
 /** Un adapter in esecuzione: un processo per plugin. */
@@ -201,6 +201,12 @@ export class PluginHost {
     })
     host.conn.onNotification('ui/terminal.show', (p: { sessionId?: unknown }) => {
       if (typeof p?.sessionId === 'string' && p.sessionId) this.services?.emit(id, HOST_EVENT_TERMINAL, { sessionId: p.sessionId })
+    })
+    // Gruppo di terminali (vista «alveare»): chiave stabile, titolo e sessioni; il messaggio sostituisce l'elenco precedente.
+    host.conn.onNotification('ui/terminal.hive', (p: { key?: unknown; title?: unknown; sessionIds?: unknown }) => {
+      const ids = Array.isArray(p?.sessionIds) ? p.sessionIds.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 80).slice(0, 24) : []
+      if (typeof p?.key !== 'string' || !/^[\w.:-]{1,80}$/.test(p.key)) return
+      this.services?.emit(id, HOST_EVENT_HIVE, { key: p.key, title: typeof p.title === 'string' ? p.title.slice(0, 80) : 'Terminali', sessionIds: ids })
     })
     host.conn.onNotification('ui/event', (p: { event?: string; data?: unknown }) => {
       if (p && typeof p.event === 'string') this.services?.emit(id, p.event, p.data ?? null)

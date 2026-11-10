@@ -231,7 +231,7 @@ const PLUGINS = {
     pack(dir, 'java-dev', {
       id: 'cct.java-dev',
       name: 'Java Development Pack',
-      version: '2.0.0',
+      version: '2.2.0',
       publisher: PUBLISHER,
       license: 'EPL-1.0 (java-debug), MIT (Lombok), GPLv2 con Classpath Exception (Temurin)',
       description: `Debugger Java (java-debug ${debugVersion}) con run configuration per Maven, Gradle e Quarkus, importazione delle run configuration di IntelliJ IDEA e supporto a Lombok ${lombokVersion}. Porta un JDK Eclipse Temurin ${jdk.version.semver} per il language server.`,
@@ -255,8 +255,42 @@ const PLUGINS = {
         `Fa partire il language server Java con il JDK Temurin ${jdk.version.semver} del pack (completo, serve al debug) e con Lombok ${lombokVersion} come agente`,
         `Carica java-debug ${debugVersion} nel language server per il debug (breakpoint, passo-passo, variabili)`,
         'Aggiunge la vista «Esegui e debug»: avvia Maven, Gradle, Quarkus e applicazioni Java in un terminale, anche in debug',
+        'Combo: avvia più servizi insieme, nell\'ordine che scegli e con una pausa tra l\'uno e l\'altro, e ne mostra i terminali in una vista ad alveare (i preset si salvano)',
+        'Per ogni servizio permette di scegliere il JDK, la versione di Maven o Gradle (altrimenti il wrapper del progetto) e le variabili d\'ambiente',
+        'Scarica Maven (da Maven Central) e Gradle (da services.gradle.org) nella cartella dell\'app quando lo chiedi, verificando il checksum pubblicato',
         'Legge le run configuration di IntelliJ IDEA dalle cartelle .idea e .run del progetto (solo lettura)',
         'Scarica Eclipse Temurin (JDK) da api.adoptium.net quando lo chiedi dal pannello, verificando il checksum'
+      ]
+    })
+  },
+
+  /**
+   * Docker: gestisce i container del sistema con il comando `docker`, senza aprire Docker Desktop (il plugin ne accende il
+   * motore quando glielo chiedi). Nessun download: sorgenti TypeScript compilati, pagina e icona.
+   */
+  async docker() {
+    const dir = staging('cct.docker')
+    pack(dir, 'docker', {
+      id: 'cct.docker',
+      name: 'Docker',
+      version: '1.0.0',
+      publisher: PUBLISHER,
+      license: 'Apache-2.0',
+      description: 'Container Docker del sistema: elenco con stato, porte, CPU e memoria; avvia, ferma, riavvia ed elimina; log in tempo reale e shell in un terminale; più log insieme in un alveare. Docker Desktop può restare chiuso.',
+      languages: [],
+      permissions: ['terminal', 'openUrl'],
+      contributes: {
+        sidebarViews: [{ id: 'containers', title: 'Docker', entry: 'ui/containers.html', icon: 'ui/docker.svg' }],
+        commands: [
+          { id: 'open', title: 'Apri i container', keywords: 'docker container immagini compose', openView: 'containers' },
+          { id: 'start-engine', title: 'Avvia il motore (senza aprire Docker Desktop)', keywords: 'docker avvia motore desktop', method: 'command-start-engine' }
+        ]
+      },
+      activities: [
+        'Esegue il comando `docker` (del PATH o di Docker Desktop) per elencare, avviare, fermare, riavviare ed eliminare i container, con argomenti fissi e senza passare da una shell',
+        'Apre in un terminale dell\'app i log in tempo reale (`docker logs -f`) e una shell dentro un container (`docker exec -it`)',
+        'Se il motore è spento e lo chiedi (o l\'hai impostato), lo accende con `docker desktop start` senza aprire la finestra di Docker Desktop; con `docker desktop stop` lo spegne',
+        'Apre nel browser gli indirizzi http://localhost:<porta> dei container, solo quando fai clic sulla porta'
       ]
     })
   },
