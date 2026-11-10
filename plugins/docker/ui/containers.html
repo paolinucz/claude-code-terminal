@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Docker</title>
+<!--
+  Vista «Docker» del plugin cct.docker: i container del sistema, con stato, porte, CPU e memoria; avvia, ferma, riavvia ed
+  elimina; log in tempo reale e shell in un terminale dell'app; più log insieme nell'alveare. Docker Desktop può restare chiuso:
+  se il motore è spento si accende da qui. Parla con l'adapter con plugin.call e ne riceve gli eventi (engine, changed).
+-->
+<style>
+  :root { --cct-bg:#09090b; --cct-surface:#18181b; --cct-surface-2:#1f1f23; --cct-border:#27272a; --cct-border-strong:#3f3f46; --cct-text:#fafafa; --cct-text-muted:#a1a1aa; --cct-text-faint:#71717a; --cct-accent:#168294; --cct-accent-soft:#459ba9; --cct-on-accent:#ffffff; --cct-ok:#6fd39b; --cct-warn:#f5c46b; --cct-danger:#ff8a8a; --cct-info:#6ea8fe; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--cct-surface); color: var(--cct-text-muted); font: 12px/1.35 system-ui, sans-serif; }
+  body { overflow-y: auto; }
+  button, input { font: inherit; color: var(--cct-text); }
+  button { cursor: pointer; background: none; border: 0; padding: 0; }
+  button:disabled { opacity: .4; cursor: default; }
+  :focus-visible { outline: 2px solid var(--cct-accent); outline-offset: 1px; }
+  .inp { height: 28px; min-width: 0; border: 1px solid var(--cct-border-strong); border-radius: 8px; background: var(--cct-bg); padding: 0 8px; outline: none; }
+  .inp:focus { border-color: var(--cct-accent); }
+  .strong { color: var(--cct-text); } .faint { color: var(--cct-text-faint); } .ok { color: var(--cct-ok); } .danger { color: var(--cct-danger); } .warn { color: var(--cct-warn); } .info { color: var(--cct-info); }
+  .ibtn { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; border-radius: 7px; color: var(--cct-text-muted); padding: 0 4px; }
+  .ibtn:hover:not(:disabled) { background: var(--cct-border); color: var(--cct-text); }
+  .ibtn.go:hover:not(:disabled) { color: var(--cct-ok); } .ibtn.bad:hover:not(:disabled) { color: var(--cct-danger); }
+  .top { display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: 1px solid var(--cct-border); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 1px solid var(--cct-border); border-radius: 12px; font-size: 11px; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cct-text-faint); flex: none; }
+  .dot.running, .dot.ready { background: var(--cct-ok); box-shadow: 0 0 6px color-mix(in srgb, var(--cct-ok) 60%, transparent); }
+  .dot.paused, .dot.restarting, .dot.starting { background: var(--cct-warn); }
+  .dot.exited, .dot.stopped, .dot.created { background: var(--cct-text-faint); }
+  .dot.dead, .dot.error, .dot.missing { background: var(--cct-danger); }
+  .banner { margin: 10px 8px; padding: 12px; border: 1px solid var(--cct-border); border-radius: 12px; background: var(--cct-surface-2); }
+  .banner p { margin: 0 0 8px; } .banner label { display: flex; gap: 6px; align-items: center; margin-top: 8px; color: var(--cct-text-muted); }
+  .btn { height: 30px; padding: 0 14px; border-radius: 9px; }
+  .btn.pri { background-color: var(--cct-accent); background-image: linear-gradient(180deg, rgb(255 255 255 / .14), rgb(255 255 255 / 0) 55%, rgb(0 0 0 / .07)); color: var(--cct-on-accent); font-weight: 600; box-shadow: inset 0 1px 0 rgb(255 255 255 / .2), 0 1px 2px rgb(0 0 0 / .28), 0 6px 14px -6px var(--cct-accent); }
+  .btn.pri:hover:not(:disabled) { filter: brightness(1.07); } .btn.pri:active:not(:disabled) { transform: scale(.98); }
+  .btn.sec { border: 1px solid var(--cct-border-strong); color: var(--cct-text-muted); } .btn.sec:hover:not(:disabled) { background: var(--cct-border); color: var(--cct-text); }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--cct-border-strong); border-top-color: var(--cct-accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .bulk { display: flex; align-items: center; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--cct-border); background: color-mix(in srgb, var(--cct-accent) 12%, var(--cct-surface)); }
+  .bulk .n { flex: 1; color: var(--cct-text); font-weight: 600; }
+  .grp { display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border-bottom: 1px solid var(--cct-border); background: var(--cct-surface-2); font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--cct-text-muted); }
+  .grp .t { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 8px; border-bottom: 1px solid var(--cct-border); }
+  .row:hover { background: var(--cct-surface-2); }
+  .row.sel { background: color-mix(in srgb, var(--cct-accent) 14%, transparent); }
+  .row .dot { margin-top: 4px; }
+  .row input[type=checkbox] { margin: 3px 0 0; accent-color: var(--cct-accent); }
+  .main { flex: 1; min-width: 0; }
+  .l1 { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  .nm { color: var(--cct-text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .img { color: var(--cct-text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .l2 { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 2px; font-size: 11px; color: var(--cct-text-faint); }
+  .port { border: 1px solid var(--cct-border-strong); border-radius: 6px; padding: 0 6px; font-size: 10.5px; color: var(--cct-info); }
+  button.port:hover { background: color-mix(in srgb, var(--cct-info) 15%, transparent); }
+  .port.plain { color: var(--cct-text-faint); border-color: var(--cct-border); }
+  .res { font-variant-numeric: tabular-nums; color: var(--cct-text-muted); }
+  .acts { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 96px; opacity: .55; }
+  .row:hover .acts, .row:focus-within .acts { opacity: 1; }
+  .note { padding: 6px 10px; font-size: 11px; min-height: 22px; }
+  .empty { padding: 22px 14px; text-align: center; color: var(--cct-text-faint); }
+  code { background: var(--cct-bg); border: 1px solid var(--cct-border); border-radius: 4px; padding: 0 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="app" style="display:none">
+  <div class="top">
+    <span class="chip" id="engineChip"><span class="dot" id="engineDot"></span><span id="engineText">…</span></span>
+    <input id="filter" class="inp" style="flex:1" placeholder="Filtra container" spellcheck="false" aria-label="Filtra i container">
+    <button class="ibtn" id="refresh" title="Aggiorna" aria-label="Aggiorna l'elenco">↻</button>
+    <button class="ibtn" id="power" title="Avvia o ferma Docker" aria-label="Avvia o ferma Docker" style="display:none">⏻</button>
+  </div>
+  <div id="banner"></div>
+  <div id="bulk" class="bulk" style="display:none"></div>
+  <p id="msg" class="note" role="status"></p>
+  <div id="list"></div>
+</div>
+<script>
+'use strict'
+// ---- Ponte con l'app ----
+let ctx = { cwd: '' }; let booted = false
+const pending = new Map(); let nextId = 1
+const rpc = (method, params) => new Promise((res, rej) => { const id = nextId++; pending.set(id, { res, rej }); parent.postMessage({ cct: 'rpc', id, method, params }, '*') })
+const call = (method, params = {}) => rpc('plugin.call', { method, params })
+window.addEventListener('message', (e) => {
+  const m = e.data
+  if (!m || typeof m !== 'object') return
+  if (m.cct === 'rpc-result') { const p = pending.get(m.id); pending.delete(m.id); if (p) m.ok ? p.res(m.value) : p.rej(new Error(m.error || 'errore')) }
+  else if (m.cct === 'init') {
+    ctx = { cwd: m.cwd }
+    for (const [k, v] of Object.entries(m.theme || {})) if (v) document.documentElement.style.setProperty(k, v)
+    if (!booted) { booted = true; boot() }
+  } else if (m.cct === 'event') onEvent(m.event, m.data)
+})
+
+// ---- Stato ----
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const S = { engine: { state: 'stopped' }, list: [], stats: {}, sel: new Set(), filter: '', closed: new Set(), busy: new Set(), loaded: false, auto: false }
+const STATE_TEXT = { running: 'in esecuzione', paused: 'in pausa', restarting: 'si riavvia', exited: 'fermo', created: 'creato', dead: 'morto', removing: 'in rimozione' }
+let msgTimer = null, listTimer = null, statsTimer = null, statsBusy = false
+
+function say(text, cls = 'faint') { const m = $('msg'); m.className = 'note ' + cls; m.textContent = text || ''; clearTimeout(msgTimer); if (text && cls !== 'faint') msgTimer = setTimeout(() => say(''), 9000) }
+const ready = () => S.engine.state === 'ready'
+const byId = (id) => S.list.find((c) => c.id === id)
+
+async function boot() {
+  $('app').style.display = ''
+  try { S.auto = (await rpc('settings.get', { key: 'autoStart' })) === true } catch {}
+  await loadEngine()
+}
+async function loadEngine() {
+  try { S.engine = await call('engine') } catch (e) { S.engine = { state: 'error', message: e.message } }
+  renderTop()
+  if (ready()) await loadList()
+  else {
+    S.list = []; S.loaded = true; render()
+    if (S.engine.state === 'stopped' && S.engine.canControl && S.auto) startEngine()
+    else if (S.engine.state === 'stopped' || S.engine.state === 'missing') schedule(() => loadEngine(), 6000)
+  }
+}
+function schedule(fn, ms) { clearTimeout(listTimer); listTimer = setTimeout(fn, ms) }
+async function loadList() {
+  try { S.list = await call('list'); S.loaded = true; const ids = new Set(S.list.map((c) => c.id)); for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id) }
+  catch (e) { say(e.message, 'danger') }
+  render(); pollStats()
+}
+function pollStats() {
+  clearTimeout(statsTimer)
+  const run = S.list.filter((c) => c.state === 'running')
+  if (!ready() || !run.length) { S.stats = {}; return }
+  if (statsBusy) return
+  statsBusy = true
+  call('stats', { ids: run.map((c) => c.id) }).then((arr) => { S.stats = Object.fromEntries(arr.map((s) => [s.id, s])); renderList() }).catch(() => {}).finally(() => { statsBusy = false; statsTimer = setTimeout(pollStats, 4000) })
+}
+function onEvent(ev, data) {
+  if (ev === 'engine') { S.engine = data; renderTop(); if (ready()) loadList(); else { render() } }
+  else if (ev === 'changed' && ready()) { clearTimeout(listTimer); listTimer = setTimeout(loadList, 150) }
+}
+async function startEngine() {
+  S.engine = { state: 'starting', message: 'Avvio di Docker Desktop in corso…', canControl: true }; render(); renderTop()
+  const info = await call('startEngine').catch((e) => ({ state: 'error', message: e.message }))
+  S.engine = info; renderTop(); if (ready()) loadList(); else render()
+}
+
+// ---- Disegno ----
+function renderTop() {
+  const e = S.engine
+  $('engineDot').className = 'dot ' + e.state
+  $('engineText').textContent = e.state === 'ready' ? `Docker ${e.version || ''}` : e.state === 'starting' ? 'In avvio…' : e.state === 'missing' ? 'Non trovato' : e.state === 'stopped' ? 'Spento' : 'Errore'
+  const p = $('power')
+  p.style.display = e.canControl && (ready() || e.state === 'stopped') ? '' : 'none'
+  p.textContent = ready() ? '⏻' : '▶'
+  p.title = ready() ? 'Ferma Docker Desktop (libera memoria e CPU)' : 'Avvia Docker (senza aprire Docker Desktop)'
+  p.setAttribute('aria-label', p.title)
+}
+function renderBanner() {
+  const e = S.engine; const b = $('banner')
+  if (ready()) { b.innerHTML = ''; return }
+  const auto = e.canControl ? `<label><input type="checkbox" id="auto" ${S.auto ? 'checked' : ''}> Avvia Docker da solo quando apro questa vista</label>` : ''
+  b.innerHTML = e.state === 'starting' ? `<div class="banner"><p><span class="spin"></span><span class="strong">${esc(e.message || 'Avvio in corso…')}</span></p><span class="faint">Docker Desktop parte in secondo plano: non serve aprirlo.</span></div>`
+    : e.state === 'stopped' ? `<div class="banner"><p class="strong">Il motore di Docker non è acceso.</p>${e.canControl ? '<button class="btn pri" data-start>Avvia Docker</button>' : '<span class="faint">Accendi il servizio Docker e riprova.</span>'}${auto}</div>`
+    : e.state === 'missing' ? `<div class="banner"><p class="strong danger">Docker non è installato.</p><span class="faint">${esc(e.message || '')}</span></div>`
+    : `<div class="banner"><p class="strong danger">Docker non risponde.</p><span class="faint">${esc(e.message || '')}</span><p style="margin-top:8px"><button class="btn sec" data-retry>Riprova</button> ${e.canControl ? '<button class="btn pri" data-start>Avvia Docker</button>' : ''}</p>${auto}</div>`
+}
+function matches(c) {
+  const f = S.filter.trim().toLowerCase(); if (!f) return true
+  return [c.name, c.image, c.project, c.service, c.status, c.shortId, ...c.ports.map((p) => `${p.hostPort ?? ''} ${p.containerPort}`)].join(' ').toLowerCase().includes(f)
+}
+const portChips = (c) => c.ports.map((p) => p.hostPort && p.proto === 'tcp'
+  ? `<button class="port" data-open="${p.hostPort}" title="Apri http://localhost:${p.hostPort} nel browser">localhost:${p.hostPort}→${p.containerPort}</button>`
+  : `<span class="port plain" title="${p.hostPort ? 'Porta ' + p.proto : 'Non pubblicata sul PC'}">${p.hostPort ? p.hostPort + '→' : ''}${p.containerPort}/${esc(p.proto)}</span>`).join('')
+function actions(c) {
+  const b = S.busy.has(c.id); const run = c.state === 'running'; const pau = c.state === 'paused'
+  const btn = (act, label, ch, cls = '') => `<button class="ibtn ${cls}" data-act="${act}" data-id="${esc(c.id)}" title="${label}" aria-label="${label} ${esc(c.name)}" ${b ? 'disabled' : ''}>${ch}</button>`
+  return (run ? btn('stop', 'Ferma', '■', 'bad') + btn('restart', 'Riavvia', '↻') : pau ? btn('unpause', 'Riprendi', '▶', 'go') : btn('start', 'Avvia', '▶', 'go')) +
+    btn('logs', 'Mostra i log', '≡') + (run ? btn('shell', 'Apri una shell nel container', '&gt;_') : '') + btn('remove', 'Elimina', '✕', 'bad')
+}
+function rowHtml(c) {
+  const st = S.stats[c.id]
+  const res = c.state === 'running' && st ? `<span class="res" title="${esc(st.memUsage)} di ${esc(st.memLimit)}">CPU ${st.cpu.toFixed(1)}% · ${esc(st.memUsage)}</span>` : ''
+  return `<div class="row ${S.sel.has(c.id) ? 'sel' : ''}" data-row="${esc(c.id)}"><input type="checkbox" data-sel="${esc(c.id)}" ${S.sel.has(c.id) ? 'checked' : ''} aria-label="Seleziona ${esc(c.name)}"><span class="dot ${c.state}" title="${esc(STATE_TEXT[c.state] || c.state)}"></span>
+    <div class="main"><div class="l1"><span class="nm" title="${esc(c.name)} · ${esc(c.shortId)}">${esc(c.name)}</span><span class="img" title="${esc(c.command)}">${esc(c.image)}</span></div>
+    <div class="l2">${portChips(c)}<span>${esc(c.status)}</span>${res}</div></div><div class="acts">${actions(c)}</div></div>`
+}
+function renderList() {
+  const list = S.list.filter(matches)
+  if (!S.loaded) { $('list').innerHTML = '<p class="empty"><span class="spin"></span>Leggo i container…</p>'; return }
+  if (!ready()) { $('list').innerHTML = ''; return }
+  if (!S.list.length) { $('list').innerHTML = '<p class="empty">Nessun container. Creane uno dal terminale (per esempio <code>docker run -d nginx</code>) e comparirà qui.</p>'; return }
+  if (!list.length) { $('list').innerHTML = '<p class="empty">Nessun container corrisponde al filtro.</p>'; return }
+  const groups = new Map()
+  for (const c of list) { const k = c.project || ''; groups.set(k, [...(groups.get(k) || []), c]) }
+  const named = [...groups.keys()].some((k) => k)
+  $('list').innerHTML = [...groups.entries()].sort((a, b) => (a[0] ? 1 : 0) - (b[0] ? 1 : 0) || a[0].localeCompare(b[0])).map(([k, cs]) => {
+    const closed = S.closed.has(k)
+    const head = named ? `<div class="grp"><button class="t" data-grp="${esc(k)}" aria-expanded="${!closed}">${closed ? '▸' : '▾'} ${k ? esc(k) : 'Altri container'} <span class="faint">(${cs.length})</span></button>${k ? `<button class="ibtn go" data-grpact="start" data-grpname="${esc(k)}" title="Avvia tutti" aria-label="Avvia tutti i container di ${esc(k)}">▶</button><button class="ibtn bad" data-grpact="stop" data-grpname="${esc(k)}" title="Ferma tutti" aria-label="Ferma tutti i container di ${esc(k)}">■</button>` : ''}</div>` : ''
+    return head + (closed ? '' : cs.map(rowHtml).join(''))
+  }).join('')
+}
+function renderBulk() {
+  const n = S.sel.size; const el = $('bulk')
+  if (!n || !ready()) { el.style.display = 'none'; return }
+  el.style.display = ''
+  el.innerHTML = `<span class="n">${n} ${n === 1 ? 'selezionato' : 'selezionati'}</span><button class="ibtn go" data-bulk="start" title="Avvia" aria-label="Avvia i selezionati">▶</button><button class="ibtn bad" data-bulk="stop" title="Ferma" aria-label="Ferma i selezionati">■</button><button class="ibtn" data-bulk="restart" title="Riavvia" aria-label="Riavvia i selezionati">↻</button><button class="ibtn" data-bulk="logs" title="${n > 1 ? 'Mostra i log insieme (alveare)' : 'Mostra i log'}" aria-label="Mostra i log dei selezionati">≡</button><button class="ibtn bad" data-bulk="remove" title="Elimina" aria-label="Elimina i selezionati">✕</button><button class="ibtn" data-bulk="clear" title="Deseleziona" aria-label="Deseleziona tutto">⨯</button>`
+}
+function render() { renderTop(); renderBanner(); renderBulk(); renderList() }
+
+// ---- Azioni ----
+async function doAct(action, ids, opts = {}) {
+  ids.forEach((i) => S.busy.add(i)); renderList()
+  try {
+    const r = await call('act', { action, ids, ...opts })
+    if (r.ok) say('')
+    else say(r.error || 'Operazione non riuscita', 'danger')
+  } catch (e) { say(e.message, 'danger') }
+  ids.forEach((i) => S.busy.delete(i)); await loadList()
+}
+async function confirmRemove(ids) {
+  const names = ids.map((i) => byId(i)?.name || i)
+  const text = names.length === 1 ? `«${names[0]}»` : `${names.length} container (${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''})`
+  return rpc('ui.confirm', { title: 'Eliminare il container?', message: `${text} verrà fermato (se in esecuzione) ed eliminato. I dati nei volumi restano.`, okLabel: 'Elimina', danger: true })
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('button'); if (!t) return
+  const d = t.dataset
+  try {
+    if (d.start !== undefined) return startEngine()
+    if (d.retry !== undefined) return loadEngine()
+    if (d.open) return void rpc('system.openUrl', { url: `http://localhost:${d.open}` }).catch((err) => say(err.message, 'danger'))
+    if (d.grp !== undefined) { S.closed.has(d.grp) ? S.closed.delete(d.grp) : S.closed.add(d.grp); return renderList() }
+    if (d.grpact) { const ids = S.list.filter((c) => c.project === d.grpname).map((c) => c.id); return doAct(d.grpact, ids) }
+    if (d.act) {
+      const id = d.id
+      if (d.act === 'logs') { const r = await call('logs', { ids: [id], workspace: ctx.cwd }); if (!r.ok) say(r.error, 'danger'); return }
+      if (d.act === 'shell') { const r = await call('shell', { id, workspace: ctx.cwd }); if (!r.ok) say(r.error, 'danger'); return }
+      if (d.act === 'remove') { if (await confirmRemove([id])) await doAct('remove', [id]); return }
+      return doAct(d.act, [id])
+    }
+    if (d.bulk) {
+      const ids = [...S.sel]
+      if (d.bulk === 'clear') { S.sel.clear(); return render() }
+      if (d.bulk === 'logs') { const r = await call('logs', { ids, workspace: ctx.cwd }); if (!r.ok) say(r.error, 'danger'); return }
+      if (d.bulk === 'remove') { if (await confirmRemove(ids)) { await doAct('remove', ids); S.sel.clear(); render() } return }
+      return doAct(d.bulk, ids)
+    }
+  } catch (err) { say(err.message, 'danger') }
+})
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (t.dataset.sel) { t.checked ? S.sel.add(t.dataset.sel) : S.sel.delete(t.dataset.sel); renderList(); renderBulk() }
+  else if (t.id === 'auto') { S.auto = t.checked; rpc('settings.set', { key: 'autoStart', value: S.auto }).catch(() => {}) }
+})
+$('filter').addEventListener('input', (e) => { S.filter = e.target.value; renderList() })
+$('refresh').onclick = () => loadEngine()
+$('power').onclick = async () => {
+  if (ready()) {
+    if (!(await rpc('ui.confirm', { title: 'Fermare Docker?', message: 'Docker Desktop si chiude e tutti i container in esecuzione si fermano. Potrai riavviarlo da qui.', okLabel: 'Ferma Docker', danger: true }))) return
+    S.engine = { ...S.engine, state: 'starting', message: 'Chiudo Docker Desktop…' }; render()
+    S.engine = await call('stopEngine').catch((err) => ({ state: 'error', message: err.message })); S.list = []; render(); if (S.engine.state === 'stopped') schedule(loadEngine, 6000)
+  } else startEngine()
+}
+parent.postMessage({ cct: 'ready' }, '*')
+</script>
+</body>
+</html>
