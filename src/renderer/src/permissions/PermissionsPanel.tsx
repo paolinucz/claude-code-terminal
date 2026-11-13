@@ -126,7 +126,7 @@ export function PermissionsPanel(props: IDockviewPanelProps<PanelParams>) {
   }, [cwd, dirtyScopes, load])
 
   if (!state || !drafts) {
-    return <div className="flex h-full items-center justify-center bg-surface text-text-faint">Caricamento dei permessi…</div>
+    return <div className="flex h-full items-center justify-center text-text-faint">Caricamento dei permessi…</div>
   }
 
   const current = state.scopes.find((s) => s.scope === scope)!
@@ -183,7 +183,7 @@ export function PermissionsPanel(props: IDockviewPanelProps<PanelParams>) {
   }
 
   return (
-    <div className="@container h-full overflow-hidden bg-surface">
+    <div className="@container h-full overflow-hidden">
       <div className="flex h-full flex-col">
         {/* Intestazione: progetto e salvataggio */}
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">

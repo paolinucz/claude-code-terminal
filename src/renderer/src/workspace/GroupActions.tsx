@@ -12,7 +12,7 @@ import {
 } from '@/components/ui-kit'
 import type { PanelParams } from '@/panels/kinds'
 import { useWorkspace } from '@/state/workspace'
-import { moveTerminalToSheet, sheetOfPanel } from './panels'
+import { moveTerminalToSpace, spaceOfPanel } from './panels'
 
 /** 'edge' sono i gruppi agganciati ai bordi (Dockview 8): li trattiamo come la griglia. */
 type Location = 'grid' | 'edge' | 'floating' | 'popout'
@@ -23,7 +23,7 @@ type Location = 'grid' | 'edge' | 'floating' | 'popout'
  */
 export function GroupActions({ api, containerApi, group }: IDockviewHeaderActionsProps) {
   const [location, setLocation] = useState<Location>(api.location.type)
-  const sheets = useWorkspace((s) => s.sheets)
+  const spaces = useWorkspace((s) => s.spaces)
   const setStatus = useWorkspace((s) => s.setStatus)
   // Le intestazioni non vengono ridisegnate quando cambiano i parametri del pannello attivo: lo facciamo noi.
   const [, refresh] = useState(0)
@@ -67,13 +67,13 @@ export function GroupActions({ api, containerApi, group }: IDockviewHeaderAction
 
   const params = activePanel?.params as PanelParams | undefined
   const canSend = params?.kind === 'terminal' && Boolean(params.sessionId)
-  const currentSheet = canSend ? sheetOfPanel(containerApi) : undefined
-  const targets = sheets.filter((s) => s.id !== currentSheet)
+  const currentSpace = canSend ? spaceOfPanel(containerApi) : undefined
+  const targets = spaces.filter((s) => s.id !== currentSpace)
 
   return (
     <PortalScope>
       <div className="flex h-full items-center gap-0.5 px-1">
-        {canSend && currentSheet && targets.length > 0 && (
+        {canSend && currentSpace && targets.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -84,12 +84,12 @@ export function GroupActions({ api, containerApi, group }: IDockviewHeaderAction
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>Sposta «{activePanel?.title}» nel foglio</DropdownMenuLabel>
+              <DropdownMenuLabel>Sposta «{activePanel?.title}» nello spazio</DropdownMenuLabel>
               {targets.map((t) => (
                 <DropdownMenuItem
                   key={t.id}
                   onSelect={() => {
-                    if (activePanel && moveTerminalToSheet(currentSheet, activePanel.id, t.id)) {
+                    if (activePanel && moveTerminalToSpace(currentSpace, activePanel.id, t.id)) {
                       setStatus(`«${activePanel.title}» inviata a ${t.name} — la sessione continua`)
                     }
                   }}

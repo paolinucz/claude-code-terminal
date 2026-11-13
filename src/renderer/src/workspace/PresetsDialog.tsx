@@ -44,7 +44,7 @@ export function PresetsDialog() {
           <DialogTitle>Prompt predefiniti</DialogTitle>
           <DialogDescription>
             Messaggi pronti da mandare a Claude con un clic. Premi <kbd className="rounded border border-border px-1 font-mono text-[11px]">Ctrl K</kbd> e
-            scrivi il nome: il prompt va alla sessione Claude del foglio attivo.
+            scrivi il nome: il prompt va alla sessione Claude dello spazio attivo.
           </DialogDescription>
         </DialogHeader>
 
@@ -56,7 +56,7 @@ export function PresetsDialog() {
                 <span className="block truncate text-[13px] text-foreground">{p.name}</span>
                 <span className="block truncate text-[12px] text-text-faint">{previewOf(p.text, 90)}</span>
               </span>
-              <button type="button" title="Manda alla sessione Claude del foglio" aria-label={`Manda «${p.name}»`} onClick={() => void sendPreset(p)} className="rounded p-1.5 text-text-muted hover:bg-border hover:text-foreground">
+              <button type="button" title="Manda alla sessione Claude dello spazio" aria-label={`Manda «${p.name}»`} onClick={() => void sendPreset(p)} className="rounded p-1.5 text-text-muted hover:bg-border hover:text-foreground">
                 <Play size={14} />
               </button>
               <button

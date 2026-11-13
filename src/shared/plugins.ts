@@ -1,5 +1,6 @@
 // Plugin di linguaggio (requisiti X1–X9): pacchetti .ccplugin con un adapter che implementa
 // la CCT Plugin API (docs/plugin-api.md) e fa l'adattamento verso il proprio language server.
+import type { PluginAppEvent, PluginMenuId, PluginMenuItem, PluginStatusItem } from './pluginExt'
 
 /**
  * Manifest di un plugin (plugin.json nella radice del pacchetto).
@@ -51,6 +52,7 @@ export interface PluginManifest {
  */
 export const PLUGIN_PERMISSIONS = {
   terminal: 'Mostrare i terminali delle sessioni che avvia',
+  browser: 'Aprire un browser integrato e pilotarlo (navigazione e strumenti di debug)',
   openUrl: 'Aprire indirizzi web (http e https) nel browser',
   'files.read': 'Leggere i file del progetto aperto',
   'files.write': 'Scrivere i file del progetto aperto'
@@ -84,6 +86,12 @@ export interface PluginContributions {
   commands?: PluginCommand[]
   /** Pagina di impostazioni del plugin, aperta dal pannello Plugin. */
   settings?: PluginSettingsPage
+  /** Voci nei menu dell'app (Plugin API v2, docs/plugin-estensioni.md): menu → comandi del plugin, con condizione `when`. */
+  menus?: Partial<Record<PluginMenuId, PluginMenuItem[]>>
+  /** Elementi della barra di stato (Plugin API v2); il testo lo aggiorna l'adapter con `app.ui.statusItem`. */
+  statusBar?: PluginStatusItem[]
+  /** Eventi dell'app da mandare all'adapter come notifica `app/event` (Plugin API v2). */
+  events?: PluginAppEvent[]
 }
 
 /**
@@ -100,6 +108,8 @@ export interface PluginCommand {
   hint?: string
   method?: string
   openView?: string
+  /** Nome di un'icona (Lucide, es. «play») per i menu che le mostrano. */
+  icon?: string
 }
 
 export interface PluginSettingsPage {

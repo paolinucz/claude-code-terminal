@@ -71,7 +71,7 @@ export function ActivityBar() {
         cancelAnimationFrame(frame.current)
         magnify(null)
       }}
-      className="relative z-20 flex w-[68px] shrink-0 flex-col items-stretch gap-1 bg-background pt-[calc(var(--cct-gap)+30px)] pb-3"
+      className="relative z-20 flex w-[68px] shrink-0 flex-col items-stretch gap-1 pt-[calc(var(--cct-gap)+30px)] pb-3"
     >
       {views.map((v, i) => {
         const on = v.id === active
@@ -87,7 +87,7 @@ export function ActivityBar() {
                   exit={{ opacity: 0, scaleX: 0.5, transition: { duration: 0.12 } }}
                   transition={{ type: 'spring', stiffness: 460, damping: 36, mass: 0.8 }}
                   style={{ originX: 1 }}
-                  className="pointer-events-none absolute inset-y-0 right-[-1px] left-1.5 rounded-l-[20px] bg-surface"
+                  className="pointer-events-none absolute inset-y-0 right-[-1px] left-1.5 rounded-l-[20px] bg-(--mg-glass-2)"
                   aria-hidden="true"
                 >
                   <span className="absolute right-0 bottom-full" style={earStyle('top')} />
@@ -192,7 +192,7 @@ export function SideBarPanel() {
 
   if (!view) return null
   return (
-    <aside aria-label={view.title} style={{ width }} className="relative my-(--cct-gap) flex shrink-0 flex-col rounded-[10px] border border-border bg-surface">
+    <aside aria-label={view.title} style={{ width }} className="mg-glass-2 relative my-(--cct-gap) flex shrink-0 flex-col rounded-[10px]">
       <header className="flex h-9 shrink-0 items-center px-3 text-[11px] font-semibold tracking-wide text-text-subtle uppercase">{view.title}</header>
       <div className="min-h-0 flex-1 overflow-hidden rounded-b-[10px]">{view.render()}</div>
       <div

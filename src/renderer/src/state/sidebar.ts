@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '@/lib/api'
-import { workdirForSheet } from '@/state/project'
+import { workdirForSpace } from '@/state/project'
 import { useSessions } from '@/state/sessions'
 
 export const SIDEBAR_MIN = 200
@@ -11,7 +11,7 @@ const KEY = 'ui.sidebar'
 interface Saved {
   active: string | null
   width: number
-  /** Cartella scelta a mano nell'Esplora file, per foglio. */
+  /** Cartella scelta a mano nell'Esplora file, per spazio. */
   cwdBySheet: Record<string, string>
 }
 
@@ -24,7 +24,7 @@ interface SidebarStore extends Saved {
   toggle(id: string): void
   show(id: string): void
   setWidth(width: number): void
-  setSheetCwd(sheetId: string, cwd: string): void
+  setSpaceCwd(spaceId: string, cwd: string): void
   setExplorerCwd(cwd: string): void
   /** Ogni valore nuovo chiede alla vista «Cerca» di prendere il focus (e di usare il testo proposto). */
   searchFocus: { n: number; text: string }
@@ -73,8 +73,8 @@ export const useSidebar = create<SidebarStore>((set, get) => {
       set({ width: clampWidth(width) })
       save()
     },
-    setSheetCwd(sheetId, cwd) {
-      set({ cwdBySheet: { ...get().cwdBySheet, [sheetId]: cwd } })
+    setSpaceCwd(spaceId, cwd) {
+      set({ cwdBySheet: { ...get().cwdBySheet, [spaceId]: cwd } })
       save()
     },
     setExplorerCwd(cwd) {
@@ -84,11 +84,11 @@ export const useSidebar = create<SidebarStore>((set, get) => {
 })
 
 /**
- * Cartella di progetto di un foglio, la stessa per Esplora file e Cerca: quella scelta a mano, poi quella del
+ * Cartella di progetto di uno spazio, la stessa per Esplora file e Cerca: quella scelta a mano, poi quella del
  * contesto del progetto, poi l'ultima mostrata dall'Esplora file, poi la cartella di una sessione viva.
  */
-export function rootForSheet(sheetId: string): string {
+export function rootForSpace(spaceId: string): string {
   const s = useSidebar.getState()
   const live = Object.values(useSessions.getState().sessions).find((x) => x.status !== 'exited')
-  return s.cwdBySheet[sheetId] || workdirForSheet(sheetId) || s.explorerCwd || live?.cwd || ''
+  return s.cwdBySheet[spaceId] || workdirForSpace(spaceId) || s.explorerCwd || live?.cwd || ''
 }

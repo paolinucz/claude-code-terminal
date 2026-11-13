@@ -18,7 +18,7 @@ export function EditorPanel(props: IDockviewPanelProps<PanelParams>) {
 
   if (!filePath) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 bg-surface p-6 text-center text-text-subtle">
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-text-subtle">
         <FileCode size={22} className="text-text-faint" />
         <p>Apri un file dall'Esplora file, dal pannello Problemi o da «vai alla definizione».</p>
       </div>

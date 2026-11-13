@@ -1,5 +1,5 @@
 import { compileMatcher, searchText } from '@shared/search'
-import type { AppApi, NamedLayout, Sheet, WorkspaceState } from '@shared/types'
+import type { AppApi, NamedLayout, Space, WorkspaceState } from '@shared/types'
 import type { SessionAttention, SessionInfo } from '@shared/sessions'
 import { emptyProjectFile } from '@shared/project'
 import { isOpen, type FileChange, type RevisionRequest } from '@shared/changes'
@@ -36,17 +36,17 @@ function createLocalStorageApi(): AppApi {
     backend: 'localStorage',
     workspace: {
       async load() {
-        return read<WorkspaceState>(KEY, { sheets: [], activeSheetId: null })
+        return read<WorkspaceState>(KEY, { spaces: [], activeSpaceId: null })
       },
-      async saveSheets(sheets, activeSheetId) {
-        const current = read<WorkspaceState>(KEY, { sheets: [], activeSheetId: null })
-        const byId = new Map(current.sheets.map((s) => [s.id, s]))
-        const next: Sheet[] = sheets.map((s) => ({ id: s.id, name: s.name, contextId: s.contextId ?? null, layout: byId.get(s.id)?.layout ?? null }))
-        write(KEY, { sheets: next, activeSheetId })
+      async saveSpaces(spaces, activeSpaceId) {
+        const current = read<WorkspaceState>(KEY, { spaces: [], activeSpaceId: null })
+        const byId = new Map(current.spaces.map((s) => [s.id, s]))
+        const next: Space[] = spaces.map((s) => ({ id: s.id, name: s.name, contextId: s.contextId ?? null, icon: s.icon, color: s.color, layout: byId.get(s.id)?.layout ?? null }))
+        write(KEY, { spaces: next, activeSpaceId })
       },
-      async saveSheetLayout(sheetId, layout) {
-        const current = read<WorkspaceState>(KEY, { sheets: [], activeSheetId: null })
-        write(KEY, { ...current, sheets: current.sheets.map((s) => (s.id === sheetId ? { ...s, layout } : s)) })
+      async saveSpaceLayout(spaceId, layout) {
+        const current = read<WorkspaceState>(KEY, { spaces: [], activeSpaceId: null })
+        write(KEY, { ...current, spaces: current.spaces.map((s) => (s.id === spaceId ? { ...s, layout } : s)) })
       }
     },
     transcript: {
@@ -112,7 +112,41 @@ function createLocalStorageApi(): AppApi {
     },
     ...createDemoFiles(),
     changes: createDemoChanges(),
+    browser: {
+      async state() {
+        return null
+      },
+      setBounds() {},
+      setVisible() {},
+      go() {},
+      back() {},
+      forward() {},
+      reload() {},
+      close() {},
+      onState: () => () => {}
+    },
     permissions: createDemoPermissions(),
+    windows: {
+      openSpace: async () => false,
+      closeSpace: async () => false,
+      externalSpaces: async () => [],
+      onSpaces: () => () => {},
+      toggleFullScreen: async () => {
+        if (document.fullscreenElement) await document.exitFullscreen()
+        else await document.documentElement.requestFullscreen()
+        return Boolean(document.fullscreenElement)
+      },
+      isFullScreen: async () => Boolean(document.fullscreenElement),
+      onFullScreen: (cb) => {
+        const h = () => cb(Boolean(document.fullscreenElement))
+        document.addEventListener('fullscreenchange', h)
+        return () => document.removeEventListener('fullscreenchange', h)
+      }
+    },
+    power: {
+      onBattery: async () => false,
+      onChanged: () => () => {}
+    },
     updates: {
       info: async () => ({ version: '0.0.0-web', packaged: false }),
       status: async () => ({ state: 'disabled', reason: 'Anteprima nel browser.' }),

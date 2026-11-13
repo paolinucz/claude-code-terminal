@@ -10,7 +10,7 @@ I language server differiscono molto: come si avviano, che trasporto usano (stdi
 
 - **l'app parla con ogni plugin con una sola API, piccola e stabile** (questa);
 - **ogni plugin contiene un adapter**, un modulo JavaScript che implementa l'API e fa l'adattamento vero e proprio verso il suo server;
-- per non riscrivere ogni volta la parte LSP comune c'è un **SDK** (`plugins/sdk/cct-plugin-sdk.mjs`) da includere nel pacchetto: un adapter tipico è di 20–30 righe.
+- per non riscrivere ogni volta la parte LSP comune c'è un **SDK** (`magnolia-plugin-sdk/cct-plugin-sdk.mjs`) da includere nel pacchetto: un adapter tipico è di 20–30 righe.
 
 ```
 ┌───────────── App ─────────────┐   CCT Plugin API (JSON-RPC su stdio)   ┌──── Processo del plugin ────┐

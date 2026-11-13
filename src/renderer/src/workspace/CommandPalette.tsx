@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { guessWorkspace, openFile } from '@/state/editor'
 import { useRecent } from '@/state/recent'
-import { rootForSheet } from '@/state/sidebar'
+import { rootForSpace } from '@/state/sidebar'
 import { FileIcon } from '@/lib/fileIcons'
 import { revealSession, sessionList, STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/sessions'
 import { useWorkspace } from '@/state/workspace'
@@ -23,16 +23,16 @@ export interface PaletteCommand {
   run(): void
 }
 
-type Group = 'Comandi' | 'Sessioni' | 'Fogli' | 'File' | 'Recenti'
+type Group = 'Comandi' | 'Sessioni' | 'Spazi' | 'File' | 'Recenti'
 
 /**
- * `all` (Ctrl+K): comandi, sessioni, fogli e file. `files` (Ctrl+P): solo file, con i recenti quando non si è scritto nulla.
+ * `all` (Ctrl+K): comandi, sessioni, spazi e file. `files` (Ctrl+P): solo file, con i recenti quando non si è scritto nulla.
  * `recent` (Ctrl+E): solo i file aperti di recente.
  */
 export type PaletteMode = 'all' | 'files' | 'recent'
 
 const MODE_TEXT: Record<PaletteMode, { placeholder: string; title: string }> = {
-  all: { placeholder: 'Cerca file, sessioni, fogli o comandi…', title: 'Palette comandi' },
+  all: { placeholder: 'Cerca file, sessioni, spazi o comandi…', title: 'Palette comandi' },
   files: { placeholder: 'Vai al file… (nome o parte del percorso)', title: 'Vai al file' },
   recent: { placeholder: 'File aperti di recente…', title: 'File recenti' }
 }
@@ -47,7 +47,7 @@ interface Item {
   run(): void
 }
 
-const LIMITS: Record<Group, number> = { Comandi: 40, Sessioni: 20, Fogli: 20, File: 60, Recenti: 40 }
+const LIMITS: Record<Group, number> = { Comandi: 40, Sessioni: 20, Spazi: 20, File: 60, Recenti: 40 }
 const SEPARATORS = /[\\/ ._\-:·«»]/
 
 /**
@@ -100,7 +100,7 @@ function fileScore(rel: string, query: string): number | null {
 }
 
 /**
- * Palette comandi (L7): con Ctrl+K cerca tra comandi, sessioni, fogli e file del progetto del foglio
+ * Palette comandi (L7): con Ctrl+K cerca tra comandi, sessioni, spazi e file del progetto dello spazio
  * attivo. Frecce per scegliere, Invio per eseguire, Esc per chiudere.
  */
 export function CommandPalette({ open, onClose, commands, mode = 'all' }: { open: boolean; onClose(): void; commands: PaletteCommand[]; mode?: PaletteMode }) {
@@ -109,20 +109,20 @@ export function CommandPalette({ open, onClose, commands, mode = 'all' }: { open
   const [index, setIndex] = useState<FileIndex | null>(null)
   const [loadingFiles, setLoadingFiles] = useState(false)
   const sessions = useSessions((s) => s.sessions)
-  const sheets = useWorkspace((s) => s.sheets)
-  const activeSheetId = useWorkspace((s) => s.activeSheetId)
+  const spaces = useWorkspace((s) => s.spaces)
+  const activeSpaceId = useWorkspace((s) => s.activeSpaceId)
   const listRef = useRef<HTMLDivElement>(null)
   const recent = useRecent((s) => s.files)
 
-  // La cartella dei file è quella del foglio attivo (esplora file o terminale), letta all'apertura.
+  // La cartella dei file è quella dello spazio attivo (esplora file o terminale), letta all'apertura.
   const [root, setRoot] = useState<string | undefined>()
   useEffect(() => {
     if (!open) return
     setQuery('')
     setActive(0)
-    const dock = dockRegistry.get(activeSheetId)
-    setRoot(rootForSheet(activeSheetId) || (dock ? guessWorkspace(dock) : undefined))
-  }, [open, activeSheetId])
+    const dock = dockRegistry.get(activeSpaceId)
+    setRoot(rootForSpace(activeSpaceId) || (dock ? guessWorkspace(dock) : undefined))
+  }, [open, activeSpaceId])
 
   useEffect(() => {
     if (!open || !root || mode === 'recent') {
@@ -221,17 +221,17 @@ export function CommandPalette({ open, onClose, commands, mode = 'all' }: { open
       })
     )
     push(
-      'Fogli',
-      sheets.flatMap((s) => {
-        const score = fuzzyScore(`${s.name} foglio`, q)
+      'Spazi',
+      spaces.flatMap((s) => {
+        const score = fuzzyScore(`${s.name} spazio`, q)
         return score === null
           ? []
           : [
               {
                 key: `f:${s.id}`,
-                group: 'Fogli' as const,
+                group: 'Spazi' as const,
                 title: s.name,
-                detail: s.id === activeSheetId ? 'foglio attivo' : 'vai al foglio',
+                detail: s.id === activeSpaceId ? 'spazio attivo' : 'vai allo spazio',
                 icon: <LayoutPanelTop size={14} />,
                 score,
                 run: () => useWorkspace.getState().setActive(s.id)
@@ -259,7 +259,7 @@ export function CommandPalette({ open, onClose, commands, mode = 'all' }: { open
       push('File', files)
     }
     return out
-  }, [query, commands, sessions, sheets, activeSheetId, index, mode, recent, root])
+  }, [query, commands, sessions, spaces, activeSpaceId, index, mode, recent, root])
 
   useEffect(() => setActive(0), [query])
 
@@ -302,7 +302,7 @@ export function CommandPalette({ open, onClose, commands, mode = 'all' }: { open
         }}
       >
         <DialogTitle className="sr-only">{MODE_TEXT[mode].title}</DialogTitle>
-        <DialogDescription className="sr-only">Cerca tra comandi, sessioni, fogli e file. Frecce per scegliere, Invio per eseguire.</DialogDescription>
+        <DialogDescription className="sr-only">Cerca tra comandi, sessioni, spazi e file. Frecce per scegliere, Invio per eseguire.</DialogDescription>
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search size={15} className="shrink-0 text-text-faint" />
           <input
@@ -354,7 +354,7 @@ export function CommandPalette({ open, onClose, commands, mode = 'all' }: { open
             {mode === 'recent'
               ? `${recent.length} file recenti`
               : !root
-              ? 'Nessuna cartella di progetto nel foglio: apri un Esplora file o un terminale'
+              ? 'Nessuna cartella di progetto nello spazio: apri un Esplora file o un terminale'
               : loadingFiles
                 ? 'Lettura dei file…'
                 : index

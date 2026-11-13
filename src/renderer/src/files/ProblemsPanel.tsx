@@ -42,7 +42,7 @@ export function ProblemsPanel() {
   const warnings = Object.values(diagnostics).reduce((n, d) => n + d.diagnostics.filter((x) => x.severity === 2).length, 0)
 
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2">
         <span className="text-[13px] font-semibold text-foreground">Problemi</span>
         <span className="text-[12px]">

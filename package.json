@@ -1,7 +1,7 @@
 {
   "name": "claude-code-terminal",
   "productName": "Magnolia",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Desktop app per Windows che riunisce terminali Claude Code, shell, file, revisione e widget",
   "author": "Paolo Coletta",

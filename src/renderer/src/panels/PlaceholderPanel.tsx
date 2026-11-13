@@ -8,7 +8,7 @@ export function PlaceholderPanel(props: IDockviewPanelProps<PanelParams>) {
   const info = PANEL_KINDS[props.params.kind] ?? PANEL_KINDS.explorer
 
   return (
-    <div className="flex h-full flex-col overflow-auto bg-surface p-4 text-text-muted">
+    <div className="flex h-full flex-col overflow-auto p-4 text-text-muted">
       <div className="flex items-center gap-2">
         <span className="text-[13px] font-semibold text-foreground">{info.title}</span>
         <span className="rounded-md border border-border px-1.5 py-0.5 font-mono text-[11px] text-text-subtle">fase {info.phase}</span>

@@ -21,8 +21,12 @@ const GROUPS: Group[] = [
       { keys: 'Ctrl P', label: 'Vai a un file' },
       { keys: 'Ctrl E', label: 'File aperti di recente' },
       { keys: 'Ctrl Maiusc T', label: 'Nuovo terminale' },
-      { keys: 'F1…F9', label: 'Vai al foglio 1–9' },
-      { keys: 'F2', label: 'Rinomina il foglio (con la sua scheda selezionata)' }
+      { keys: '↑ ↓', label: 'Nella revisione: file precedente / successivo (con l\'elenco dei file selezionato)' },
+      { keys: 'F11', label: 'Schermo intero (di nuovo F11 per uscire)' },
+      { keys: 'Ctrl+1…9', label: 'Vai allo spazio 1–9 (anche dentro un terminale)' },
+      { keys: 'Ctrl+Tab', label: 'Panoramica degli spazi (Esc per chiuderla)' },
+      { keys: 'F1…F9', label: 'Vai allo spazio 1–9' },
+      { keys: 'F2', label: 'Rinomina lo spazio (con la sua scheda selezionata)' }
     ]
   },
   {

@@ -5,6 +5,7 @@ import { basename, join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { PLUGIN_PERMISSIONS, type InstalledPlugin, type PluginInstallProgress, type PluginLanguageInfo, type PluginManifest, type PluginPreview } from '@shared/plugins'
 import { PLUGIN_API_VERSION } from '@shared/pluginApi'
+import { PLUGIN_APP_EVENTS, PLUGIN_API_MIN_VERSION, PLUGIN_MENUS, whenIsValid } from '@shared/pluginExt'
 import type { AppDb } from '../db'
 import { dirSize, downloadVerified, extract, fileSha256, TAR, treeHash } from './download'
 
@@ -229,7 +230,7 @@ export class PluginManager {
     for (const d of manifest.downloads ?? []) {
       if (!/^https:\/\//.test(d.url)) warnings.push(`Download non HTTPS: ${d.url}`)
     }
-    if (manifest.main && manifest.apiVersion !== PLUGIN_API_VERSION) {
+    if (manifest.main && (manifest.apiVersion ?? 1) < PLUGIN_API_MIN_VERSION || (manifest.apiVersion ?? 1) > PLUGIN_API_VERSION) {
       warnings.push(`Il plugin usa la versione ${manifest.apiVersion ?? '?'} della Plugin API, l'app la ${PLUGIN_API_VERSION}: potrebbe non funzionare.`)
     }
     if (!manifest.main && (manifest.languages ?? []).length) warnings.push('Il plugin non ha un adapter: dà solo la colorazione della sintassi.')
@@ -389,6 +390,27 @@ function validate(m: PluginManifest): string[] {
     ids.add(c.id)
     if (c.openView && !(m.contributes?.sidebarViews ?? []).some((v) => v.id === c.openView)) p.push(`il comando ${c.id} apre una vista che non esiste: ${c.openView}`)
   }
+  // Punti di estensione dell'interfaccia (Plugin API v2).
+  const v2 = m.contributes?.menus || m.contributes?.statusBar || m.contributes?.events
+  if (v2 && (m.apiVersion ?? 1) < 2) p.push('menus, statusBar ed events richiedono apiVersion 2')
+  const cmdIds = new Set((m.contributes?.commands ?? []).map((c) => c.id))
+  for (const [menu, items] of Object.entries(m.contributes?.menus ?? {})) {
+    if (!(menu in PLUGIN_MENUS) || !Array.isArray(items)) {
+      p.push(`menu sconosciuto: ${menu} (ammessi: ${Object.keys(PLUGIN_MENUS).join(', ')})`)
+      continue
+    }
+    for (const it of items) {
+      if (!it || !cmdIds.has(it.command)) p.push(`voce di ${menu}: il comando «${it?.command}» non esiste in commands`)
+      else if (it.when !== undefined && (typeof it.when !== 'string' || !whenIsValid(it.when))) p.push(`voce di ${menu}: condizione 'when' non leggibile`)
+    }
+  }
+  const sbIds = new Set<string>()
+  for (const s of m.contributes?.statusBar ?? []) {
+    if (!s?.id || !/^[w.-]{1,40}$/.test(s.id) || sbIds.has(s.id) || (s.command !== undefined && !cmdIds.has(s.command))) p.push(`elemento della barra di stato non valido: ${s?.id ?? '?'}`)
+    sbIds.add(s?.id)
+  }
+  const evs = m.contributes?.events
+  if (evs !== undefined && (!Array.isArray(evs) || evs.some((e) => !(e in PLUGIN_APP_EVENTS)))) p.push(`«events» deve essere un elenco di: ${Object.keys(PLUGIN_APP_EVENTS).join(', ')}`)
   const st = m.contributes?.settings
   if (st && (!rel(st.entry) || !/\.html?$/.test(st.entry))) p.push('«settings» richiede entry (.html dentro il pacchetto)')
   if (m.storage?.settingsPrefixes !== undefined && (!Array.isArray(m.storage.settingsPrefixes) || m.storage.settingsPrefixes.some((x) => typeof x !== 'string' || !/^[a-z][\w.-]*\.$/.test(x)))) {

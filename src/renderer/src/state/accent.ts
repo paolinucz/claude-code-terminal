@@ -3,7 +3,12 @@ import { api } from '@/lib/api'
 
 const KEY = 'ui.accent'
 /** Ottanio: il blu-verde profondo del colore di base dell'app. */
-export const DEFAULT_ACCENT = '#168294'
+export const DEFAULT_ACCENT = '#1E9AA5'
+/** Accento predefinito delle versioni precedenti: chi non lo aveva cambiato passa al nuovo. */
+const OLD_DEFAULT_ACCENT = '#168294'
+/** Link e tinta chiara sull'accento predefinito, testo sopra l'accento (DESIGN.md §Colore). */
+export const DEFAULT_ACCENT_LINK = '#5CC8D1'
+export const DEFAULT_ON_ACCENT = '#021A1D'
 
 export const ACCENT_PRESETS = [
   { name: 'Ottanio', value: DEFAULT_ACCENT },
@@ -29,8 +34,9 @@ export function applyAccent(hex: string): void {
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
   const root = document.documentElement.style
   root.setProperty('--cct-accent', color)
-  root.setProperty('--cct-accent-soft', toHex([r + (255 - r) * 0.2, g + (255 - g) * 0.2, b + (255 - b) * 0.2]))
-  root.setProperty('--cct-on-accent', luminance > 0.55 ? '#1a0f0a' : '#ffffff')
+  const isDefault = color.toLowerCase() === DEFAULT_ACCENT.toLowerCase()
+  root.setProperty('--cct-accent-soft', isDefault ? DEFAULT_ACCENT_LINK : toHex([r + (255 - r) * 0.3, g + (255 - g) * 0.3, b + (255 - b) * 0.3]))
+  root.setProperty('--cct-on-accent', isDefault ? DEFAULT_ON_ACCENT : luminance > 0.55 ? '#1a0f0a' : '#ffffff')
 }
 
 interface AccentStore {
@@ -53,8 +59,9 @@ export const useAccent = create<AccentStore>((set, get) => ({
     set({ loaded: true })
     const saved = await api.settings.get(KEY)
     if (typeof saved === 'string' && HEX.test(saved)) {
-      set({ accent: saved })
-      applyAccent(saved)
+      const accent = saved.toLowerCase() === OLD_DEFAULT_ACCENT ? DEFAULT_ACCENT : saved
+      set({ accent })
+      applyAccent(accent)
     }
   },
   set(hex) {

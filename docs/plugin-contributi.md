@@ -51,11 +51,11 @@ L'adapter gira in un processo Node separato (solo quando serve) e chiede all'app
 - `app.emit(evento, dati)` — evento per le pagine del proprio plugin.
 - `app.editor.markers(path, [{line, kind, hint?, reveal?}])` — segni nel margine dell'editor per quel file (`kind`: `breakpoint`, `breakpoint-disabled`, `stopped`); `reveal` apre il file sulla riga. `app.editor.clearMarkers()` li toglie tutti. Il clic nel margine arriva all'adapter come `call(<metodo di editorGutter.click>, {path, line})`.
 
-Esempio completo: `plugins/java/ui/packages.html`.
+Esempio completo: `magnolia-plugin-java/ui/packages.html`.
 
 ## Java fuori dal core (fatto)
 
-Tutti i passi sono completati: vista a package (`cct.java`), infrastruttura (`sidebarViews`, `app.*`, `plugin.call`, `editorGutter`), pannello «Esegui e debug» come pagina del plugin Java Dev, logica (`src/main/java/*`) nell'adapter `plugins/java/` (sorgenti `.mts` compilati dallo script di build), tipi dentro il plugin, handler `java:*`, `window.api.java` e `shared/java.ts` rimossi dal core. Il pacchetto `cct.java` 2.0.0 (unificato con il vecchio `cct.java-dev`) non è più un interruttore: senza di lui l'app non contiene niente di Java.
+Tutti i passi sono completati: vista a package (`cct.java`), infrastruttura (`sidebarViews`, `app.*`, `plugin.call`, `editorGutter`), pannello «Esegui e debug» come pagina del plugin Java Dev, logica (`src/main/java/*`) nell'adapter `magnolia-plugin-java/` (sorgenti `.mts` compilati dallo script di build), tipi dentro il plugin, handler `java:*`, `window.api.java` e `shared/java.ts` rimossi dal core. Il pacchetto `cct.java` 2.0.0 (unificato con il vecchio `cct.java-dev`) non è più un interruttore: senza di lui l'app non contiene niente di Java.
 
 Da provare a mano su Windows con un JDK vero: breakpoint, passo-passo e download dei JDK con i pacchetti nuovi (l'adapter e i servizi dell'app sono provati, il debug completo con jdtls no).
 

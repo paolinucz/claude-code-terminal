@@ -4,6 +4,7 @@ import { api } from '@/lib/api'
 import { openDocsPanel } from '@/docs/DocsPanel'
 import { useDocs } from '@/state/docs'
 import { useProject } from '@/state/project'
+import { useAbout } from '@/state/about'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,6 +97,8 @@ export function ProjectMenu() {
               <DropdownMenuItem onSelect={() => useProject.getState().close()}>Chiudi progetto</DropdownMenuItem>
             </>
           )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => useAbout.getState().show()}>Informazioni su Magnolia…</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <NewProjectDialog open={creating} onClose={() => setCreating(false)} />

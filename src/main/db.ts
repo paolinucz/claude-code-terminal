@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
-import type { NamedLayout, SerializedLayout, Sheet, WorkspaceState } from '@shared/types'
+import type { NamedLayout, SerializedLayout, Space, WorkspaceState } from '@shared/types'
+import { SPACE_COLORS, defaultSpaceIcon } from '@shared/spaces'
 import type { ClaudeEffort, ClaudeModel, ProjectPrefs } from '@shared/sessions'
 
 export interface PluginRow {
@@ -213,6 +214,20 @@ export class AppDb {
           );
           PRAGMA user_version = 9;
         `)
+      })
+    }
+    if (version < 10) {
+      // Spazi nella barra in alto: ogni spazio (la tabella resta «sheets») ha un'icona e un colore della palette fissa.
+      // I vecchi fogli: icona = iniziale del nome, colore = palette in ordine di posizione. Layout e id non cambiano.
+      this.transaction(() => {
+        this.db.exec(`
+          ALTER TABLE sheets ADD COLUMN icon TEXT;
+          ALTER TABLE sheets ADD COLUMN color TEXT;
+        `)
+        const rows = this.db.prepare('SELECT id, name FROM sheets ORDER BY position').all() as { id: string; name: string }[]
+        const set = this.db.prepare('UPDATE sheets SET icon = ?, color = ? WHERE id = ?')
+        rows.forEach((r, i) => set.run(defaultSpaceIcon(r.name), SPACE_COLORS[i % SPACE_COLORS.length], r.id))
+        this.db.exec('PRAGMA user_version = 10;')
       })
     }
   }
@@ -439,54 +454,58 @@ export class AppDb {
   }
 
   loadWorkspace(): WorkspaceState {
-    const rows = this.db.prepare('SELECT id, name, layout_json, context_id FROM sheets ORDER BY position').all() as {
+    const rows = this.db.prepare('SELECT id, name, layout_json, context_id, icon, color FROM sheets ORDER BY position').all() as {
       id: string
       name: string
       layout_json: string | null
       context_id: string | null
+      icon: string | null
+      color: string | null
     }[]
-    const sheets: Sheet[] = rows.map((r) => ({
+    const spaces: Space[] = rows.map((r, i) => ({
       id: r.id,
       name: r.name,
       contextId: r.context_id,
+      icon: r.icon || defaultSpaceIcon(r.name),
+      color: r.color || SPACE_COLORS[i % SPACE_COLORS.length],
       layout: r.layout_json ? (JSON.parse(r.layout_json) as SerializedLayout) : null
     }))
     const active = this.db.prepare("SELECT value FROM app_state WHERE key = 'activeSheetId'").get() as
       | { value: string }
       | undefined
-    return { sheets, activeSheetId: active?.value ?? null }
+    return { spaces, activeSpaceId: active?.value ?? null }
   }
 
-  saveSheets(sheets: Pick<Sheet, 'id' | 'name' | 'contextId'>[], activeSheetId: string | null): void {
+  saveSpaces(spaces: Pick<Space, 'id' | 'name' | 'contextId' | 'icon' | 'color'>[], activeSpaceId: string | null): void {
     const now = new Date().toISOString()
     this.transaction(() => {
-      const ids = sheets.map((s) => s.id)
+      const ids = spaces.map((s) => s.id)
       if (ids.length === 0) {
         this.db.prepare('DELETE FROM sheets').run()
       } else {
         this.db.prepare(`DELETE FROM sheets WHERE id NOT IN (${ids.map(() => '?').join(',')})`).run(...ids)
       }
       const upsert = this.db.prepare(`
-        INSERT INTO sheets (id, name, position, layout_json, updated_at, context_id)
-        VALUES (?, ?, ?, NULL, ?, ?)
+        INSERT INTO sheets (id, name, position, layout_json, updated_at, context_id, icon, color)
+        VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position, updated_at = excluded.updated_at,
-          context_id = excluded.context_id
+          context_id = excluded.context_id, icon = excluded.icon, color = excluded.color
       `)
-      sheets.forEach((s, position) => upsert.run(s.id, s.name, position, now, s.contextId ?? null))
-      if (activeSheetId) {
+      spaces.forEach((s, position) => upsert.run(s.id, s.name, position, now, s.contextId ?? null, s.icon, s.color))
+      if (activeSpaceId) {
         this.db
           .prepare(
             "INSERT INTO app_state (key, value) VALUES ('activeSheetId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
           )
-          .run(activeSheetId)
+          .run(activeSpaceId)
       }
     })
   }
 
-  saveSheetLayout(sheetId: string, layout: SerializedLayout | null): void {
+  saveSpaceLayout(spaceId: string, layout: SerializedLayout | null): void {
     this.db
       .prepare('UPDATE sheets SET layout_json = ?, updated_at = ? WHERE id = ?')
-      .run(layout ? JSON.stringify(layout) : null, new Date().toISOString(), sheetId)
+      .run(layout ? JSON.stringify(layout) : null, new Date().toISOString(), spaceId)
   }
 
   listLayouts(): NamedLayout[] {

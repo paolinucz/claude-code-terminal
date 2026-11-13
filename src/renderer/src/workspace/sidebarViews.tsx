@@ -7,7 +7,7 @@ import { useMemo } from 'react'
 import { pluginUiUrl } from '@shared/plugins'
 import { EMPTY_DECOR, PluginFrame } from '@/plugins/PluginFrame'
 import { useEditor } from '@/state/editor'
-import { rootForSheet, useSidebar } from '@/state/sidebar'
+import { rootForSpace, useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
 
 /**
@@ -41,16 +41,16 @@ export function registerSidebarView(view: SidebarView): () => void {
 }
 
 /**
- * Pagina di un plugin nella barra laterale: lavora nella cartella del progetto del foglio attivo (`rootForSheet`, la stessa di
+ * Pagina di un plugin nella barra laterale: lavora nella cartella del progetto dello spazio attivo (`rootForSpace`, la stessa di
  * Esplora file, Cerca e palette). Non si usa `explorerCwd`: lo imposta l'Esplora file quando è visibile, quindi con una vista di
  * plugin aperta all'avvio sarebbe vuoto finché non lo si apre.
  */
 function PluginSidebarPage({ pluginId, entry }: { pluginId: string; entry: string }) {
-  const sheetId = useWorkspace((s) => s.activeSheetId)
-  // Solo per ridisegnare quando cambia la cartella del foglio o quella dell'Esplora file.
+  const spaceId = useWorkspace((s) => s.activeSpaceId)
+  // Solo per ridisegnare quando cambia la cartella dello spazio o quella dell'Esplora file.
   useSidebar((s) => s.cwdBySheet)
   useSidebar((s) => s.explorerCwd)
-  const cwd = rootForSheet(sheetId)
+  const cwd = rootForSpace(spaceId)
   return <PluginFrame pluginId={pluginId} entry={entry} cwd={cwd} decor={EMPTY_DECOR} />
 }
 

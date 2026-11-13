@@ -30,7 +30,7 @@ export class PanelErrorBoundary extends Component<Props, State> {
     const { error } = this.state
     if (!error) return this.props.children
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-surface p-6 text-center text-[13px]">
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-[13px]">
         <AlertTriangle size={22} className="text-danger" />
         <div className="font-semibold text-foreground">Il pannello «{this.props.title}» si è interrotto per un errore</div>
         <pre className="max-h-32 max-w-full overflow-auto rounded-md bg-background px-3 py-2 text-left font-mono text-[11px] whitespace-pre-wrap text-text-subtle">

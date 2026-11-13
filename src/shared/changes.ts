@@ -132,7 +132,7 @@ export const isOpen = (c: Pick<FileChange, 'status'>): boolean => c.status === '
 
 /** Messaggio mostrato quando l'input è bloccato dalla revisione obbligatoria. */
 export const REVIEW_LOCK_MESSAGE =
-  'Prima di scrivere a Claude devi revisionare le sue modifiche: approva o rifiuta ogni file nel pannello Modifiche.'
+  'Prima di scrivere a Claude devi revisionare le sue modifiche: approva o rifiuta ogni file nella revisione accanto al terminale.'
 
 /**
  * Revisione obbligatoria: a Claude fermo (stato «idle») con modifiche ancora aperte della sessione,

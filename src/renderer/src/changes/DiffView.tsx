@@ -18,12 +18,15 @@ export default function DiffView({
   filePath,
   before,
   after,
+  mode = 'auto',
   onSelection,
   onReview
 }: {
   filePath: string
   before: string
   after: string
+  /** Come si legge: `auto` affiancato se c'è larghezza e in linea se stretto, `inline` sempre in una colonna, `side` sempre affiancato. */
+  mode?: 'auto' | 'inline' | 'side'
   /** Righe selezionate nel lato «dopo» (null se non c'è selezione). */
   onSelection?(sel: LineSelection | null): void
   /** Tasto destro «Revisiona» sulle righe selezionate (solo se si può chiedere una revisione). */
@@ -114,10 +117,10 @@ export default function DiffView({
       options={{
         readOnly: true,
         originalEditable: false,
-        renderSideBySide: true,
-        // Sotto questa larghezza il diff passa in una sola colonna.
+        renderSideBySide: mode !== 'inline',
+        // In modalità automatica, sotto questa larghezza il diff passa in una sola colonna.
         renderSideBySideInlineBreakpoint: 640,
-        useInlineViewWhenSpaceIsLimited: true,
+        useInlineViewWhenSpaceIsLimited: mode === 'auto',
         hideUnchangedRegions: { enabled: true, contextLineCount: 3, minimumLineCount: 6, revealLineCount: 10 },
         automaticLayout: true,
         minimap: { enabled: false },

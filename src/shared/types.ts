@@ -1,4 +1,5 @@
 // Tipi condivisi tra processo principale, preload e interfaccia.
+import type { BrowserBounds, BrowserState } from './browser'
 import type { ChangeContents, FileChange, RejectManyResult, RejectResult, ReviewNote, RevisionResult } from './changes'
 import type { ExternalChange, PermissionScope, PermissionsState, SaveResult, ScopeData } from './permissions'
 import type {
@@ -33,14 +34,18 @@ import type { ChatItem, TranscriptUpdate } from './transcript'
 /** Layout serializzato di Dockview (risultato di `api.toJSON()`). Lo trattiamo come dato opaco. */
 export type SerializedLayout = Record<string, unknown>
 
-/** Un foglio (L1): area di lavoro indipendente con i suoi pannelli. */
-export interface Sheet {
+/** Uno spazio (L1): area di lavoro indipendente con i suoi pannelli. */
+export interface Space {
   id: string
   name: string
-  /** Contesto del progetto a cui appartiene (J5). `null` = nessun progetto o foglio della 1.0. */
+  /** Contesto del progetto a cui appartiene (J5). `null` = nessun progetto o spazio della 1.0. */
   contextId: string | null
-  /** Disposizione salvata in automatico (L5). `null` = usa il layout predefinito del foglio. */
+  /** Disposizione salvata in automatico (L5). `null` = usa il layout predefinito dello spazio. */
   layout: SerializedLayout | null
+  /** Lettera o simbolo mostrato nel chip dello spazio (predefinito: l'iniziale del nome). */
+  icon: string
+  /** Colore dalla palette fissa `SPACE_COLORS` (shared/spaces.ts). */
+  color: string
 }
 
 /** Layout salvato con un nome (L5). Contiene solo la disposizione dei pannelli, non le sessioni. */
@@ -52,8 +57,8 @@ export interface NamedLayout {
 }
 
 export interface WorkspaceState {
-  sheets: Sheet[]
-  activeSheetId: string | null
+  spaces: Space[]
+  activeSpaceId: string | null
 }
 
 /** API esposta dal preload su `window.api`. Nel browser la sostituisce un'implementazione su localStorage. */
@@ -84,10 +89,10 @@ export interface AppApi {
   readonly backend: 'sqlite' | 'localStorage'
   workspace: {
     load(): Promise<WorkspaceState>
-    /** Salva elenco, nomi e ordine dei fogli e il foglio attivo (non i layout). */
-    saveSheets(sheets: Pick<Sheet, 'id' | 'name' | 'contextId'>[], activeSheetId: string | null): Promise<void>
-    /** Salvataggio automatico della disposizione di un foglio. */
-    saveSheetLayout(sheetId: string, layout: SerializedLayout | null): Promise<void>
+    /** Salva elenco, nomi e ordine degli spazi e lo spazio attivo (non i layout). */
+    saveSpaces(spaces: Pick<Space, 'id' | 'name' | 'contextId' | 'icon' | 'color'>[], activeSpaceId: string | null): Promise<void>
+    /** Salvataggio automatico della disposizione di uno spazio. */
+    saveSpaceLayout(spaceId: string, layout: SerializedLayout | null): Promise<void>
   }
   layouts: {
     list(): Promise<NamedLayout[]>
@@ -169,12 +174,43 @@ export interface AppApi {
     onEvent(cb: (e: { pluginId: string; event: string; data: unknown }) => void): () => void
     /** Segni nel margine dell'editor mandati dagli adapter (contributo `editorGutter`). */
     onMarkers(cb: (u: GutterMarkersUpdate) => void): () => void
-  }  /** Permessi di Claude Code nei tre file di impostazioni (P1–P6). */
+  }  /** Browser integrato dei plugin: la barra e la posizione del pannello (il resto lo pilota l'adapter). */
+  browser: {
+    state(id: string): Promise<BrowserState | null>
+    /** Posizione della vista sopra il segnaposto del pannello (pixel della finestra). */
+    setBounds(id: string, bounds: BrowserBounds): void
+    setVisible(id: string, visible: boolean): void
+    /** Indirizzo scritto nella barra. */
+    go(id: string, text: string): void
+    back(id: string): void
+    forward(id: string): void
+    reload(id: string): void
+    /** Il pannello è stato chiuso dall'utente: la vista si chiude e l'adapter lo viene a sapere. */
+    close(id: string): void
+    onState(cb: (s: BrowserState) => void): () => void
+  }
+  /** Permessi di Claude Code nei tre file di impostazioni (P1–P6). */
   permissions: {
     /** Legge i tre ambiti e inizia a osservarne i file (una cartella di progetto alla volta). */
     read(cwd: string): Promise<PermissionsState | null>
     save(cwd: string, scope: PermissionScope, data: ScopeData): Promise<SaveResult>
     onExternalChange(cb: (change: ExternalChange) => void): () => void
+  }
+  /** Spazi aperti in una finestra propria (un solo proprietario per spazio). */
+  windows: {
+    openSpace(spaceId: string): Promise<boolean>
+    closeSpace(spaceId: string): Promise<boolean>
+    externalSpaces(): Promise<string[]>
+    onSpaces(cb: (spaceIds: string[]) => void): () => void
+    /** Schermo intero della finestra (F11). Restituisce lo stato dopo il cambio. */
+    toggleFullScreen(): Promise<boolean>
+    isFullScreen(): Promise<boolean>
+    onFullScreen(cb: (on: boolean) => void): () => void
+  }
+  /** Alimentazione del PC: lo sfondo animato si ferma a batteria. */
+  power: {
+    onBattery(): Promise<boolean>
+    onChanged(cb: (onBattery: boolean) => void): () => void
   }
   /** Versione dell'app e aggiornamenti automatici (fase 8). */
   updates: {

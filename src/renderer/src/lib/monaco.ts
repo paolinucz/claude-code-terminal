@@ -24,12 +24,13 @@ monaco.editor.defineTheme('cct-dark', {
     { token: 'type', foreground: '6ea8fe' }
   ],
   colors: {
-    'editor.background': '#09090b',
+    // Trasparenti: il fondo quasi opaco lo dà il contenitore (.mg-glass-solid).
+    'editor.background': '#00000000',
     'editor.foreground': '#e4e4e7',
     'editorLineNumber.foreground': '#52525b',
     'editorLineNumber.activeForeground': '#a1a1aa',
     'editor.lineHighlightBackground': '#18181b',
-    'editorGutter.background': '#09090b',
+    'editorGutter.background': '#00000000',
     'diffEditor.insertedTextBackground': '#6fd39b26',
     'diffEditor.removedTextBackground': '#ff8a8a26',
     'diffEditor.insertedLineBackground': '#17332280',

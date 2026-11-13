@@ -75,7 +75,7 @@ export function SmartExplain({ change }: { change: FileChange }) {
           referrerPolicy="no-referrer"
           className="min-h-0 flex-1 border-0 bg-background"
         />
-        <div className="flex shrink-0 items-center gap-3 border-t border-border bg-surface px-3 py-1.5 text-[11px] text-text-faint">
+        <div className="mg-bar flex shrink-0 items-center gap-3 border-t border-border px-3 py-1.5 text-[11px] text-text-faint">
           <span className="inline-flex items-center gap-1">
             <Sparkles size={11} /> Spiegazione di {MODEL_LABEL}
             {result.cached ? ' · salvata (nessun token consumato)' : result.costUsd !== undefined ? ` · costo stimato $${result.costUsd.toFixed(4)}` : ''}

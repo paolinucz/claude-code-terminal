@@ -79,7 +79,7 @@ function ContextDialog(props: { open: boolean; context: ProjectContextDef | null
           <DialogHeader>
             <DialogTitle>{props.context ? 'Modifica contesto' : 'Nuovo contesto'}</DialogTitle>
             <DialogDescription>
-              Un contesto è un&apos;area di lavoro del progetto, con i suoi fogli, la sua cartella e i suoi documenti. Puoi tenerne aperti più di uno.
+              Un contesto è un&apos;area di lavoro del progetto, con i suoi spazi, la sua cartella e i suoi documenti. Puoi tenerne aperti più di uno.
             </DialogDescription>
           </DialogHeader>
           <label htmlFor="ctx-name" className="mt-4 block text-[12px] text-text-subtle">
@@ -190,7 +190,7 @@ export function ContextSwitcher() {
       <ConfirmDialog
         open={deleting !== null}
         title={`Eliminare il contesto «${deleting?.name ?? ''}»?`}
-        description="Si chiudono i suoi fogli. Le sessioni di Claude Code non si fermano e si possono riprendere da «Nuovo terminale». I file del progetto non vengono toccati."
+        description="Si chiudono i suoi spazi. Le sessioni di Claude Code non si fermano e si possono riprendere da «Nuovo terminale». I file del progetto non vengono toccati."
         confirmLabel="Elimina"
         destructive
         onCancel={() => setDeleting(null)}

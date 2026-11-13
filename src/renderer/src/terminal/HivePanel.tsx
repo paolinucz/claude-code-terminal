@@ -45,11 +45,11 @@ export function HivePanel(props: IDockviewPanelProps<PanelParams>) {
   const { cols, rows } = gridFor(maximized ? 1 : ids.length, size.w, size.h)
 
   if (!hive) {
-    return <div className="flex h-full items-center justify-center bg-surface p-5 text-text-subtle">Gruppo di terminali non più disponibile.</div>
+    return <div className="flex h-full items-center justify-center p-5 text-text-subtle">Gruppo di terminali non più disponibile.</div>
   }
 
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div className="flex h-full flex-col">
       <header className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border px-2.5 text-[12px]">
         <span className="font-semibold text-foreground">{hive.title}</span>
         <span className="text-text-faint">
@@ -140,9 +140,9 @@ function HiveCell({
   return (
     <section
       aria-label={session?.title ?? 'Terminale'}
-      className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background', hidden && 'hidden', maximized && 'border-brand/50')}
+      className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border mg-glass-solid', hidden && 'hidden', maximized && 'border-brand/50')}
     >
-      <header onDoubleClick={onToggle} className="flex h-7 shrink-0 select-none items-center gap-2 border-b border-border bg-surface px-2.5 text-[12px]">
+      <header onDoubleClick={onToggle} className="mg-bar flex h-7 shrink-0 select-none items-center gap-2 border-b border-border px-2.5 text-[12px]">
         <StatusDot session={session} />
         <span className="min-w-0 flex-1 truncate font-medium text-foreground" title={session?.command}>
           {session?.title ?? 'Terminale'}

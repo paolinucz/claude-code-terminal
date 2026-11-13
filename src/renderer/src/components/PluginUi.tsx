@@ -4,7 +4,7 @@ import { AlertTriangle, Check, Info, X } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui-kit'
 import { EMPTY_DECOR, PluginFrame } from '@/plugins/PluginFrame'
 import { usePluginUi, type PluginDialogRequest, type PluginNotice, type PluginPageRequest } from '@/state/pluginUi'
-import { rootForSheet, useSidebar } from '@/state/sidebar'
+import { rootForSpace, useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
 
 const ICONS = {
@@ -43,11 +43,11 @@ export function PluginUi() {
  */
 function PageDialog({ page }: { page: PluginPageRequest }) {
   const close = usePluginUi((s) => s.closePage)
-  const sheetId = useWorkspace((s) => s.activeSheetId)
+  const spaceId = useWorkspace((s) => s.activeSpaceId)
   // Solo per ridisegnare quando cambia la cartella del progetto.
   useSidebar((s) => s.cwdBySheet)
   useSidebar((s) => s.explorerCwd)
-  const cwd = rootForSheet(sheetId)
+  const cwd = rootForSpace(spaceId)
   return (
     <Dialog open onOpenChange={(o) => !o && close(page.id)}>
       <DialogContent

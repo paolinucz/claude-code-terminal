@@ -1,9 +1,12 @@
 import { HOST_EVENT_HIVE, HOST_EVENT_NOTIFY, HOST_EVENT_TERMINAL, type InstalledPlugin, type PluginCommand, type PluginPermission } from '@shared/plugins'
+import { HOST_EVENT_BROWSER } from '@shared/browser'
+import { HOST_EVENT_STATUS_ITEM, extKey, type MenuContext } from '@shared/pluginExt'
 import { api } from '@/lib/api'
 import type { PanelParams } from '@/panels/kinds'
 import { useHives } from '@/state/hives'
 import { pluginNotify } from '@/state/pluginUi'
 import { useEditor } from '@/state/editor'
+import { usePluginExt } from '@/state/pluginExt'
 import { useSessions } from '@/state/sessions'
 import { useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
@@ -27,7 +30,7 @@ export function settingKey(pluginId: string, key: unknown): string {
 /** Mostra il terminale di una sessione in un pannello sotto quello attivo (se non c'è già un pannello che la mostra). */
 export function showSessionTerminal(sessionId: string): boolean {
   const info = useSessions.getState().sessions[sessionId]
-  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  const dock = dockRegistry.get(useWorkspace.getState().activeSpaceId)
   if (!info || !dock) return false
   const existing = dock.panels.find((p) => (p.params as { sessionId?: string } | undefined)?.sessionId === sessionId)
   if (existing) {
@@ -53,14 +56,14 @@ export function parseHive(pluginId: string, d: Record<string, unknown>): { key: 
 }
 
 /**
- * Mostra un gruppo di terminali nella vista «alveare». Se il pannello c'è già (in qualunque foglio) si aggiorna da solo
- * dall'elenco nuovo; altrimenti se ne apre uno sotto il pannello attivo del foglio attivo.
+ * Mostra un gruppo di terminali nella vista «alveare». Se il pannello c'è già (in qualunque spazio) si aggiorna da solo
+ * dall'elenco nuovo; altrimenti se ne apre uno sotto il pannello attivo dello spazio attivo.
  */
 export function showHive(h: { key: string; title: string; sessionIds: string[]; pluginId?: string }): boolean {
   useHives.getState().set(h)
   const has = (api: ReturnType<typeof dockRegistry.all>[number]) => api.panels.some((p) => (p.params as PanelParams | undefined)?.hiveKey === h.key)
   if (dockRegistry.all().some(has)) return true
-  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  const dock = dockRegistry.get(useWorkspace.getState().activeSpaceId)
   if (!dock) return false
   const ref = dock.activePanel
   const id = addPanel(dock, 'hive', { title: h.title, params: { hiveKey: h.key }, position: ref ? { referencePanel: ref.id, direction: 'below' } : undefined })
@@ -68,14 +71,32 @@ export function showHive(h: { key: string; title: string; sessionIds: string[]; 
   return true
 }
 
+/** Mostra il pannello di una vista del browser integrato (se c'è già, in qualunque spazio, la porta in primo piano). */
+export function showBrowser(b: { id: string; title: string }): boolean {
+  const has = (d: ReturnType<typeof dockRegistry.all>[number]) => d.panels.find((p) => (p.params as PanelParams | undefined)?.browserId === b.id)
+  for (const d of dockRegistry.all()) {
+    const found = has(d)
+    if (found) {
+      found.api.setActive()
+      return true
+    }
+  }
+  const dock = dockRegistry.get(useWorkspace.getState().activeSpaceId)
+  if (!dock) return false
+  // Accanto all'editor, se c'è; altrimenti a destra del pannello attivo.
+  const ref = dock.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'editor') ?? dock.activePanel
+  addPanel(dock, 'browser', { title: b.title, params: { browserId: b.id }, position: ref ? { referencePanel: ref.id, direction: 'right' } : undefined })
+  return true
+}
+
 /** Esegue un comando della palette contribuito da un plugin. */
-export function runPluginCommand(pluginId: string, cmd: PluginCommand): void {
+export function runPluginCommand(pluginId: string, cmd: PluginCommand, context?: MenuContext): void {
   if (cmd.openView) {
     useSidebar.getState().show(`${pluginId}:${cmd.openView}`)
     return
   }
   if (cmd.method) {
-    api.plugins.call(pluginId, cmd.method, { command: cmd.id }).catch((e: Error) => pluginNotify(pluginName(pluginId), e.message, 'error'))
+    api.plugins.call(pluginId, cmd.method, { command: cmd.id, ...(context ? { context } : {}) }).catch((e: Error) => pluginNotify(pluginName(pluginId), e.message, 'error'))
   }
 }
 
@@ -93,8 +114,13 @@ export function startPluginBridge(): void {
   api.plugins.onEvent((e) => {
     const d = (e.data ?? {}) as Record<string, unknown>
     if (e.event === HOST_EVENT_NOTIFY) pluginNotify(pluginName(e.pluginId), d.message, d.kind)
-    else if (e.event === HOST_EVENT_TERMINAL && hasPermission(e.pluginId, 'terminal')) showWhenKnown(String(d.sessionId ?? ''))
-    else if (e.event === HOST_EVENT_HIVE && hasPermission(e.pluginId, 'terminal')) {
+    else if (e.event === HOST_EVENT_STATUS_ITEM && typeof d.id === 'string') {
+      const { id, ...patch } = d
+      usePluginExt.getState().patchStatus(extKey(e.pluginId, String(id)), patch)
+    } else if (e.event === HOST_EVENT_TERMINAL &&hasPermission(e.pluginId, 'terminal')) showWhenKnown(String(d.sessionId ?? ''))
+    else if (e.event === HOST_EVENT_BROWSER && hasPermission(e.pluginId, 'browser') && typeof d.id === 'string' && d.id.startsWith(`${e.pluginId}/`)) {
+      showBrowser({ id: d.id, title: typeof d.title === 'string' ? d.title : 'Browser' })
+    } else if (e.event === HOST_EVENT_HIVE && hasPermission(e.pluginId, 'terminal')) {
       const hive = parseHive(e.pluginId, d)
       if (hive) showHive(hive)
     }

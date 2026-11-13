@@ -18,7 +18,7 @@ import { cn } from '@/lib/cn'
 import type { SessionHint } from '@/panels/kinds'
 import { Segmented } from '@/components/ui-kit'
 import { sessionList, STATUS_COLORS, STATUS_LABELS, useSessions } from '@/state/sessions'
-import { useProject, workdirForSheet } from '@/state/project'
+import { useProject, workdirForSpace } from '@/state/project'
 import { useWorkspace } from '@/state/workspace'
 import { sessionLocations, type Placement } from '@/workspace/panels'
 
@@ -84,8 +84,8 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
     })
     void api.env.recentProjects().then(async (list) => {
       setRecent(list)
-      // Con un progetto aperto la cartella parte da quella del contesto del foglio attivo (J7).
-      const workdir = workdirForSheet(useWorkspace.getState().activeSheetId)
+      // Con un progetto aperto la cartella parte da quella del contesto dello spazio attivo (J7).
+      const workdir = workdirForSpace(useWorkspace.getState().activeSpaceId)
       if (!hint?.cwd) setCwd((c) => c || workdir || list[0]?.cwd || '')
       if (!hint?.cwd && !workdir && list.length === 0) {
         const home = await api.env.homeDir()
@@ -440,7 +440,7 @@ export function NewSessionForm({ variant, hint, onDone, onCancel }: Props) {
                       {s.kind === 'claude' ? 'Claude' : 'Shell'} · {s.title}
                     </span>
                     <span className="block text-[12px] text-text-faint">
-                      {STATUS_LABELS[s.status]} · {where?.length ? `foglio ${where.join(', ')}` : 'nessuna vista aperta'}
+                      {STATUS_LABELS[s.status]} · {where?.length ? `spazio ${where.join(', ')}` : 'nessuna vista aperta'}
                     </span>
                   </span>
                 </ListItem>

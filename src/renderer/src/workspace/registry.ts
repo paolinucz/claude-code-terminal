@@ -1,22 +1,22 @@
 import type { DockviewApi } from 'dockview-react'
 
 /**
- * Le API Dockview dei fogli montati. Non stanno nello store React perché sono oggetti
+ * Le API Dockview degli spazi montati. Non stanno nello store React perché sono oggetti
  * vivi (non serializzabili) e cambiarli non deve causare un nuovo render.
  */
 const apis = new Map<string, DockviewApi>()
 
 export const dockRegistry = {
-  set(sheetId: string, api: DockviewApi): void {
-    apis.set(sheetId, api)
+  set(spaceId: string, api: DockviewApi): void {
+    apis.set(spaceId, api)
   },
-  delete(sheetId: string): void {
-    apis.delete(sheetId)
+  delete(spaceId: string): void {
+    apis.delete(spaceId)
   },
-  get(sheetId: string): DockviewApi | undefined {
-    return apis.get(sheetId)
+  get(spaceId: string): DockviewApi | undefined {
+    return apis.get(spaceId)
   },
-  /** Tutti i fogli montati (anche quelli nascosti). */
+  /** Tutti gli spazi montati (anche quelli nascosti). */
   all(): DockviewApi[] {
     return [...apis.values()]
   }

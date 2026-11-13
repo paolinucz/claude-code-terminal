@@ -1,7 +1,7 @@
 /**
  * Menu contestuale nativo di base per tutta l'app (Electron di suo non ne mostra nessuno): nei campi di testo
  * Annulla/Ripeti/Taglia/Copia/Incolla/Seleziona tutto, sul testo selezionato Copia. I pannelli che hanno un menu
- * proprio (editor, terminale, Markdown, Esplora file, fogli) bloccano l'evento e questo menu non compare.
+ * proprio (editor, terminale, Markdown, Esplora file, spazi) bloccano l'evento e questo menu non compare.
  * Funzione pura, senza dipendenze da Electron, così si prova da sola.
  */
 export interface ContextParams {

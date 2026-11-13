@@ -11,6 +11,8 @@ interface ProjectStore {
   active: ProjectInfo | null
   /** Contesto attivo del progetto (J5), o `null` se il progetto non ne ha ancora. */
   activeContextId: string | null
+  /** Il primo caricamento del progetto è finito (anche se non ce n'è nessuno): da qui `workdirForSpace` è affidabile. */
+  ready: boolean
   recents: ProjectRef[]
   init(): void
   refreshRecents(): Promise<void>
@@ -45,12 +47,12 @@ export function activeContextOf(s: Pick<ProjectStore, 'active' | 'activeContextI
   return s.active?.data.contexts.find((c) => c.id === s.activeContextId)
 }
 
-/** Cartella di lavoro predefinita del contesto di un foglio, o `undefined` se non c'è un progetto aperto. */
-export function workdirForSheet(sheetId: string | undefined): string | undefined {
+/** Cartella di lavoro predefinita del contesto di uno spazio, o `undefined` se non c'è un progetto aperto. */
+export function workdirForSpace(spaceId: string | undefined): string | undefined {
   const { active } = useProject.getState()
   if (!active) return undefined
-  const sheet = useWorkspace.getState().sheets.find((s) => s.id === sheetId)
-  const ctx = active.data.contexts.find((c) => c.id === sheet?.contextId)
+  const space = useWorkspace.getState().spaces.find((s) => s.id === spaceId)
+  const ctx = active.data.contexts.find((c) => c.id === space?.contextId)
   return contextWorkdir(active.root, ctx)
 }
 
@@ -70,7 +72,7 @@ export const useProject = create<ProjectStore>((set, get) => {
     return null
   }
 
-  /** Dopo aver aperto un progetto: ripristina l'ultimo contesto e mostra i suoi fogli. */
+  /** Dopo aver aperto un progetto: ripristina l'ultimo contesto e mostra i suoi spazi. */
   const applyContext = (info: ProjectInfo | null) => {
     const contexts = info?.data.contexts ?? []
     if (!info || contexts.length === 0) {
@@ -97,6 +99,7 @@ export const useProject = create<ProjectStore>((set, get) => {
   return {
     active: null,
     activeContextId: null,
+    ready: false,
     recents: [],
     init() {
       if (started) return
@@ -104,12 +107,16 @@ export const useProject = create<ProjectStore>((set, get) => {
       void get().refreshRecents()
       // Riapre l'ultimo progetto. Se non c'è più (cartella spostata o file rovinato) si riparte senza.
       void api.settings.get(ACTIVE_KEY).then(async (root) => {
-        if (typeof root !== 'string' || !root) return
+        if (typeof root !== 'string' || !root) {
+          set({ ready: true })
+          return
+        }
         const res = await api.project.open(root)
         if (res.ok) {
           set({ active: res.value })
           applyContext(res.value)
         } else void api.settings.set(ACTIVE_KEY, null)
+        set({ ready: true })
       })
     },
     async refreshRecents() {
@@ -166,8 +173,8 @@ export const useProject = create<ProjectStore>((set, get) => {
       const ctx: ProjectContextDef = { id: crypto.randomUUID(), name: clean, dirs: dir ? [dir] : [], docs: [] }
       const err = await persistData({ ...active.data, contexts: [...active.data.contexts, ctx] })
       if (err) return err
-      // Il primo contesto prende i fogli già aperti, così non si perde il lavoro in corso.
-      if (active.data.contexts.length === 0) useWorkspace.getState().adoptLooseSheets(ctx.id)
+      // Il primo contesto prende gli spazi già aperti, così non si perde il lavoro in corso.
+      if (active.data.contexts.length === 0) useWorkspace.getState().adoptLooseSpaces(ctx.id)
       get().setContext(ctx.id)
       setStatus(`Contesto «${clean}» creato`)
       return null
@@ -194,7 +201,7 @@ export const useProject = create<ProjectStore>((set, get) => {
       const copy: ProjectContextDef = { id: crypto.randomUUID(), name, dirs: [...src.dirs], docs: [...src.docs] }
       if (await persistData({ ...active.data, contexts: [...active.data.contexts, copy] })) return
       get().setContext(copy.id)
-      setStatus(`Contesto «${name}» creato: ambito e documenti copiati, fogli nuovi`)
+      setStatus(`Contesto «${name}» creato: ambito e documenti copiati, spazi nuovi`)
     },
 
     async removeContext(id) {
@@ -202,7 +209,7 @@ export const useProject = create<ProjectStore>((set, get) => {
       if (!active) return
       const contexts = active.data.contexts.filter((c) => c.id !== id)
       if (await persistData({ ...active.data, contexts })) return
-      useWorkspace.getState().removeContextSheets(id)
+      useWorkspace.getState().removeContextSpaces(id)
       if (get().activeContextId === id) {
         if (contexts.length > 0) get().setContext(contexts[0].id)
         else {

@@ -4,6 +4,7 @@ import { ChangesPanel } from '@/changes/ChangesPanel'
 import { DocsPanel } from '@/docs/DocsPanel'
 import { EditorPanel } from '@/files/EditorPanel'
 import { ProblemsPanel } from '@/files/ProblemsPanel'
+import { BrowserPanel } from '@/browser/BrowserPanel'
 import { PermissionsPanel } from '@/permissions/PermissionsPanel'
 import { PluginsPanel } from '@/plugins/PluginsPanel'
 import { HivePanel } from '@/terminal/HivePanel'
@@ -30,6 +31,8 @@ export function PanelHost(props: IDockviewPanelProps<PanelParams>) {
         return <PluginsPanel />
       case 'docs':
         return <DocsPanel {...props} />
+      case 'browser':
+        return <BrowserPanel {...props} />
       case 'hive':
         return <HivePanel {...props} />
       default:

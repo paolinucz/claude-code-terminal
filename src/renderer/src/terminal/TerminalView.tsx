@@ -12,7 +12,8 @@ import { sessionHub } from './hub'
 
 /** Colori del terminale, dal tema dell'app (mockup). */
 const THEME: ITheme = {
-  background: '#09090b',
+  // Trasparente: il fondo (quasi opaco) lo dà il contenitore con .mg-glass-solid, così xterm non dipinge uno sfondo suo.
+  background: '#00000000',
   foreground: '#e4e4e7',
   cursor: '#3fb5c8',
   cursorAccent: '#09090b',
@@ -82,6 +83,7 @@ export function TerminalView({ sessionId, viewId, onMissing, onExit, active }: P
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: true,
+      allowTransparency: true,
       theme: THEME,
       windowsPty: window.api ? { backend: 'conpty' } : undefined
     })
@@ -234,7 +236,7 @@ export function TerminalView({ sessionId, viewId, onMissing, onExit, active }: P
   }, [active])
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden bg-background">
+    <div className="relative min-h-0 flex-1 overflow-hidden">
       <div ref={hostRef} className="absolute inset-0 py-1 pl-2" />
       {popup}
     </div>

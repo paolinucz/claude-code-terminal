@@ -7,13 +7,14 @@ import { cn } from '@/lib/cn'
 import { useChanges } from '@/state/changes'
 import { openFile, useEditor } from '@/state/editor'
 import { useSessions } from '@/state/sessions'
-import { workdirForSheet } from '@/state/project'
+import { workdirForSpace } from '@/state/project'
 import { useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
 import { isInside } from '@shared/textEdits'
 import { moveInto, parentOf, relativeTo, requestMove, requestRename, topLevel } from '@/state/fileOps'
 import { FileIcon } from '@/lib/fileIcons'
 import { PluginFrame, type ExplorerDecor } from '@/plugins/PluginFrame'
+import { menuItems, resourceContext, runMenuItem } from '@/plugins/extensions'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui-kit'
 
 const MARK_COLORS: Record<GitMark, string> = {
@@ -33,15 +34,15 @@ interface Root {
 /**
  * Esplora file (F1), nella barra laterale fissa: albero del workspace e delle cartelle aggiuntive, con i file
  * modificati segnati M, A o D (stato git), quelli toccati da Claude in attesa di revisione e quelli con errori.
- * Segue il foglio attivo; la cartella scelta a mano si ricorda per foglio.
+ * Segue lo spazio attivo; la cartella scelta a mano si ricorda per spazio.
  */
 export function ExplorerView() {
-  const sheetId = useWorkspace((s) => s.activeSheetId)
-  const saved = useSidebar((s) => s.cwdBySheet[sheetId] ?? '')
+  const spaceId = useWorkspace((s) => s.activeSpaceId)
+  const saved = useSidebar((s) => s.cwdBySheet[spaceId] ?? '')
   const [cwd, setCwdState] = useState(saved)
   const setCwd = (dir: string) => {
     setCwdState(dir)
-    useSidebar.getState().setSheetCwd(sheetId, dir)
+    useSidebar.getState().setSpaceCwd(spaceId, dir)
   }
   const [children, setChildren] = useState<Record<string, DirEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -73,15 +74,15 @@ export function ExplorerView() {
   expandedRef.current = expanded
 
   // Cartella: quella del pannello, altrimenti un terminale aperto, altrimenti l'ultimo progetto.
-  // Al cambio di foglio si passa alla cartella di quel foglio (quella scelta a mano, se c'è).
+  // Al cambio di spazio si passa alla cartella di quel spazio (quella scelta a mano, se c'è).
   useEffect(() => {
     setCwdState(saved)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetId])
+  }, [spaceId])
   useEffect(() => {
     if (cwd) return
-    // Con un progetto aperto: la cartella del contesto del foglio (J7).
-    const workdir = workdirForSheet(sheetId)
+    // Con un progetto aperto: la cartella del contesto dello spazio (J7).
+    const workdir = workdirForSpace(spaceId)
     if (workdir) {
       setCwdState(workdir)
       return
@@ -89,7 +90,7 @@ export function ExplorerView() {
     const live = Object.values(sessions).find((s) => s.status !== 'exited')
     if (live) setCwdState(live.cwd)
     else void api.env.recentProjects().then(async (list) => setCwdState(list[0]?.cwd ?? (await api.env.homeDir())))
-  }, [cwd, sessions, sheetId])
+  }, [cwd, sessions, spaceId])
 
   // Cartelle aggiuntive delle sessioni aperte su questo progetto.
   const roots: Root[] = useMemo(() => {
@@ -235,6 +236,24 @@ export function ExplorerView() {
     return list.map((e) => renderEntry(e, depth))
   }
 
+  // Voci dei plugin nel menu del tasto destro (`contributes.menus['explorer/context']`). Funzione che restituisce JSX, non componente.
+  function pluginMenu(entry: DirEntry) {
+    const paths = targets(entry)
+    const ctx = { ...resourceContext(entry.path), isDir: entry.dir, multiple: paths.length > 1, selection: paths.join('\n') }
+    const items = menuItems(plugins, 'explorer/context', ctx)
+    if (!items.length) return null
+    return (
+      <>
+        <ContextMenuSeparator />
+        {items.map((it) => (
+          <ContextMenuItem key={it.key} onSelect={() => runMenuItem(it, ctx)} title={it.pluginName}>
+            {it.command.title}
+          </ContextMenuItem>
+        ))}
+      </>
+    )
+  }
+
   // Funzione e non componente: se fosse un componente definito qui dentro, a ogni disegno dell'Esplora file
   // React lo vedrebbe come un tipo nuovo e lo ricreerebbe, chiudendo il menu del tasto destro appena aperto.
   function renderEntry(entry: DirEntry, depth: number) {
@@ -319,6 +338,7 @@ export function ExplorerView() {
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => void navigator.clipboard.writeText(entry.path)}>Copia percorso</ContextMenuItem>
             <ContextMenuItem onSelect={() => void navigator.clipboard.writeText(relativeTo(rootOf(entry.path), entry.path))}>Copia percorso relativo</ContextMenuItem>
+            {pluginMenu(entry)}
           </ContextMenuContent>
         </ContextMenu>
         {entry.dir && open && renderEntries(entry.path, depth + 1)}
@@ -335,12 +355,12 @@ export function ExplorerView() {
   const warnTotal = Object.values(diagnostics).reduce((a, d) => a + d.diagnostics.filter((x) => x.severity === 2).length, 0)
 
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-2 py-1.5">
         <input
           value={cwd}
           onChange={(e) => setCwdState(e.target.value)}
-          onBlur={() => useSidebar.getState().setSheetCwd(sheetId, cwd)}
+          onBlur={() => useSidebar.getState().setSpaceCwd(spaceId, cwd)}
           spellCheck={false}
           aria-label="Cartella del progetto"
           className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[11px] text-foreground outline-none focus:border-brand"

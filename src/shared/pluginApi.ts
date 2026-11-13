@@ -1,7 +1,8 @@
 // CCT Plugin API v1: il contratto tra l'app e l'adapter di ogni plugin (docs/plugin-api.md).
 // Formati dell'app, non di LSP: percorsi Windows, righe e colonne da 1.
 
-export const PLUGIN_API_VERSION = 1
+/** v2 = v1 + punti di estensione dell'interfaccia (menu, barra di stato, eventi): additiva, gli adapter v1 funzionano uguale. */
+export const PLUGIN_API_VERSION = 2
 
 export interface ApiPosition {
   line: number

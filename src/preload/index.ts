@@ -12,8 +12,8 @@ const api: AppApi = {
   backend: 'sqlite',
   workspace: {
     load: () => ipcRenderer.invoke('workspace:load'),
-    saveSheets: (sheets, activeSheetId) => ipcRenderer.invoke('workspace:saveSheets', sheets, activeSheetId),
-    saveSheetLayout: (sheetId, layout) => ipcRenderer.invoke('workspace:saveSheetLayout', sheetId, layout)
+    saveSpaces: (spaces, activeSpaceId) => ipcRenderer.invoke('workspace:saveSpaces', spaces, activeSpaceId),
+    saveSpaceLayout: (spaceId, layout) => ipcRenderer.invoke('workspace:saveSpaceLayout', spaceId, layout)
   },
   layouts: {
     list: () => ipcRenderer.invoke('layouts:list'),
@@ -73,10 +73,34 @@ const api: AppApi = {
     call: (pluginId, method, params) => ipcRenderer.invoke('plugin:call', pluginId, method, params),
     onEvent: (cb) => on('plugin:event', cb),
     onMarkers: (cb) => on('plugin:markers', cb)
-  },  permissions: {
+  },  browser: {
+    state: (id) => ipcRenderer.invoke('browser:state', id),
+    setBounds: (id, bounds) => ipcRenderer.send('browser:bounds', id, bounds),
+    setVisible: (id, visible) => ipcRenderer.send('browser:visible', id, visible),
+    go: (id, text) => ipcRenderer.send('browser:go', id, text),
+    back: (id) => ipcRenderer.send('browser:back', id),
+    forward: (id) => ipcRenderer.send('browser:forward', id),
+    reload: (id) => ipcRenderer.send('browser:reload', id),
+    close: (id) => ipcRenderer.send('browser:close', id),
+    onState: (cb) => on('browser:state', cb)
+  },
+  permissions: {
     read: (cwd) => ipcRenderer.invoke('permissions:read', cwd),
     save: (cwd, scope, data) => ipcRenderer.invoke('permissions:save', cwd, scope, data),
     onExternalChange: (cb) => on('permissions:external', cb)
+  },
+  windows: {
+    openSpace: (spaceId) => ipcRenderer.invoke('window:openSpace', spaceId),
+    closeSpace: (spaceId) => ipcRenderer.invoke('window:closeSpace', spaceId),
+    externalSpaces: () => ipcRenderer.invoke('window:externalSpaces'),
+    onSpaces: (cb) => on('window:spaces', cb),
+    toggleFullScreen: () => ipcRenderer.invoke('window:toggleFullScreen'),
+    isFullScreen: () => ipcRenderer.invoke('window:isFullScreen'),
+    onFullScreen: (cb) => on('window:fullscreen', cb)
+  },
+  power: {
+    onBattery: () => ipcRenderer.invoke('power:onBattery'),
+    onChanged: (cb) => on('power:changed', cb)
   },
   updates: {
     info: () => ipcRenderer.invoke('updates:info'),

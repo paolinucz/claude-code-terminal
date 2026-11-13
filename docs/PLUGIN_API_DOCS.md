@@ -69,6 +69,9 @@ I percorsi nel pacchetto devono essere relativi, senza `..`. Il manifest è vali
 | `editorGutter: {languages, click}` | Margine dell'editor per i file di quei linguaggi. L'adapter decide i segni (`app.editor.markers`), il clic chiama `click` con `{path, line}`. |
 | `commands: [{id, title, keywords?, hint?, method \| openView}]` | Comandi nella palette (Ctrl+K), mostrati come «Nome plugin: titolo». Con `method` l'app chiama quel metodo dell'adapter con `{command: id}`; con `openView` apre la vista della barra laterale con quell'id. Uno solo dei due. |
 | `settings: {entry, title?}` | Pagina di impostazioni: compare un pulsante «Impostazioni» nella scheda del plugin (pannello Plugin) che la apre in una finestra. |
+| `menus: {<menu>: [{command, when?, group?}]}` | **API v2.** Voci nei menu dell'app (`explorer/context`, `editor/context`, `terminal/toolbar`) che richiamano un comando del plugin, con condizione `when`. Vedi [plugin-estensioni.md](plugin-estensioni.md). |
+| `statusBar: [{id, align?, text?, tooltip?, command?}]` | **API v2.** Elementi della barra di stato dell'app; testo e stato li manda l'adapter con `app.ui.statusItem`. |
+| `events: [...]` | **API v2.** Eventi dell'app (`session.created`, `session.status`, `session.exited`) mandati all'adapter come `handlers.appEvent`. |
 
 Le pagine sono HTML/JS/CSS statici dentro il pacchetto, servite da `app://plugin/<id-plugin>/<percorso>` solo se il plugin è **attivo e non modificato**. Estensioni ammesse: `.html .js .css .svg .png .json`.
 
@@ -93,7 +96,7 @@ addEventListener('message', (e) => {
 parent.postMessage({ cct: 'ready' }, '*')   // dopo aver registrato i listener
 ```
 
-Esempi completi: `plugins/java/ui/packages.html` (vista a package), `plugins/java/ui/run.html` (pannello con adapter e dialoghi propri).
+Esempi completi: `magnolia-plugin-java/ui/packages.html` (vista a package), `magnolia-plugin-java/ui/run.html` (pannello con adapter e dialoghi propri).
 
 ### 3.1 Pagina → app
 
@@ -144,7 +147,7 @@ Eventi dell'app (nome sempre con prefisso `app.`, quindi non confondibili con qu
 
 | Evento | `data` | Quando |
 | --- | --- | --- |
-| `app.workspace` | `{cwd}` | Cambia la cartella del progetto (foglio o cartella dell'Esplora file) |
+| `app.workspace` | `{cwd}` | Cambia la cartella del progetto (spazio o cartella dell'Esplora file) |
 | `app.file.changed` | `{paths}` | File cambiati nella cartella del progetto (raggruppati, ~300 ms) |
 | `app.session.exit` | `{sessionId, exitCode}` | Una sessione (terminale, task) è terminata |
 
@@ -153,7 +156,17 @@ Per applicare il tema: `for (const [k, v] of Object.entries(m.theme)) document.d
 ### 3.3 Vista alveare e pagine in finestra
 
 - **Alveare**: un pannello dell'app che mostra più terminali in un mosaico che si riorganizza da solo in base al numero di celle e alle dimensioni del pannello (celle simili a un terminale, senza spazi vuoti inutili). Ogni cella ha una testata con nome, stato (verde in esecuzione, grigio terminato, rosso uscito con errore), «Ferma» e «Ingrandisci»; si ingrandisce anche con il doppio clic sulla testata. Con una cella ingrandita le altre restano in esecuzione, nascoste, e si passa dall'una all'altra con le linguette in alto; «Mosaico» le rimette tutte. «Ferma tutti» chiude le sessioni. Il pannello non sopravvive al riavvio (le sessioni nemmeno). Lo apre il plugin con `terminal.hive` / `app.terminal.hive`; il plugin sceglie `key` (che l'app prefissa con l'id del plugin, così due plugin non si prendono il gruppo a vicenda) e l'elenco delle sessioni, e può aggiornarlo mentre le sessioni partono.
-- **Pagine in finestra** (`ui.openPage`): per interfacce che non entrano nella barra laterale (modali di configurazione, editor di preset…). La pagina è isolata come le altre, ha lo stesso protocollo e si chiude con `ui.close`, con Esc o con la X; un clic fuori non la chiude. L'app mostra sempre il nome del plugin nell'intestazione. Per far arrivare alla pagina aperta le novità, usa gli eventi dell'adapter (`app.emit`): li ricevono tutte le pagine aperte del plugin. Esempio: `plugins/java/ui/combo.html` (avvio combo con trascinamento).
+- **Pagine in finestra** (`ui.openPage`): per interfacce che non entrano nella barra laterale (modali di configurazione, editor di preset…). La pagina è isolata come le altre, ha lo stesso protocollo e si chiude con `ui.close`, con Esc o con la X; un clic fuori non la chiude. L'app mostra sempre il nome del plugin nell'intestazione. Per far arrivare alla pagina aperta le novità, usa gli eventi dell'adapter (`app.emit`): li ricevono tutte le pagine aperte del plugin. Esempio: `magnolia-plugin-java/ui/combo.html` (avvio combo con trascinamento).
+
+### 3.4 Browser integrato
+
+Servizio generico per i plugin che devono mostrare e controllare una pagina web (debug frontend, anteprime…). L'app non sa a cosa serva.
+
+- **Vista**: una `WebContentsView` del processo principale, posizionata sopra il segnaposto di un pannello «Browser» (barra con indietro, avanti, ricarica e indirizzo). Partizione propria per plugin (`persist:cct-browser-<id-plugin>`), `sandbox`, niente preload né accesso all'app, nessun permesso del sito (fotocamera, posizione…), solo indirizzi `http`/`https` (e `about:blank` come pagina iniziale). Gli `id` stanno nello spazio del plugin (`<id-plugin>/<id>`).
+- **Adapter**: `app.browser.open(id, {url, title?})` crea (o riusa) la vista e apre il pannello; `navigate`, `cdp` e `close` la pilotano. `cdp` accetta qualunque metodo CDP (`Dominio.metodo`) sul bersaglio principale della pagina. Gli eventi arrivano a `handlers.browserEvent({id, type: 'cdp'|'state'|'closed', …})`: `cdp` porta `method`, `params`, `sessionId`; `state` porta `{url, title, loading, canGoBack, canGoForward, debugging}`.
+- **Chiusura**: chiudere il pannello chiude la vista e manda `closed` all'adapter; se l'adapter si ferma le sue viste si chiudono.
+- **Limiti**: la vista è nativa, quindi sta sopra l'interfaccia: l'app la nasconde quando il pannello non si vede o quando un dialogo o un menu la coprirebbe. Il pannello non sopravvive al riavvio. Solo l'adapter usa il servizio (le pagine no).
+- Esempio completo: `magnolia-plugin-frontend-debug/` (breakpoint sui file originali con le source map, passo-passo, variabili).
 
 ## 4. Adapter: ciclo di vita e SDK
 
@@ -183,9 +196,11 @@ L'adapter parte quando serve (primo uso, un file del suo linguaggio, una chiamat
 | `app.notify(message, kind?)` | Avviso (toast) nell'app, con il nome del plugin | no |
 | `app.emit(event, data)` | Evento per le pagine di questo plugin (`{cct:'event'}`) | no |
 | `app.plugin(idPlugin, metodo, parametri)` | Richiesta all'adapter di un plugin dichiarato in `requires` | no (ma serve `requires`) |
+| `app.browser.open(id, {url, title?})` / `navigate(id, url)` / `cdp(id, metodo, parametri?, sessionId?)` / `close(id)` | **Browser integrato** (§3.4): apre una vista web in un pannello, la fa navigare e la pilota con il protocollo Chrome DevTools. Gli eventi (messaggi CDP, stato, chiusura) arrivano a `handlers.browserEvent(e)` | `browser` |
+| `app.ui.statusItem(id, {text?, tooltip?, tone?, visible?})` | **API v2.** Aggiorna un elemento di `contributes.statusBar` | no (serve `statusBar`) |
 | `app.editor.markers(path, [{line, kind, hint?, reveal?}])` / `clearMarkers()` | Segni nel margine dell'editor (`kind`: `breakpoint` `breakpoint-disabled` `stopped`); `reveal` apre il file alla riga | no (serve `editorGutter`) |
 
-Il clic nel margine arriva all'adapter come `call(<editorGutter.click>, {path, line})`. I tipi sono in `plugins/java/src/cct-plugin-sdk.d.mts` (se scrivi l'adapter in TypeScript).
+Il clic nel margine arriva all'adapter come `call(<editorGutter.click>, {path, line})`. I tipi sono in `magnolia-plugin-sdk/cct-plugin-sdk.d.mts` (se scrivi l'adapter in TypeScript).
 
 Gli eventi `app.notify`, `app.terminal.show` e `app.terminal.hive` viaggiano come eventi riservati (`$ui.notify`, `$terminal.show`, `$terminal.hive`) gestiti dall'app: non arrivano mai alle pagine.
 
@@ -199,6 +214,7 @@ Dichiarati in `permissions`, mostrati all'utente prima dell'installazione («Per
 | `openUrl` | `system.openUrl` (pagine) |
 | `files.read` | `files.read` dalle pagine, nel progetto |
 | `files.write` | `files.write` dalle pagine, nel progetto |
+| `browser` | `app.browser.*` (adapter): aprire un browser integrato e pilotarlo con CDP. Il protocollo DevTools dà pieno accesso alla pagina (cookie, rete, script): si mostra all'utente prima dell'installazione |
 
 Quello che non richiede permesso è a basso rischio o mediato dall'utente: aprire un file nell'editor, avvisi, dialoghi, selettori di file e cartelle, impostazioni del proprio plugin, chiamate al proprio adapter. Il permesso riguarda le **pagine** (codice isolato); l'adapter, essendo un processo Node con i permessi dell'utente, può già leggere e scrivere i file: per questo resta tra le cose che si mostrano in «Cosa eseguirà».
 
@@ -211,12 +227,14 @@ Quello che non richiede permesso è a basso rischio o mediato dall'utente: aprir
 
 ## 8. Aggiungere un servizio all'API
 
-1. **Pagine**: nuovo `case` in `renderer/src/plugins/PluginFrame.tsx` (con `need('permesso')` se sensibile). **Adapter**: richiesta o notifica in `main/plugins/PluginHost.ts` (`registerHostRequests`) e metodo in `plugins/sdk/cct-plugin-sdk.mjs` più tipo in `cct-plugin-sdk.d.mts`.
+1. **Pagine**: nuovo `case` in `renderer/src/plugins/PluginFrame.tsx` (con `need('permesso')` se sensibile). **Adapter**: richiesta o notifica in `main/plugins/PluginHost.ts` (`registerHostRequests`) e metodo in `magnolia-plugin-sdk/cct-plugin-sdk.mjs` più tipo in `cct-plugin-sdk.d.mts`.
 2. Se serve il processo principale: i quattro punti (handler in `main/index.ts`, `AppApi` in `shared/types.ts`, ponte in `preload/index.ts`, versione finta in `renderer/src/lib/api.ts`).
 3. Nuovo permesso: aggiungilo a `PLUGIN_PERMISSIONS` in `shared/plugins.ts` (validazione e dialogo di installazione lo prendono da lì).
 4. **Aggiorna questo documento.** Il servizio deve essere generico: se ha senso solo per un plugin, va nel plugin.
 
 ## 9. Ancora da fare
+
+- Altri punti di estensione (decorazioni dei file, viste ad albero native, revisione delle modifiche, hook di Claude Code, input del terminale, impostazioni dichiarative): elenco in [plugin-estensioni.md](plugin-estensioni.md).
 
 - Stile di base per le pagine (CSS condiviso con controlli già coerenti con l'app) per evitare che ogni plugin riscriva pulsanti, campi e modali.
 - Versione dell'API delle pagine negoziata in `init` (oggi implicita nella versione dell'app).

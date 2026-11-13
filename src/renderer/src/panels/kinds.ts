@@ -12,6 +12,7 @@ export type PanelKind =
   | 'plugins'
   | 'docs'
   | 'hive'
+  | 'browser'
 
 export interface PanelKindInfo {
   kind: PanelKind
@@ -51,7 +52,7 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
   changes: {
     kind: 'changes',
     title: 'Modifiche',
-    description: 'Ogni Edit o Write di Claude, con diff affiancato e i pulsanti Approva e Rifiuta.',
+    description: 'Panoramica delle modifiche di tutte le sessioni, con Approva e Rifiuta di massa. La revisione di una sessione sta nel cassetto accanto al suo terminale.',
     phase: 0,
     requirements: 'F4–F7'
   },
@@ -92,6 +93,15 @@ export const PANEL_KINDS: Record<PanelKind, PanelKindInfo> = {
     // Le sessioni non sopravvivono al riavvio: il pannello si toglie dai layout salvati e non compare nei menu.
     hidden: true
   },
+  browser: {
+    kind: 'browser',
+    title: 'Browser',
+    description: 'Browser integrato che apre e pilota un plugin (per esempio il debug frontend).',
+    phase: 0,
+    requirements: '',
+    // La vista non sopravvive al riavvio: il pannello si toglie dai layout salvati e non compare nei menu.
+    hidden: true
+  },
   widgets: {
     kind: 'widgets',
     title: 'Widget',
@@ -130,4 +140,6 @@ export interface PanelParams {
   filePath?: string
   /** Solo alveare: chiave del gruppo di terminali (`state/hives.ts`). */
   hiveKey?: string
+  /** Solo browser: id completo della vista (`<id-plugin>/<id>`). */
+  browserId?: string
 }

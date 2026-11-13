@@ -6,6 +6,8 @@ import { CLAUDE_EFFORTS, CLAUDE_MODELS, type SessionInfo } from '@shared/session
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import type { PanelParams } from '@/panels/kinds'
+import { menuItems, runMenuItem } from '@/plugins/extensions'
+import { useEditor } from '@/state/editor'
 import { useSessions } from '@/state/sessions'
 import { useWorkspace } from '@/state/workspace'
 import {
@@ -17,22 +19,130 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui-kit'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
-import { bindPanelToSession, hintOf, sheetOfPanel } from '@/workspace/panels'
+import { bindPanelToSession, hintOf, spaceOfPanel } from '@/workspace/panels'
 import { NewSessionForm } from './NewSessionForm'
 import { ConversationView } from './ConversationView'
 import { PromptBox } from './PromptBox'
+import { useBot, useBots } from '@/state/bots'
+import { isBubbleMode } from '@/state/appearance'
+import { ReviewDock } from '@/changes/ReviewDrawer'
+import { useChanges } from '@/state/changes'
+import { useReviewUi } from '@/state/review'
 import { TerminalView } from './TerminalView'
 
 /** Pannello terminale: una vista su una sessione, oppure la scelta della sessione da aprire. */
 export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
   const { sessionId, hint } = props.params
   const session = useSessions((s) => (sessionId ? s.sessions[sessionId] : undefined))
-  const wrapperRef = useRef<HTMLDivElement>(null)
+  const bot = useBot(sessionId)
   const [missing, setMissing] = useState(false)
-  const [exitCode, setExitCode] = useState<number | null>(null)
   const [active, setActive] = useState(props.api.isActive)
   // Spostato in una finestra staccata o fluttuante: si ricrea la vista nel nuovo documento.
   const [generation, setGeneration] = useState(0)
+  useEffect(() => {
+    const a = props.api.onDidActiveChange((e) => setActive(e.isActive))
+    const l = props.api.onDidLocationChange(() => setGeneration((g) => g + 1))
+    return () => {
+      a.dispose()
+      l.dispose()
+    }
+  }, [props.api])
+
+  useEffect(() => {
+    setMissing(false)
+  }, [sessionId])
+
+  // Il titolo della scheda segue quello della sessione.
+  useEffect(() => {
+    const title = session?.kind === 'claude' && bot ? bot.name : session?.title
+    if (session && title && props.api.title !== title) props.api.setTitle(title)
+  }, [session?.title, props.api, session, bot?.name])
+
+  // S7: guardare la sessione (scheda attiva nello spazio aperto, finestra in primo piano) toglie il segnale di attenzione.
+  const spaceActive = useWorkspace((s) => s.activeSpaceId === spaceOfPanel(props.containerApi))
+  const hasAttention = useSessions((s) => (sessionId ? Boolean(s.attention[sessionId]) : false))
+  useEffect(() => {
+    if (!sessionId || !hasAttention) return
+    const check = () => {
+      if (active && spaceActive && props.api.isVisible && document.hasFocus()) useSessions.getState().seen(sessionId)
+    }
+    check()
+    window.addEventListener('focus', check)
+    return () => window.removeEventListener('focus', check)
+  }, [sessionId, hasAttention, active, spaceActive, props.api])
+
+  if (!sessionId || missing) {
+    return (
+      <div className="h-full overflow-auto p-5">
+        <div className="mx-auto max-w-xl">
+          <p className="text-[14px] font-semibold text-foreground">{hint ? 'Sessione non più attiva' : 'Nuovo terminale'}</p>
+          <p className="mt-1 mb-4 text-text-subtle">
+            {hint
+              ? `«${hint.title}» non è più in esecuzione (per esempio dopo un riavvio dell'app). Riprendila o aprine un'altra.`
+              : 'Scegli cosa aprire in questo pannello.'}
+          </p>
+          <NewSessionForm
+            variant="inline"
+            hint={hint}
+            onDone={(s) => {
+              // In modalità Bolle le sessioni di Claude non stanno nelle schede: il pannello si chiude e si apre la bolla.
+              if (isBubbleMode() && s.kind === 'claude') {
+                props.api.close()
+                useBots.getState().open(s.id)
+                return
+              }
+              setMissing(false)
+              bindPanelToSession(props.api, s)
+            }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <SessionView
+      sessionId={sessionId}
+      viewKey={props.api.id}
+      viewId={`${props.api.id}#${generation}`}
+      active={active}
+      hint={hint}
+      onMissing={() => setMissing(true)}
+      onClose={() => props.api.close()}
+      onRestarted={(s) => bindPanelToSession(props.api, s)}
+    />
+  )
+}
+
+/**
+ * La vista di una sessione: terminale, vista grafica, casella di input, barra di stato e cassetto di revisione. La usano il
+ * pannello Dockview (`TerminalPanel`) e la bolla ampliata (`BotExpanded`): chi la ospita decide cosa fare se la sessione
+ * manca, si chiude o viene ripresa.
+ */
+export function SessionView({
+  sessionId,
+  viewKey,
+  viewId,
+  active,
+  hint,
+  onMissing,
+  onClose,
+  onRestarted
+}: {
+  sessionId: string
+  /** Chiave della vista per la casella di input (la sua bozza). */
+  viewKey: string
+  /** Id della vista del terminale (cambia quando il pannello cambia documento). */
+  viewId: string
+  active: boolean
+  hint?: PanelParams['hint']
+  onMissing(): void
+  onClose(): void
+  onRestarted(session: SessionInfo): void
+}) {
+  const session = useSessions((s) => s.sessions[sessionId])
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [exitCode, setExitCode] = useState<number | null>(null)
   // Vista grafica della conversazione: sovrapposta al terminale, che resta in esecuzione (e delle sue dimensioni) sotto.
   const [graphic, setGraphicState] = useState(false)
   // La scelta si ricorda: chi preferisce la vista grafica la ritrova nei terminali nuovi.
@@ -47,72 +157,22 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
     })
 
   useEffect(() => {
-    const a = props.api.onDidActiveChange((e) => setActive(e.isActive))
-    const l = props.api.onDidLocationChange(() => setGeneration((g) => g + 1))
-    return () => {
-      a.dispose()
-      l.dispose()
-    }
-  }, [props.api])
-
-  useEffect(() => {
-    setMissing(false)
     setExitCode(null)
   }, [sessionId])
-
-  // Il titolo della scheda segue quello della sessione.
-  useEffect(() => {
-    if (session && props.api.title !== session.title) props.api.setTitle(session.title)
-  }, [session?.title, props.api, session])
-
-  // S7: guardare la sessione (scheda attiva nel foglio aperto, finestra in primo piano) toglie il segnale di attenzione.
-  const sheetActive = useWorkspace((s) => s.activeSheetId === sheetOfPanel(props.containerApi))
-  const hasAttention = useSessions((s) => (sessionId ? Boolean(s.attention[sessionId]) : false))
-  useEffect(() => {
-    if (!sessionId || !hasAttention) return
-    const check = () => {
-      if (active && sheetActive && props.api.isVisible && document.hasFocus()) useSessions.getState().seen(sessionId)
-    }
-    check()
-    window.addEventListener('focus', check)
-    return () => window.removeEventListener('focus', check)
-  }, [sessionId, hasAttention, active, sheetActive, props.api])
-
-  if (!sessionId || missing) {
-    return (
-      <div className="h-full overflow-auto bg-surface p-5">
-        <div className="mx-auto max-w-xl">
-          <p className="text-[14px] font-semibold text-foreground">{hint ? 'Sessione non più attiva' : 'Nuovo terminale'}</p>
-          <p className="mt-1 mb-4 text-text-subtle">
-            {hint
-              ? `«${hint.title}» non è più in esecuzione (per esempio dopo un riavvio dell'app). Riprendila o aprine un'altra.`
-              : 'Scegli cosa aprire in questo pannello.'}
-          </p>
-          <NewSessionForm
-            variant="inline"
-            hint={hint}
-            onDone={(s) => {
-              setMissing(false)
-              bindPanelToSession(props.api, s)
-            }}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  const viewId = `${props.api.id}#${generation}`
   const exited = session?.status === 'exited' || exitCode !== null
 
   return (
-    <div ref={wrapperRef} className="flex h-full flex-col bg-background">
-      <div className="relative flex min-h-0 flex-1 flex-col">
+    // Riga: a sinistra terminale, casella di input e barra di stato; a destra il cassetto di revisione della sessione.
+    <div ref={wrapperRef} className="relative flex h-full">
+    <div className="flex min-w-0 flex-1 flex-col">
+      {/* Con la vista grafica attiva il terminale resta in esecuzione (e delle sue dimensioni) ma non si vede: sotto il vetro il suo testo traspariva. */}
+      <div className="relative flex min-h-0 flex-1 flex-col" data-graphic={graphic && session?.kind === 'claude' ? 'on' : 'off'}>
         <TerminalView
           key={viewId}
           sessionId={sessionId}
           viewId={viewId}
           active={active}
-          onMissing={() => setMissing(true)}
+          onMissing={onMissing}
           onExit={(code) => setExitCode(code)}
         />
         {graphic && session?.kind === 'claude' && <ConversationView session={session} onShowTerminal={() => setGraphic(false)} />}
@@ -120,7 +180,8 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
       {session?.kind === 'claude' && !exited && (
         <PromptBox
           session={session}
-          viewKey={props.api.id}
+          viewKey={viewKey}
+          graphic={graphic}
           focusTerminal={() => wrapperRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()}
         />
       )}
@@ -144,12 +205,14 @@ export function TerminalPanel(props: IDockviewPanelProps<PanelParams>) {
                     }
                   })
                 : await api.sessions.create({ kind: 'shell', shell: h.shell ?? 'powershell', cwd: h.cwd })
-            bindPanelToSession(props.api, s)
+            onRestarted(s)
           }}
-          onClose={() => props.api.close()}
+          onClose={onClose}
         />
       )}
       {session && <StatusBar session={session} graphic={graphic} onToggleGraphic={() => setGraphic((g) => !g)} />}
+    </div>
+    {session?.kind === 'claude' && <ReviewDock sessionId={session.id} />}
     </div>
   )
 }
@@ -246,7 +309,7 @@ function FontSizeControl() {
 
 function ExitedBar({ code, onRestart, onClose }: { code: number | null | undefined; onRestart(): void; onClose(): void }) {
   return (
-    <div className="flex items-center gap-3 border-t border-border bg-surface-2 px-3 py-2 text-[12px]">
+    <div className="mg-bar flex items-center gap-3 border-t border-border px-3 py-2 text-[12px]">
       <span className="text-text-subtle">Sessione terminata{code !== null && code !== undefined ? ` · codice ${code}` : ''}</span>
       <button
         type="button"
@@ -271,9 +334,14 @@ function StatusBar({ session, graphic, onToggleGraphic }: { session: SessionInfo
   const modelLabel = session.modelLabel ?? CLAUDE_MODELS.find((m) => m.id === session.model)?.label ?? 'Predefinito'
   const effortLabel = session.effortLevel ?? CLAUDE_EFFORTS.find((m) => m.id === session.effort)?.label ?? 'Predefinito'
   const live = session.status !== 'exited'
+  const reviewPending = useChanges((s) => s.changes.filter((c) => c.sessionId === session.id && c.status === 'pending').length)
+  const reviewOpen = useReviewUi((s) => Boolean(s.sessions[session.id]?.open))
+  const plugins = useEditor((s) => s.plugins)
+  const pluginCtx = { sessionId: session.id, sessionKind: session.kind, sessionStatus: session.status, cwd: session.cwd }
+  const pluginItems = useMemo(() => menuItems(plugins, 'terminal/toolbar', pluginCtx), [plugins, session.id, session.kind, session.status, session.cwd]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border bg-surface px-2 font-mono text-[11px] text-text-subtle">
+    <div className="mg-bar flex h-7 shrink-0 items-center gap-3 border-t border-border px-2 font-mono text-[11px] text-text-subtle">
       {isClaude ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={!live}>
@@ -362,6 +430,31 @@ function StatusBar({ session, graphic, onToggleGraphic }: { session: SessionInfo
           <Square size={10} fill="currentColor" /> Ferma
         </button>
       )}
+      {/* Revisione delle modifiche di Claude: il cassetto accanto al terminale (si apre da solo alla prima modifica). */}
+      {isClaude && (
+        <button
+          type="button"
+          onClick={() => useReviewUi.getState().toggleReview(session.id)}
+          aria-pressed={reviewOpen}
+          title={reviewOpen ? 'Chiudi la revisione delle modifiche' : 'Apri la revisione delle modifiche di questa sessione'}
+          className={cn('inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 font-sans text-[11px] transition-colors hover:bg-border hover:text-foreground', reviewOpen ? 'bg-border text-foreground' : 'text-text-muted')}
+        >
+          Revisione
+          {reviewPending > 0 && <span className="rounded-full px-1.5 font-mono font-semibold text-on-brand" style={{ background: 'var(--cct-warn)' }}>{reviewPending}</span>}
+        </button>
+      )}
+      {/* Pulsanti dei plugin (`contributes.menus['terminal/toolbar']`): l'app li disegna, il plugin decide solo se e cosa fanno. */}
+      {pluginItems.map((it) => (
+        <button
+          key={it.key}
+          type="button"
+          onClick={() => runMenuItem(it, pluginCtx)}
+          title={`${it.pluginName}: ${it.command.title}`}
+          className="inline-flex h-5 shrink-0 items-center rounded px-1.5 font-sans text-[11px] text-text-muted transition-colors hover:bg-border hover:text-foreground"
+        >
+          {it.command.title}
+        </button>
+      ))}
       <FontSizeControl />
 
       <DropdownMenu>

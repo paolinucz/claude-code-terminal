@@ -20,7 +20,9 @@ import {
   type LogNotification,
   type StatusNotification
 } from '@shared/pluginApi'
+import { HOST_EVENT_BROWSER, isOpenableUrl, BROWSER_ID_RE, type BrowserEvent } from '@shared/browser'
 import { HOST_EVENT_HIVE, HOST_EVENT_NOTIFY, HOST_EVENT_TERMINAL, type GutterMarker, type GutterMarkersUpdate } from '@shared/plugins'
+import { HOST_EVENT_STATUS_ITEM, type PluginAppEvent, type StatusItemPatch } from '@shared/pluginExt'
 import type { AdapterSpec, PluginManager } from './PluginManager'
 
 /** Un adapter in esecuzione: un processo per plugin. */
@@ -68,6 +70,14 @@ export interface HostServices {
   emit(pluginId: string, event: string, data: unknown): void
   /** Segni nel margine dell'editor mandati dall'adapter. */
   markers(update: GutterMarkersUpdate): void
+  /** Browser integrato (permesso `browser`). */
+  browser: {
+    open(pluginId: string, id: string, url: string): Promise<void>
+    navigate(pluginId: string, id: string, url: string): Promise<void>
+    cdp(pluginId: string, id: string, method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown>
+    close(pluginId: string, id: string): void
+    closeAllFor(pluginId: string): void
+  }
 }
 
 /**
@@ -194,6 +204,31 @@ export class PluginHost {
       if (!q?.plugin || !q.method || !me?.manifest.requires?.includes(q.plugin)) throw new Error(`Il plugin non può chiamare «${String(q?.plugin)}»: manca in «requires»`)
       return this.call(q.plugin, q.method, q.params ?? {})
     })
+    // Browser integrato: serve il permesso `browser`; gli id sono nello spazio del plugin (`<id-plugin>/<id>`).
+    const browserId = (p: unknown): string => {
+      const raw = (p as { id?: unknown } | null)?.id
+      if (typeof raw !== 'string' || !BROWSER_ID_RE.test(raw)) throw new Error(`Id del browser non valido: ${String(raw)}`)
+      if (!this.plugins.list().find((x) => x.manifest.id === id)?.manifest.permissions?.includes('browser')) throw new Error('Manca il permesso «browser» nel manifest')
+      return `${id}/${raw}`
+    }
+    host.conn.onRequest('host/browser.open', async (p: { id?: unknown; url?: unknown; title?: unknown }) => {
+      const full = browserId(p)
+      if (!isOpenableUrl(p.url)) throw new Error('Il browser apre solo indirizzi http e https')
+      await svc().browser.open(id, full, p.url)
+      this.services?.emit(id, HOST_EVENT_BROWSER, { id: full, title: typeof p.title === 'string' && p.title ? p.title.slice(0, 60) : 'Browser' })
+      return null
+    })
+    host.conn.onRequest('host/browser.navigate', async (p: { url?: unknown }) => (await svc().browser.navigate(id, browserId(p), String(p.url)), null))
+    host.conn.onRequest('host/browser.cdp', (p: { method?: unknown; params?: unknown; sessionId?: unknown }) =>
+      svc().browser.cdp(id, browserId(p), String(p.method), p.params && typeof p.params === 'object' ? (p.params as Record<string, unknown>) : {}, typeof p.sessionId === 'string' ? p.sessionId : undefined)
+    )
+    host.conn.onNotification('browser/close', (p: unknown) => {
+      try {
+        svc().browser.close(id, browserId(p))
+      } catch {
+        /* id non valido o permesso mancante */
+      }
+    })
     host.conn.onNotification('editor/markers', (p: { path?: string | null; markers?: unknown }) => {
       const markers = Array.isArray(p?.markers) ? (p.markers as GutterMarker[]).filter((m) => m && Number.isInteger(m.line) && m.line > 0 && ['breakpoint', 'breakpoint-disabled', 'stopped'].includes(m.kind)) : []
       this.services?.markers({ pluginId: id, path: typeof p?.path === 'string' ? p.path : null, markers })
@@ -215,6 +250,29 @@ export class PluginHost {
     host.conn.onNotification('ui/event', (p: { event?: string; data?: unknown }) => {
       if (p && typeof p.event === 'string') this.services?.emit(id, p.event, p.data ?? null)
     })
+    // Elemento della barra di stato (Plugin API v2): solo quelli dichiarati nel manifest; i testi sono limitati.
+    host.conn.onNotification('ui/statusItem', (p: { id?: unknown } & StatusItemPatch) => {
+      const declared = this.plugins.list().find((x) => x.manifest.id === id)?.manifest.contributes?.statusBar ?? []
+      if (typeof p?.id !== 'string' || !declared.some((s) => s.id === p.id)) return
+      const patch: StatusItemPatch = {}
+      if (typeof p.text === 'string') patch.text = p.text.slice(0, 60)
+      if (typeof p.tooltip === 'string') patch.tooltip = p.tooltip.slice(0, 300)
+      if (typeof p.visible === 'boolean') patch.visible = p.visible
+      if (['neutral', 'ok', 'warn', 'error', 'busy'].includes(String(p.tone))) patch.tone = p.tone
+      this.services?.emit(id, HOST_EVENT_STATUS_ITEM, { id: p.id, ...patch })
+    })
+  }
+
+  /**
+   * Evento dell'app per gli adapter (Plugin API v2): lo riceve (notifica `app/event`) solo l'adapter già in esecuzione di un
+   * plugin che lo ha chiesto in `contributes.events`. Non avvia adapter: un evento perso non vale un processo in più.
+   */
+  broadcast(event: PluginAppEvent, data: unknown): void {
+    for (const [pluginId, host] of this.hosts) {
+      if (!host.alive || host.stopping) continue
+      const wants = this.plugins.list().find((x) => x.manifest.id === pluginId)?.manifest.contributes?.events
+      if (wants?.includes(event)) void host.conn.sendNotification('app/event', { event, data })
+    }
   }
 
   private setStatus(host: Host, p: StatusNotification): void {
@@ -236,6 +294,8 @@ export class PluginHost {
     if (host.ended) return
     host.ended = true
     if (this.hosts.get(host.spec.pluginId) === host) this.hosts.delete(host.spec.pluginId)
+    // Senza adapter nessuno pilota più le viste del browser integrato: si chiudono.
+    this.services?.browser.closeAllFor(host.spec.pluginId)
     const wasAlive = host.alive
     host.alive = false
     // Durante lo shutdown la connessione serve ancora: si chiude dopo (vedi shutdown).
@@ -420,6 +480,12 @@ export class PluginHost {
 
   statuses(): LspStatus[] {
     return [...this.hosts.values()].flatMap((h) => [...h.statuses.values()])
+  }
+
+  /** Evento del browser integrato per l'adapter proprietario (messaggio CDP, stato, chiusura). */
+  sendBrowserEvent(pluginId: string, e: BrowserEvent): void {
+    const host = this.hosts.get(pluginId)
+    if (host?.alive && !host.ended) void host.conn.sendNotification('browser/event', e)
   }
 
   /** Ferma l'adapter di un plugin (disattivazione, aggiornamento, disinstallazione). */

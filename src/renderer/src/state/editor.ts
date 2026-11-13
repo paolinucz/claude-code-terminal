@@ -103,13 +103,13 @@ export function takePendingReveal(path: string): RevealPosition | undefined {
 }
 
 /**
- * Apre un file nell'editor del foglio attivo (F2). Se è già aperto lo attiva; altrimenti apre un
+ * Apre un file nell'editor dello spazio attivo (F2). Se è già aperto lo attiva; altrimenti apre un
  * pannello nuovo accanto agli altri editor (o al posto di un pannello Editor vuoto); il primo file
- * del foglio apre un gruppo Editor a destra dell'Esplora file.
+ * dello spazio apre un gruppo Editor a destra dell'Esplora file.
  */
 export function openFile(path: string, position?: RevealPosition, workspace?: string): void {
-  const sheetId = useWorkspace.getState().activeSheetId
-  const dock = dockRegistry.get(sheetId)
+  const spaceId = useWorkspace.getState().activeSpaceId
+  const dock = dockRegistry.get(spaceId)
   if (!dock) return
   useRecent.getState().push(path)
   const key = normPath(path)
@@ -140,7 +140,7 @@ export function openFile(path: string, position?: RevealPosition, workspace?: st
     addPanel(dock, 'editor', { title: name, params: { filePath: path, cwd: ws }, position: { referencePanel: anotherEditor.id, direction: 'within' } })
     return
   }
-  // Primo file del foglio: l'editor ha un gruppo tutto suo, a destra del pannello attivo (l'Esplora file
+  // Primo file dello spazio: l'editor ha un gruppo tutto suo, a destra del pannello attivo (l'Esplora file
   // sta nella barra laterale fissa). Senza posizione Dockview lo metterebbe come scheda nel gruppo attivo.
   const reference = dock.activePanel
   // Dockview ridistribuisce la larghezza fra tutte le colonne: si ricordano quelle di prima, così le
@@ -157,16 +157,16 @@ export function openFile(path: string, position?: RevealPosition, workspace?: st
   for (const b of before) if (b.width > 0 && b.width < widest.width) b.group.api.setSize({ width: b.width })
 }
 
-/** X8/X9: apre (o attiva) il pannello dei plugin nel foglio attivo. */
+/** X8/X9: apre (o attiva) il pannello dei plugin nello spazio attivo. */
 export function openPluginsPanel(): void {
-  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  const dock = dockRegistry.get(useWorkspace.getState().activeSpaceId)
   if (!dock) return
   const existing = dock.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'plugins')
   if (existing) existing.api.setActive()
   else addPanel(dock, 'plugins')
 }
 
-/** Cartella di progetto di un foglio: quella dell'Esplora file (barra laterale) o del terminale attivo. */
+/** Cartella di progetto di uno spazio: quella dell'Esplora file (barra laterale) o del terminale attivo. */
 export function guessWorkspace(dock: DockviewApi): string | undefined {
   const sessions = useSessions.getState().sessions
   const terminals = dock.panels.filter((p) => (p.params as PanelParams | undefined)?.kind === 'terminal')

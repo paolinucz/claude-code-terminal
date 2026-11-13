@@ -7,6 +7,7 @@ import type { SessionInfo } from '@shared/sessions'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { useChanges } from '@/state/changes'
+import { useReviewUi } from '@/state/review'
 import { useDocs } from '@/state/docs'
 import type { PanelParams } from '@/panels/kinds'
 import { useWorkspace } from '@/state/workspace'
@@ -37,7 +38,7 @@ function referenceFor(cwd: string, abs: string): string {
  * Casella di input dell'app sotto il terminale di una sessione Claude (B1–B7). Il messaggio arriva al processo
  * come incolla seguita da Invio, quindi più righe restano un solo messaggio. Il terminale resta interattivo.
  */
-export function PromptBox(props: { session: SessionInfo; viewKey: string; focusTerminal(): void }) {
+export function PromptBox(props: { session: SessionInfo; viewKey: string; focusTerminal(): void; graphic?: boolean }) {
   const { session, viewKey } = props
   const draft = usePrompt((s) => s.drafts[viewKey] ?? '')
   const enterSends = usePrompt((s) => s.enterSends)
@@ -58,6 +59,8 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
   const allChanges = useChanges((s) => s.changes)
   // Revisione obbligatoria: con modifiche di Claude ancora da rivedere non si scrive.
   const locked = useMemo(() => isReviewLocked(session, allChanges), [session, allChanges])
+  const reviewOpen = useReviewUi((s) => Boolean(s.sessions[session.id]?.open))
+  const reviewPending = useMemo(() => allChanges.filter((c) => c.sessionId === session.id && c.status === 'pending').length, [allChanges, session.id])
   const waiting = session.status === 'waiting' || locked
   const working = session.status === 'working'
 
@@ -206,11 +209,11 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
     }
   }
 
-  // Documenti del progetto da inserire come riferimento (B6): CLAUDE.md, globali e contesto del foglio.
+  // Documenti del progetto da inserire come riferimento (B6): CLAUDE.md, globali e contesto dello spazio.
   const docRefs = useMemo(() => {
     if (!project) return []
-    const sheetCtx = useProject.getState().activeContextId
-    const ctx = project.data.contexts.find((c) => c.id === sheetCtx)
+    const spaceCtx = useProject.getState().activeContextId
+    const ctx = project.data.contexts.find((c) => c.id === spaceCtx)
     return [
       ...(claudeMd === 'present' ? [CLAUDE_MD] : []),
       ...project.data.docs.global,
@@ -221,12 +224,12 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
   const sendLabel = enterSends ? 'Invio per mandare · Maiusc+Invio per andare a capo' : 'Ctrl+Invio per mandare · Invio va a capo'
 
   return (
-    <div className="relative shrink-0 border-t border-border bg-surface px-2 py-2">
+    <div className="mg-bar relative shrink-0 border-t border-border px-2 py-2">
       {open && (
         <ul
           role="listbox"
           aria-label="Suggerimenti"
-          className="absolute right-2 bottom-full left-2 z-10 mb-1 max-h-60 overflow-auto rounded-lg border border-border bg-surface-2 py-1 text-[12px] shadow-lg"
+          className="absolute right-2 bottom-full left-2 z-10 mb-1 max-h-60 overflow-auto rounded-lg mg-glass-3 py-1 text-[12px] shadow-lg"
         >
           {suggestions.items.map((s, i) => (
             <li
@@ -248,11 +251,20 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
       )}
 
       {locked && (
-        <p className="mb-1.5 text-[12px] text-warn" role="status">
+        <p className="mb-1.5 flex flex-wrap items-center gap-2 text-[12px] text-warn" role="status">
           {REVIEW_LOCK_MESSAGE}
+          {!reviewOpen && (
+            <button
+              type="button"
+              onClick={() => useReviewUi.getState().openReview(session.id)}
+              className="inline-flex items-center gap-1 rounded border border-warn/50 px-2 py-0.5 text-foreground hover:bg-warn/10"
+            >
+              Apri la revisione ({reviewPending})
+            </button>
+          )}
         </p>
       )}
-      {session.status === 'waiting' && (
+      {session.status === 'waiting' && !props.graphic && (
         <p className="mb-1.5 flex items-center gap-2 text-[12px] text-warn" role="status">
           Claude aspetta una tua risposta nel terminale (permesso o domanda): rispondi lì.
           <button type="button" onClick={props.focusTerminal} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-text-muted hover:bg-border hover:text-foreground">
@@ -347,9 +359,9 @@ export function PromptBox(props: { session: SessionInfo; viewKey: string; focusT
   )
 }
 
-/** File aperto nell'editor del foglio attivo (per «Riferimento a…»). */
+/** File aperto nell'editor dello spazio attivo (per «Riferimento a…»). */
 function activeEditorFile(): string | undefined {
-  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  const dock = dockRegistry.get(useWorkspace.getState().activeSpaceId)
   const editors = (dock?.panels ?? []).filter((p) => {
     const params = p.params as PanelParams | undefined
     return params?.kind === 'editor' && Boolean(params.filePath)

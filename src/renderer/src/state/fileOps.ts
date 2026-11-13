@@ -43,7 +43,7 @@ export function relativeTo(root: string, path: string): string {
 
 export const notify = (message: string, kind: 'info' | 'ok' | 'warn' | 'error' = 'info') => pluginNotify('Magnolia', message, kind)
 
-/** Pannelli editor aperti in tutti i fogli. */
+/** Pannelli editor aperti in tutti gli spazi. */
 function editorPanels(): { api: DockviewPanelApi; params: PanelParams; filePath: string; dirty: boolean }[] {
   const out: { api: DockviewPanelApi; params: PanelParams; filePath: string; dirty: boolean }[] = []
   for (const dock of dockRegistry.all()) {

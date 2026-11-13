@@ -71,7 +71,7 @@ export function RevisionComposer({
 
   return (
     <div
-      className="flex max-h-[55%] shrink-0 flex-col border-t border-info/40 bg-surface"
+      className="mg-glass-content flex max-h-[55%] shrink-0 flex-col border-t border-info/40"
       onKeyDown={(e) => {
         if (e.key === 'Enter' && e.ctrlKey) {
           e.preventDefault()

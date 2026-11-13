@@ -1,11 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, shell, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, powerMonitor, protocol, shell, type WebContents } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { extname, join, normalize, sep } from 'node:path'
 import { PLUGIN_UI_HOST } from '@shared/plugins'
 import { pathToFileURL } from 'node:url'
-import type { SerializedLayout, Sheet } from '@shared/types'
+import type { SerializedLayout, Space } from '@shared/types'
 import type { ClaudeEffort, ClaudeModel, CreateSessionRequest, ProjectPrefs } from '@shared/sessions'
 import { isOpen, isReviewLocked, REVIEW_LOCK_MESSAGE, REVIEW_RUNNING_MESSAGE, type ReviewNote, type RevisionResult } from '@shared/changes'
 import { AppDb } from './db'
@@ -17,6 +17,7 @@ import { ChangeTracker, fileReviewMessage } from './changes/ChangeTracker'
 import { PermissionsService } from './permissions/PermissionsService'
 import { FileService } from './files/FileService'
 import { PluginHost } from './plugins/PluginHost'
+import { BrowserService } from './browser/BrowserService'
 import { PluginManager } from './plugins/PluginManager'
 import type { ApiFileEdit, ApiPosition } from '@shared/pluginApi'
 import { applyTextEdits } from '@shared/textEdits'
@@ -56,14 +57,20 @@ let changes: ChangeTracker | null = null
 let permissions: PermissionsService | null = null
 
 // ---- Fase 6: file, editor, language server ----
+// Gli eventi vanno alla finestra principale e alle finestre degli spazi (stesse sessioni, stessi dati): non ai pannelli staccati.
 const sendToMain = (channel: string, ...args: unknown[]) => {
-  const win = mainWindow()
-  if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+  for (const win of appWindows()) if (!win.isDestroyed()) win.webContents.send(channel, ...args)
 }
 const files = new FileService((root, paths) => sendToMain('files:changed', root, paths))
 /** Fase 6a: plugin di linguaggio e i loro language server (creati quando il database è pronto). */
 let plugins: PluginManager | null = null
 let lsp: PluginHost | null = null
+/** Browser integrato per i plugin (permesso `browser`): viste web nei pannelli, pilotate dall'adapter via CDP. */
+const browser = new BrowserService(
+  () => mainWindow(),
+  (state) => sendToMain('browser:state', state),
+  (pluginId, e) => lsp?.sendBrowserEvent(pluginId, e)
+)
 
 /** Ferma un plugin e quelli che lo richiedono (es. Java → Maven, Gradle: usano il suo runtime). */
 async function stopWithDependents(id: string): Promise<void> {
@@ -81,7 +88,7 @@ const sessions = new SessionManager(
   () => (db?.getSetting('claude.allowArtifacts') === true ? [] : ['Artifact', 'ArtifactComments', 'ArtifactData'])
 )
 
-/** S7: notifica quando una sessione finisce o chiede un permesso, anche se il suo foglio non è aperto. */
+/** S7: notifica quando una sessione finisce o chiede un permesso, anche se il suo spazio non è aperto. */
 sessions.onAttention((a) => {
   const win = mainWindow()
   if (!win || win.isDestroyed()) return
@@ -100,9 +107,16 @@ sessions.onAttention((a) => {
   }
 })
 
-function mainWindow(): BrowserWindow | undefined {
-  return BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().includes('popout.html'))
+/** Finestra che mostra un solo spazio (`?space=<id>`): vedi `window:openSpace`. */
+const isSpaceWindowUrl = (url: string) => /[?&]space=/.test(url)
+function appWindows(): BrowserWindow[] {
+  return BrowserWindow.getAllWindows().filter((w) => !w.webContents.getURL().includes('popout.html'))
 }
+function mainWindow(): BrowserWindow | undefined {
+  return appWindows().find((w) => !isSpaceWindowUrl(w.webContents.getURL()))
+}
+/** Spazi aperti in una finestra propria: un solo proprietario per spazio, così due Dockview non scrivono lo stesso layout. */
+const spaceWindows = new Map<string, BrowserWindow>()
 /** Finestre che ricevono gli aggiornamenti sull'elenco delle sessioni. */
 const sessionWatchers = new Set<WebContents>()
 
@@ -186,19 +200,19 @@ const WINDOW_ICON = (() => {
 })()
 
 const darkWindow = {
-  backgroundColor: '#09090B',
+  backgroundColor: '#000000',
   ...(WINDOW_ICON ? { icon: WINDOW_ICON } : {}),
   autoHideMenuBar: true,
   titleBarStyle: 'hidden' as const,
   // Come la barra in alto è una scheda staccata dal bordo, i controlli della finestra stanno sullo sfondo scuro, centrati sulla scheda.
-  titleBarOverlay: { color: '#09090B', symbolColor: '#D4D4D8', height: 64 }
+  titleBarOverlay: { color: '#0A0A0C', symbolColor: '#D4D4D8', height: 48 }
 }
 
-function createMainWindow(): BrowserWindow {
+function createMainWindow(spaceId?: string): BrowserWindow {
   const win = new BrowserWindow({
     ...darkWindow,
-    width: 1600,
-    height: 1000,
+    width: spaceId ? 1280 : 1600,
+    height: spaceId ? 820 : 1000,
     minWidth: 960,
     minHeight: 600,
     show: false,
@@ -212,7 +226,7 @@ function createMainWindow(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => {
-    win.maximize()
+    if (!spaceId) win.maximize()
     win.show()
   })
 
@@ -242,12 +256,21 @@ function createMainWindow(): BrowserWindow {
   // F12 apre gli strumenti di sviluppo, anche senza menu.
   win.webContents.on('before-input-event', (_event, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools()
+    // F11: schermo intero, anche con il focus dentro un terminale (la shell non usa questo tasto).
+    if (input.type === 'keyDown' && input.key === 'F11' && !input.control && !input.alt && !input.shift) {
+      _event.preventDefault()
+      win.setFullScreen(!win.isFullScreen())
+    }
   })
+  // L'interfaccia lo sa: in schermo intero i controlli nativi della finestra spariscono e la barra non deve lasciare loro spazio.
+  win.on('enter-full-screen', () => win.webContents.send('window:fullscreen', true))
+  win.on('leave-full-screen', () => win.webContents.send('window:fullscreen', false))
 
+  const query = spaceId ? `?space=${encodeURIComponent(spaceId)}` : ''
   if (isDev && process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    void win.loadURL(process.env['ELECTRON_RENDERER_URL'] + query)
   } else {
-    void win.loadURL(`${APP_ORIGIN}/index.html`)
+    void win.loadURL(`${APP_ORIGIN}/index.html${query}`)
   }
   return win
 }
@@ -277,12 +300,12 @@ function isPopoutUrl(url: string): boolean {
 function registerIpc(store: AppDb): void {
   ipcMain.handle('workspace:load', () => store.loadWorkspace())
   ipcMain.handle(
-    'workspace:saveSheets',
-    (_e, sheets: Pick<Sheet, 'id' | 'name' | 'contextId'>[], activeSheetId: string | null) =>
-      store.saveSheets(sheets, activeSheetId)
+    'workspace:saveSpaces',
+    (_e, spaces: Pick<Space, 'id' | 'name' | 'contextId' | 'icon' | 'color'>[], activeSpaceId: string | null) =>
+      store.saveSpaces(spaces, activeSpaceId)
   )
-  ipcMain.handle('workspace:saveSheetLayout', (_e, sheetId: string, layout: SerializedLayout | null) =>
-    store.saveSheetLayout(sheetId, layout)
+  ipcMain.handle('workspace:saveSpaceLayout', (_e, spaceId: string, layout: SerializedLayout | null) =>
+    store.saveSpaceLayout(spaceId, layout)
   )
   ipcMain.handle('layouts:list', () => store.listLayouts())
   ipcMain.handle('layouts:save', (_e, name: string, layout: SerializedLayout) => store.saveLayout(name, layout))
@@ -367,6 +390,39 @@ function registerIpc(store: AppDb): void {
       ? files.search(root, query, opts)
       : { ok: false, error: 'Richiesta non valida', root: '', files: [], total: 0, truncated: false, searched: 0 }
   )
+  ipcMain.handle('power:onBattery', () => powerMonitor.isOnBatteryPower())
+  // Apri uno spazio in una finestra propria. Le sessioni sono del processo principale: cambia solo la vista, nessun processo si ferma.
+  const SPACE_ID_RE = /^[\w:.-]{1,80}$/
+  const notifySpaceWindows = () => sendToMain('window:spaces', [...spaceWindows.keys()])
+  ipcMain.handle('window:openSpace', (_e, spaceId: string) => {
+    if (typeof spaceId !== 'string' || !SPACE_ID_RE.test(spaceId)) return false
+    const open = spaceWindows.get(spaceId)
+    if (open && !open.isDestroyed()) {
+      if (open.isMinimized()) open.restore()
+      open.focus()
+      return true
+    }
+    const win = createMainWindow(spaceId)
+    spaceWindows.set(spaceId, win)
+    win.on('closed', () => {
+      spaceWindows.delete(spaceId)
+      notifySpaceWindows()
+    })
+    notifySpaceWindows()
+    return true
+  })
+  ipcMain.handle('window:toggleFullScreen', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win) return false
+    win.setFullScreen(!win.isFullScreen())
+    return win.isFullScreen()
+  })
+  ipcMain.handle('window:isFullScreen', (e) => BrowserWindow.fromWebContents(e.sender)?.isFullScreen() ?? false)
+  ipcMain.handle('window:closeSpace', (_e, spaceId: string) => {
+    spaceWindows.get(spaceId)?.close()
+    return true
+  })
+  ipcMain.handle('window:externalSpaces', () => [...spaceWindows.keys()])
   ipcMain.handle('updates:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }))
   ipcMain.handle('updates:status', () => updater.current)
   ipcMain.handle('updates:check', () => updater.check())
@@ -406,6 +462,19 @@ function registerIpc(store: AppDb): void {
     return lsp?.call(pluginId, method, params && typeof params === 'object' ? params : {})
   })
   ipcMain.handle('lsp:statuses', () => lsp?.statuses() ?? [])
+
+  // ---- Browser integrato: barra e posizione del pannello (solo viste che esistono) ----
+  const bid = (v: unknown): string => (typeof v === 'string' && v.length <= 120 ? v : '')
+  ipcMain.handle('browser:state', (_e, id: string) => browser.state(bid(id)))
+  ipcMain.on('browser:bounds', (_e, id: string, b: { x: number; y: number; width: number; height: number }) => {
+    if (b && [b.x, b.y, b.width, b.height].every((n) => Number.isFinite(n))) browser.setBounds(bid(id), b)
+  })
+  ipcMain.on('browser:visible', (_e, id: string, visible: boolean) => browser.setVisible(bid(id), Boolean(visible)))
+  ipcMain.on('browser:go', (_e, id: string, text: string) => browser.go(bid(id), String(text ?? '')))
+  ipcMain.on('browser:back', (_e, id: string) => browser.back(bid(id)))
+  ipcMain.on('browser:forward', (_e, id: string) => browser.forward(bid(id)))
+  ipcMain.on('browser:close', (_e, id: string) => browser.closeByUser(bid(id)))
+  ipcMain.on('browser:reload', (_e, id: string) => browser.reload(bid(id)))
 
   // ---- Plugin di linguaggio (X1–X9) ----
   // L'elenco aspetta la verifica dei plugin: così all'avvio gli stati sono quelli veri e la schermata iniziale la copre.
@@ -654,6 +723,9 @@ app.whenReady().then(async () => {
   // Su Windows le notifiche richiedono un AppUserModelID (lo stesso dell'installer).
   app.setAppUserModelId('it.coletta.claude-code-terminal')
   Menu.setApplicationMenu(null)
+  // A batteria lo sfondo animato si ferma (vedi AppBackground): l'interfaccia viene avvisata dei cambi.
+  powerMonitor.on('on-battery', () => sendToMain('power:changed', true))
+  powerMonitor.on('on-ac', () => sendToMain('power:changed', false))
   serveRenderer()
   sessions.cleanStaleSettings()
   try {
@@ -685,7 +757,22 @@ app.whenReady().then(async () => {
     killSession: (id) => sessions.kill(id),
     sessionStatus: (id) => sessions.list().find((x) => x.id === id)?.status,
     emit: (pluginId, event, data) => sendToMain('plugin:event', { pluginId, event, data }),
-    markers: (update) => sendToMain('plugin:markers', update)
+    markers: (update) => sendToMain('plugin:markers', update),
+    browser
+  })
+  // Eventi dell'app per gli adapter che li chiedono (contributes.events): solo metadati delle sessioni, mai il loro output.
+  const seenSessions = new Map<string, string>()
+  sessions.onChange((list) => {
+    const brief = (s: (typeof list)[number]) => ({ id: s.id, kind: s.kind, title: s.title, cwd: s.cwd, status: s.status, exitCode: s.exitCode })
+    for (const s of list) {
+      const before = seenSessions.get(s.id)
+      if (before === s.status) continue
+      seenSessions.set(s.id, s.status)
+      if (before === undefined) lsp?.broadcast('session.created', brief(s))
+      else if (s.status === 'exited') lsp?.broadcast('session.exited', brief(s))
+      else lsp?.broadcast('session.status', brief(s))
+    }
+    for (const id of seenSessions.keys()) if (!list.some((s) => s.id === id)) seenSessions.delete(id)
   })
   permissions = new PermissionsService(
     db,
@@ -707,6 +794,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   sessions.killAll()
   hookServer.stop()
+  browser.dispose()
   lsp?.stopAll()
   files.dispose()
   transcripts.dispose()

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SerializedDockview } from 'dockview-react'
-import { ArrowDownToLine, ChevronDown, Keyboard, LayoutGrid, Plus, Puzzle, ShieldCheck } from 'lucide-react'
+import { ArrowDownToLine, ChevronDown, Keyboard, LayoutGrid, Maximize, Minimize, Plus, Puzzle, ShieldCheck } from 'lucide-react'
 import { openPluginsPanel, useEditor } from '@/state/editor'
 import { runPluginCommand } from '@/plugins/pluginBridge'
 import type { PanelParams } from '@/panels/kinds'
+import { useAppearance } from '@/state/appearance'
+import { switchClaudeMode } from './claudeMode'
 import { useSessions } from '@/state/sessions'
 import { useTerminalSettings } from '@/state/terminalSettings'
 import { describeUpdate, useUpdates } from '@/state/updates'
@@ -11,7 +13,7 @@ import type { NamedLayout } from '@shared/types'
 import { api } from '@/lib/api'
 import { PANEL_KIND_LIST } from '@/panels/kinds'
 import { SnippetExplain } from '@/changes/SnippetExplain'
-import { sheetsOf, useWorkspace } from '@/state/workspace'
+import { spacesOf, useWorkspace } from '@/state/workspace'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,25 +34,31 @@ import { SaveLayoutDialog } from './SaveLayoutDialog'
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { ProjectMenu } from './ProjectMenu'
 import { ContextSwitcher } from './ContextSwitcher'
+import { SpaceChips } from './SpaceChips'
+import { useFullScreen, windowControlsWidth } from '@/state/fullscreen'
+import { AboutDialog } from './AboutDialog'
+import { useAbout } from '@/state/about'
+import { activeClaudeSessionId } from '@/changes/reveal'
+import { useReviewUi } from '@/state/review'
+import { useOverview } from '@/state/overview'
 import { useProject } from '@/state/project'
 import { useDocs } from '@/state/docs'
 import { useExplainSettings } from '@/state/explain'
 import { usePresets } from '@/state/presets'
 import { previewOf } from '@shared/prompts'
 import { PresetsDialog } from './PresetsDialog'
-import { AccentDialog } from './AccentDialog'
+import { AppearanceDialog } from './AppearanceDialog'
 import { useAccent } from '@/state/accent'
 import { sendPreset } from './presets'
 import { openDocsPanel } from '@/docs/DocsPanel'
 
 /** In Electron i pulsanti della finestra (riduci, ingrandisci, chiudi) stanno sopra la barra, a destra. */
-const WINDOW_CONTROLS_WIDTH = window.api ? 140 : 0
 
 const buttonClass =
   'app-no-drag inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-lg border border-border px-3 text-[13px] text-text-muted transition-colors hover:bg-border hover:text-foreground data-[state=open]:bg-border data-[state=open]:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent'
 
 export function TopBar() {
-  const activeSheet = useWorkspace((s) => s.sheets.find((x) => x.id === s.activeSheetId))
+  const activeSpace = useWorkspace((s) => s.spaces.find((x) => x.id === s.activeSpaceId))
   const setStatus = useWorkspace((s) => s.setStatus)
   const [layouts, setLayouts] = useState<NamedLayout[]>([])
   const [saving, setSaving] = useState(false)
@@ -62,6 +70,7 @@ export function TopBar() {
   const [paletteMode, setPaletteMode] = useState<PaletteMode>('all')
   const [installing, setInstalling] = useState(false)
   const update = useUpdates((s) => s.status)
+  const fullScreen = useFullScreen((s) => s.on)
   const appInfo = useUpdates((s) => s.info)
   const project = useProject((s) => s.active)
   const explainOn = useExplainSettings((s) => s.enabled)
@@ -95,16 +104,30 @@ export function TopBar() {
           setPalette(true)
         }
       }
-      // F1–F9: foglio 1–9 del contesto attivo, anche con il focus dentro un terminale.
-      // Sulla scheda di un foglio F2 resta «rinomina»; nei campi di testo non si intercetta; nell'albero dei file F2, F5 e F6
+      // F1–F9: spazio 1–9 del contesto attivo, anche con il focus dentro un terminale.
+      // Sulla scheda di uno spazio F2 resta «rinomina»; nei campi di testo non si intercetta; nell'albero dei file F2, F5 e F6
       // sono rinomina, copia e sposta.
       const fn = /^F([1-9])$/.exec(e.key)
       const target = e.target as Element | null
       if (fn && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && !target?.closest?.('[role="tab"], [role="tree"], input, textarea:not(.xterm-helper-textarea)')) {
-        const { sheets, contextId, setActive } = useWorkspace.getState()
-        const sheet = sheetsOf(sheets, contextId)[Number(fn[1]) - 1]
+        const { spaces, contextId, setActive } = useWorkspace.getState()
+        const space = spacesOf(spaces, contextId)[Number(fn[1]) - 1]
         e.preventDefault()
-        if (sheet) setActive(sheet.id)
+        if (space) setActive(space.id)
+      }
+      // Ctrl+1…9: spazio n del contesto attivo; Ctrl+Tab: panoramica degli spazi. Valgono anche con il focus nel terminale
+      // (le shell non usano queste combinazioni).
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
+        const { spaces, contextId, setActive } = useWorkspace.getState()
+        const space = spacesOf(spaces, contextId)[Number(e.key) - 1]
+        e.preventDefault()
+        e.stopPropagation()
+        if (space) setActive(space.id)
+      }
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.key === 'Tab') {
+        e.preventDefault()
+        e.stopPropagation()
+        useOverview.getState().toggle()
       }
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 't') {
         e.preventDefault()
@@ -116,11 +139,11 @@ export function TopBar() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
-  const dock = () => (activeSheet ? dockRegistry.get(activeSheet.id) : undefined)
+  const dock = () => (activeSpace ? dockRegistry.get(activeSpace.id) : undefined)
 
   /**
-   * L6: i permessi sono un pannello. Se nel foglio ce n'è già uno lo attiva; altrimenti lo apre sul
-   * progetto del terminale attivo (o di un terminale qualsiasi del foglio).
+   * L6: i permessi sono un pannello. Se nello spazio ce n'è già uno lo attiva; altrimenti lo apre sul
+   * progetto del terminale attivo (o di un terminale qualsiasi dello spazio).
    */
   const openPermissions = () => {
     const d = dock()
@@ -140,11 +163,11 @@ export function TopBar() {
 
   const applyLayout = (layout: NamedLayout) => {
     const d = dock()
-    if (!d || !activeSheet) return
+    if (!d || !activeSpace) return
     try {
       d.fromJSON(layout.layout as unknown as SerializedDockview)
       removeHiddenPanels(d)
-      setStatus(`Layout «${layout.name}» applicato a «${activeSheet.name}»`)
+      setStatus(`Layout «${layout.name}» applicato a «${activeSpace.name}»`)
     } catch (err) {
       console.error(err)
       setStatus(`Impossibile applicare il layout «${layout.name}»`)
@@ -153,15 +176,15 @@ export function TopBar() {
 
   const installedPlugins = useEditor((s) => s.plugins)
   const commands = useMemo<PaletteCommand[]>(() => {
-    const d = () => (activeSheet ? dockRegistry.get(activeSheet.id) : undefined)
+    const d = () => (activeSpace ? dockRegistry.get(activeSpace.id) : undefined)
     const font = useTerminalSettings.getState()
     return [
       { id: 'new-terminal', title: 'Nuovo terminale', hint: 'Ctrl+Maiusc+T', keywords: 'sessione claude shell', run: () => setNewTerminal(true) },
-      { id: 'new-sheet', title: 'Nuovo foglio', run: () => useWorkspace.getState().addSheet() },
+      { id: 'new-space', title: 'Nuovo spazio', run: () => useWorkspace.getState().addSpace() },
       ...PANEL_KIND_LIST.map((k) => ({
         id: `panel-${k.kind}`,
         title: `Aggiungi pannello: ${k.title}`,
-        hint: activeSheet ? `in «${activeSheet.name}»` : undefined,
+        hint: activeSpace ? `in «${activeSpace.name}»` : undefined,
         run: () => {
           const dd = d()
           if (dd) addPanel(dd, k.kind)
@@ -173,7 +196,7 @@ export function TopBar() {
         keywords: 'contesto progetto',
         run: () => useProject.getState().setContext(c.id)
       })),
-      // Prompt predefiniti: un clic li manda alla sessione Claude del foglio attivo. Il testo è tra le parole cercabili.
+      // Prompt predefiniti: un clic li manda alla sessione Claude dello spazio attivo. Il testo è tra le parole cercabili.
       ...presets.map((p) => ({
         id: `preset-${p.id}`,
         title: `Prompt: ${p.name}`,
@@ -191,7 +214,7 @@ export function TopBar() {
           setStatus(!on ? 'Artifact di claude.ai consentiti nelle nuove sessioni' : 'Artifact di claude.ai disattivati nelle nuove sessioni: Claude scrive i file nella cartella')
         }
       },
-      { id: 'accent', title: "Colore d'accento…", keywords: 'tema colore accento aspetto personalizza', run: () => useAccent.getState().openDialog() },
+      { id: 'accent', title: 'Aspetto…', keywords: 'tema colore accento sfondo animato vetro trasparenza personalizza', run: () => useAccent.getState().openDialog() },
       { id: 'presets-manage', title: 'Gestisci prompt predefiniti…', keywords: 'prompt messaggi salvati aggiungi modifica', run: () => usePresets.getState().openDialog() },
       {
         id: 'explain-toggle',
@@ -201,6 +224,19 @@ export function TopBar() {
       },
       { id: 'docs', title: 'Apri Documentazione', keywords: 'claude.md markdown progetto riferimenti', run: openDocsPanel },
       { id: 'permissions', title: 'Apri Permessi', keywords: 'regole claude settings', run: openPermissions },
+      {
+        id: 'review-toggle',
+        title: 'Revisione: apri o chiudi il cassetto della sessione',
+        keywords: 'modifiche diff approva rifiuta cassetto claude',
+        run: () => {
+          const id = activeClaudeSessionId()
+          if (id) useReviewUi.getState().toggleReview(id)
+          else setStatus('Nessuna sessione di Claude aperta in questo spazio')
+        }
+      },
+      { id: 'about', title: 'Informazioni su Magnolia…', keywords: 'versione autore dedica licenza about', run: () => useAbout.getState().show() },
+      { id: 'claude-mode', title: 'Claude: passa a Bolle / Schede', keywords: 'bolle schede bot modalità workspace vuoto', run: () => void switchClaudeMode(useAppearance.getState().claudeMode === 'tabs' ? 'bubbles' : 'tabs') },
+      { id: 'fullscreen', title: 'Schermo intero', hint: 'F11', keywords: 'finestra tutto schermo full screen', run: () => useFullScreen.getState().toggle() },
       { id: 'plugins', title: 'Apri Plugin', keywords: 'language server linguaggi', run: openPluginsPanel },
       // Comandi contribuiti dai plugin attivi (`contributes.commands`).
       ...installedPlugins
@@ -232,22 +268,25 @@ export function TopBar() {
         run: () => setStatus(`Magnolia ${appInfo?.version ?? ''} · ${describeUpdate(useUpdates.getState().status)}`)
       }
     ]
-    // openPermissions e applyLayout dipendono solo dal foglio attivo.
+    // openPermissions e applyLayout dipendono solo dallo spazio attivo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSheet, layouts, update, appInfo, project, explainOn, presets, installedPlugins])
+  }, [activeSpace, layouts, update, appInfo, project, explainOn, presets, installedPlugins])
 
   return (
     // La barra non ha sfondo né bordo: i suoi elementi stanno sullo sfondo scuro della finestra, a --cct-gap dal bordo. Il contenitore trascina
     // la finestra anche nei margini; i controlli nativi di Windows stanno a destra, fuori dalla scheda.
-    <div className="app-drag shrink-0 pt-(--cct-gap)" style={{ paddingRight: WINDOW_CONTROLS_WIDTH || 10 }}>
-    <header className="flex h-11 items-center gap-3 pr-3">
-      {/* La barra comincia dove comincia il pannello della sidebar (68 px a sinistra), allineata al suo bordo. */}
-      <div className="w-[68px] shrink-0" aria-hidden="true" />
-
+    <div className="app-drag mg-glass-1 relative z-30 shrink-0 border-x-0 border-t-0" style={{ paddingRight: windowControlsWidth(fullScreen) || 10 }}>
+    <header className="flex h-12 items-center gap-3 pr-3 pl-3">
       <ProjectMenu />
       <ContextSwitcher />
 
-      <div className="flex-1" aria-hidden="true" />
+      <div className="h-5 w-px shrink-0 bg-white/10" aria-hidden="true" />
+      <div className="flex min-w-0 items-center gap-1">
+        <SpaceChips />
+      </div>
+
+      {/* Area vuota trascinabile: la finestra si sposta da qui. Almeno 48 px liberi tra l'ultimo chip e i pulsanti. */}
+      <div className="min-w-12 flex-1 self-stretch" aria-hidden="true" />
 
       <div className="app-no-drag flex items-center gap-2">
         <button
@@ -266,7 +305,7 @@ export function TopBar() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
-            <DropdownMenuLabel>Aggiungi al foglio «{activeSheet?.name}»</DropdownMenuLabel>
+            <DropdownMenuLabel>Aggiungi allo spazio «{activeSpace?.name}»</DropdownMenuLabel>
             {PANEL_KIND_LIST.map((k) => (
               <DropdownMenuItem
                 key={k.kind}
@@ -291,7 +330,7 @@ export function TopBar() {
           <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuItem onSelect={() => setSaving(true)}>Salva layout con nome…</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>Applica a «{activeSheet?.name}»</DropdownMenuLabel>
+            <DropdownMenuLabel>Applica a «{activeSpace?.name}»</DropdownMenuLabel>
             {layouts.length === 0 && (
               <DropdownMenuItem disabled>Nessun layout salvato</DropdownMenuItem>
             )}
@@ -325,6 +364,16 @@ export function TopBar() {
         </button>
         <button
           type="button"
+          onClick={() => useFullScreen.getState().toggle()}
+          title={fullScreen ? 'Esci dallo schermo intero (F11)' : 'Schermo intero (F11)'}
+          aria-label={fullScreen ? 'Esci dallo schermo intero' : 'Schermo intero'}
+          aria-pressed={fullScreen}
+          className="app-no-drag inline-flex size-8 items-center justify-center rounded-lg text-text-subtle transition-colors hover:bg-border hover:text-foreground"
+        >
+          {fullScreen ? <Minimize size={16} /> : <Maximize size={16} />}
+        </button>
+        <button
+          type="button"
           onClick={() => setShortcuts(true)}
           title="Scorciatoie da tastiera"
           aria-label="Scorciatoie da tastiera"
@@ -352,14 +401,15 @@ export function TopBar() {
       <NewTerminalDialog open={newTerminal} onClose={() => setNewTerminal(false)} />
       <ShortcutsDialog open={shortcuts} onClose={() => setShortcuts(false)} />
       <PresetsDialog />
-      <AccentDialog />
+      <AppearanceDialog />
+      <AboutDialog />
 
       <SnippetExplain />
       <CommandPalette open={palette} mode={paletteMode} onClose={() => setPalette(false)} commands={commands} />
 
       <SaveLayoutDialog
         open={saving}
-        defaultName={activeSheet?.name ?? ''}
+        defaultName={activeSpace?.name ?? ''}
         existing={layouts}
         onClose={() => setSaving(false)}
         onSave={async (name) => {
@@ -375,7 +425,7 @@ export function TopBar() {
       <ConfirmDialog
         open={deleting !== null}
         title={`Eliminare il layout «${deleting?.name ?? ''}»?`}
-        description="I fogli che lo usano mantengono la loro disposizione attuale."
+        description="Gli spazi che lo usano mantengono la loro disposizione attuale."
         confirmLabel="Elimina"
         destructive
         onCancel={() => setDeleting(null)}
@@ -403,13 +453,13 @@ export function TopBar() {
 
       <ConfirmDialog
         open={resetting}
-        title={`Ripristinare il layout predefinito di «${activeSheet?.name ?? ''}»?`}
+        title={`Ripristinare il layout predefinito di «${activeSpace?.name ?? ''}»?`}
         description="La disposizione attuale dei pannelli viene sostituita. Se vuoi conservarla, salvala prima con un nome."
         confirmLabel="Ripristina"
         onCancel={() => setResetting(false)}
         onConfirm={() => {
           const d = dock()
-          if (d && activeSheet) buildDefaultLayout(d, activeSheet.id)
+          if (d && activeSpace) buildDefaultLayout(d, activeSpace.id)
           setResetting(false)
         }}
       />

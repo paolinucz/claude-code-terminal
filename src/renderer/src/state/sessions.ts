@@ -4,6 +4,8 @@ import type { SessionAttention, SessionInfo } from '@shared/sessions'
 import { api } from '@/lib/api'
 import type { PanelParams } from '@/panels/kinds'
 import { useWorkspace } from '@/state/workspace'
+import { isBubbleMode } from '@/state/appearance'
+import { useBots } from '@/state/bots'
 import { dockRegistry } from '@/workspace/registry'
 
 export interface Toast extends SessionAttention {
@@ -61,32 +63,38 @@ export const useSessions = create<SessionsStore>((set, get) => ({
   }
 }))
 
-/** Pannelli (con il loro foglio) che mostrano una sessione. */
-function viewsOf(sessionId: string): { sheetId: string; panel: IDockviewPanel }[] {
-  const out: { sheetId: string; panel: IDockviewPanel }[] = []
-  for (const sheet of useWorkspace.getState().sheets) {
-    const dock = dockRegistry.get(sheet.id)
+/** Pannelli (con il loro spazio) che mostrano una sessione. */
+function viewsOf(sessionId: string): { spaceId: string; panel: IDockviewPanel }[] {
+  const out: { spaceId: string; panel: IDockviewPanel }[] = []
+  for (const space of useWorkspace.getState().spaces) {
+    const dock = dockRegistry.get(space.id)
     for (const panel of dock?.panels ?? []) {
-      if ((panel.params as PanelParams | undefined)?.sessionId === sessionId) out.push({ sheetId: sheet.id, panel })
+      if ((panel.params as PanelParams | undefined)?.sessionId === sessionId) out.push({ spaceId: space.id, panel })
     }
   }
   return out
 }
 
-/** La sessione è già sotto gli occhi dell'utente: finestra in primo piano, foglio attivo, scheda visibile. */
+/** La sessione è già sotto gli occhi dell'utente: finestra in primo piano, spazio attivo, scheda visibile. */
 function isVisible(sessionId: string): boolean {
   if (!document.hasFocus()) return false
-  const active = useWorkspace.getState().activeSheetId
-  return viewsOf(sessionId).some((v) => v.sheetId === active && v.panel.api.isVisible)
+  const active = useWorkspace.getState().activeSpaceId
+  return viewsOf(sessionId).some((v) => v.spaceId === active && v.panel.api.isVisible)
 }
 
-/** Porta in vista una sessione: passa al suo foglio e attiva la scheda (clic su notifica o toast). */
+/** Porta in vista una sessione: passa al suo spazio e attiva la scheda (clic su notifica o toast). */
 export function revealSession(sessionId: string): void {
+  // Modalità Bolle: la sessione si vede nella sua bolla (non ha schede).
+  if (isBubbleMode() && useSessions.getState().sessions[sessionId]?.kind === 'claude') {
+    useBots.getState().open(sessionId)
+    useSessions.getState().seen(sessionId)
+    return
+  }
   const views = viewsOf(sessionId)
-  const active = useWorkspace.getState().activeSheetId
-  const target = views.find((v) => v.sheetId === active) ?? views[0]
+  const active = useWorkspace.getState().activeSpaceId
+  const target = views.find((v) => v.spaceId === active) ?? views[0]
   if (target) {
-    if (target.sheetId !== active) useWorkspace.getState().setActive(target.sheetId)
+    if (target.spaceId !== active) useWorkspace.getState().setActive(target.spaceId)
     target.panel.api.setActive()
   } else {
     useWorkspace.getState().setStatus('La sessione non ha viste aperte: collegala da «Nuovo terminale › Collega a sessione attiva»')

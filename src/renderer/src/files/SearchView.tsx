@@ -6,14 +6,14 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { FileIcon } from '@/lib/fileIcons'
 import { openFile } from '@/state/editor'
-import { rootForSheet, useSidebar } from '@/state/sidebar'
+import { rootForSpace, useSidebar } from '@/state/sidebar'
 import { useWorkspace } from '@/state/workspace'
 
 const OPTIONS_KEY = 'ui.searchOptions'
 
 /** Ricerca nei file del progetto (Ctrl+Maiusc+F), nella barra laterale: risultati per file, clic per aprire alla riga. */
 export function SearchView() {
-  const sheetId = useWorkspace((s) => s.activeSheetId)
+  const spaceId = useWorkspace((s) => s.activeSpaceId)
   const focus = useSidebar((s) => s.searchFocus)
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
@@ -22,7 +22,7 @@ export function SearchView() {
   const [result, setResult] = useState<SearchResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const root = rootForSheet(sheetId)
+  const root = rootForSpace(spaceId)
 
   // Opzioni ricordate tra un avvio e l'altro.
   useEffect(() => {
@@ -80,7 +80,7 @@ export function SearchView() {
     cn('inline-flex size-6 shrink-0 items-center justify-center rounded', on ? 'bg-brand/25 text-foreground' : 'text-text-subtle hover:bg-border hover:text-foreground')
 
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div className="flex h-full flex-col">
       <div className="shrink-0 space-y-1.5 border-b border-border p-2">
         <div className="flex items-center gap-1">
           <input

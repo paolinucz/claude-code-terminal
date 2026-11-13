@@ -4,9 +4,9 @@ import { openSessionView } from '@/workspace/panels'
 import { dockRegistry } from '@/workspace/registry'
 import { NewSessionForm } from './NewSessionForm'
 
-/** Dialogo «Nuovo terminale» (mockup, schermata 3). Apre la vista nel foglio attivo. */
+/** Dialogo «Nuovo terminale» (mockup, schermata 3). Apre la vista nello spazio attivo. */
 export function NewTerminalDialog({ open, onClose }: { open: boolean; onClose(): void }) {
-  const sheet = useWorkspace((s) => s.sheets.find((x) => x.id === s.activeSheetId))
+  const space = useWorkspace((s) => s.spaces.find((x) => x.id === s.activeSpaceId))
   const setStatus = useWorkspace((s) => s.setStatus)
 
   return (
@@ -14,7 +14,7 @@ export function NewTerminalDialog({ open, onClose }: { open: boolean; onClose():
       <DialogContent className="max-h-[90vh] overflow-auto sm:max-w-2xl">
         <DialogHeader className="mb-4">
           <DialogTitle>
-            Nuovo terminale <span className="font-normal text-text-subtle">· foglio {sheet?.name}</span>
+            Nuovo terminale <span className="font-normal text-text-subtle">· spazio {space?.name}</span>
           </DialogTitle>
           <DialogDescription className="sr-only">Scegli Claude Code o una shell, la cartella e dove aprire il terminale.</DialogDescription>
         </DialogHeader>
@@ -23,9 +23,9 @@ export function NewTerminalDialog({ open, onClose }: { open: boolean; onClose():
             variant="dialog"
             onCancel={onClose}
             onDone={(session, placement) => {
-              const dock = sheet ? dockRegistry.get(sheet.id) : undefined
+              const dock = space ? dockRegistry.get(space.id) : undefined
               if (dock) openSessionView(dock, session, placement)
-              setStatus(`«${session.title}» aperta nel foglio «${sheet?.name}»`)
+              setStatus(`«${session.title}» aperta nello spazio «${space?.name}»`)
               onClose()
             }}
           />

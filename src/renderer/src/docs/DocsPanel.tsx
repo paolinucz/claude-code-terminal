@@ -10,7 +10,7 @@ import { openFile } from '@/state/editor'
 import { useDocs } from '@/state/docs'
 import { useProject } from '@/state/project'
 import { useWorkspace } from '@/state/workspace'
-import { addPanel, sheetOfPanel } from '@/workspace/panels'
+import { addPanel, spaceOfPanel } from '@/workspace/panels'
 import { dockRegistry } from '@/workspace/registry'
 
 type Source = 'claude' | 'global' | 'context'
@@ -32,9 +32,9 @@ const MAX_DOC_BYTES = 1_000_000
 
 const dirOf = (path: string) => path.replace(/[\\/][^\\/]*$/, '')
 
-/** Porta in primo piano il pannello Documentazione del foglio attivo, o lo aggiunge (J8). */
+/** Porta in primo piano il pannello Documentazione dello spazio attivo, o lo aggiunge (J8). */
 export function openDocsPanel(): void {
-  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  const dock = dockRegistry.get(useWorkspace.getState().activeSpaceId)
   if (!dock) return
   const existing = dock.panels.find((p) => (p.params as PanelParams | undefined)?.kind === 'docs')
   if (existing) existing.api.setActive()
@@ -43,17 +43,17 @@ export function openDocsPanel(): void {
 
 /**
  * Documentazione del progetto (J8): `CLAUDE.md` rilevato da solo, riferimenti globali scelti a mano e documentazione
- * del contesto del foglio. Lettura con indice delle sezioni e ricerca; «Modifica» apre il file nell'editor.
+ * del contesto dello spazio. Lettura con indice delle sezioni e ricerca; «Modifica» apre il file nell'editor.
  */
 export function DocsPanel(props: IDockviewPanelProps<PanelParams>) {
   const active = useProject((s) => s.active)
-  const sheets = useWorkspace((s) => s.sheets)
+  const spaces = useWorkspace((s) => s.spaces)
   const claudeMd = useDocs((s) => s.claudeMd)
   const docsVersion = useDocs((s) => s.version)
 
-  // Il contesto è quello del foglio che contiene il pannello, non per forza quello attivo.
-  const sheetId = sheetOfPanel(props.containerApi)
-  const contextId = useMemo(() => sheets.find((s) => s.id === sheetId)?.contextId ?? null, [sheets, sheetId])
+  // Il contesto è quello dello spazio che contiene il pannello, non per forza quello attivo.
+  const spaceId = spaceOfPanel(props.containerApi)
+  const contextId = useMemo(() => spaces.find((s) => s.id === spaceId)?.contextId ?? null, [spaces, spaceId])
   const context = active?.data.contexts.find((c) => c.id === contextId)
 
   const entries = useMemo<DocEntry[]>(() => {
@@ -153,7 +153,7 @@ export function DocsPanel(props: IDockviewPanelProps<PanelParams>) {
 
   return (
     <div className="flex h-full min-h-0 text-[13px]">
-      <aside className="flex w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface">
+      <aside className="mg-bar flex w-60 shrink-0 flex-col overflow-y-auto border-r border-border">
         <div className="relative p-2">
           <Search size={13} className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-text-faint" />
           <input

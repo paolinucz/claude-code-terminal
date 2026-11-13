@@ -10,7 +10,10 @@ import {
   ContextMenu as CM,
   Dialog as D,
   DropdownMenu as DM,
-  ToggleGroup as TG
+  Popover as PO,
+  Switch as SW,
+  ToggleGroup as TG,
+  Tooltip as TT
 } from '@animate-ui/react/primitives/radix-ui'
 import { cn } from '@/lib/cn'
 
@@ -45,7 +48,7 @@ function usePortal(): HTMLElement | undefined {
 
 const overlayClass = 'fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]'
 const modalClass =
-  'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-0 rounded-xl border border-strong bg-surface p-5 text-[13px] text-foreground shadow-2xl outline-none sm:max-w-lg'
+  'mg-glass-3 fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-0 rounded-xl p-5 text-[13px] text-foreground shadow-2xl outline-none sm:max-w-lg'
 
 export const Dialog = D.Dialog
 export const DialogTrigger = D.DialogTrigger
@@ -129,7 +132,7 @@ export function AlertDialogCancel({ className, ...props }: ComponentProps<typeof
 
 /**
  * Animate UI disegna l'evidenziazione della voce attiva come una «superficie» a parte e ne legge colore e angoli una volta
- * sola, quando il gruppo compare. I fogli non attivi restano montati ma nascosti (`display: none`): lì il gruppo misura 0 e
+ * sola, quando il gruppo compare. Gli spazi non attivi restano montati ma nascosti (`display: none`): lì il gruppo misura 0 e
  * gli angoli vengono letti come 0, cioè a 90° (e tali restano fino al primo clic, che le rilegge). Quando il gruppo
  * diventa visibile si cambia per un istante una classe, che la libreria osserva: così rilegge l'aspetto con le misure vere.
  */
@@ -198,7 +201,7 @@ export function Segmented<T extends string>({
 /* ---------------- Menu (Dropdown e Context) ---------------- */
 
 const menuContentClass =
-  'z-50 min-w-44 overflow-hidden rounded-lg border border-strong bg-surface p-1 text-[13px] text-foreground shadow-xl outline-none'
+  'mg-glass-3 z-50 min-w-44 overflow-hidden rounded-lg p-1 text-[13px] text-foreground shadow-xl outline-none'
 const menuItemClass =
   'relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-md px-2 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-border data-[state=open]:bg-border'
 const menuLabelClass = 'px-2 pt-1.5 pb-1 text-[11px] font-medium text-text-faint'
@@ -262,4 +265,46 @@ export function ContextMenuItem({ className, ...props }: ComponentProps<typeof C
 
 export function ContextMenuSeparator({ className, ...props }: ComponentProps<typeof CM.ContextMenuSeparator>) {
   return <CM.ContextMenuSeparator className={cn(menuSeparatorClass, className)} {...props} />
+}
+
+/* ---------------- Tooltip ---------------- */
+
+export const TooltipProvider = TT.TooltipProvider
+export const Tooltip = TT.Tooltip
+export const TooltipTrigger = TT.TooltipTrigger
+
+/** Suggerimento al passaggio del mouse: stessa superficie dei menu. Il contenuto può essere ricco (più righe). */
+export function TooltipContent({ className, sideOffset = 8, ...props }: ComponentProps<typeof TT.TooltipContent>) {
+  return (
+    <TT.TooltipPortal container={usePortal()}>
+      <TT.TooltipContent sideOffset={sideOffset} className={cn('mg-glass-3 z-50 max-w-72 rounded-lg px-2.5 py-2 text-[12px] text-foreground shadow-xl', className)} {...props} />
+    </TT.TooltipPortal>
+  )
+}
+
+/* ---------------- Popover ---------------- */
+
+export const Popover = PO.Popover
+export const PopoverTrigger = PO.PopoverTrigger
+export const PopoverClose = PO.PopoverClose
+
+export function PopoverContent({ className, sideOffset = 8, ...props }: ComponentProps<typeof PO.PopoverContent>) {
+  return (
+    <PO.PopoverPortal container={usePortal()}>
+      <PO.PopoverContent sideOffset={sideOffset} className={cn('mg-glass-3 z-50 w-60 rounded-lg p-3 text-[13px] text-foreground shadow-xl outline-none', className)} {...props} />
+    </PO.PopoverPortal>
+  )
+}
+
+/* ---------------- Switch ---------------- */
+
+export function Switch({ className, ...props }: ComponentProps<typeof SW.Switch>) {
+  return (
+    <SW.Switch
+      className={cn('inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-strong bg-border p-0.5 outline-none transition-colors data-[state=checked]:border-brand data-[state=checked]:bg-brand focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40', className)}
+      {...props}
+    >
+      <SW.SwitchThumb className="block size-3.5 rounded-full bg-foreground shadow data-[state=checked]:bg-on-brand" />
+    </SW.Switch>
+  )
 }

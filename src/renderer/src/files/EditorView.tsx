@@ -9,6 +9,7 @@ import { renderMarkdown } from '@/docs/markdown'
 import { useExplainSettings } from '@/state/explain'
 import { useSnippetExplain } from '@/state/snippetExplain'
 import { usePluginGutter } from '@/state/pluginGutter'
+import { menuItems, resourceContext, runMenuItem } from '@/plugins/extensions'
 import { normPath } from '@shared/files'
 import { api } from '@/lib/api'
 import { languageOf, monaco } from '@/lib/monaco'
@@ -180,6 +181,26 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
           })
         )
       }
+      // Voci dei plugin nel menu del tasto destro (`contributes.menus['editor/context']`). Le condizioni dipendono dalla
+      // selezione di quel momento, quindi le azioni si rifanno a ogni apertura del menu.
+      let pluginActions: monaco.IDisposable[] = []
+      subs.push(
+        editor.onContextMenu(() => {
+          for (const a of pluginActions) a.dispose()
+          const sel = editor.getSelection()
+          const hasSelection = Boolean(sel && !sel.isEmpty())
+          const ctx = {
+            ...resourceContext(filePath),
+            languageId: d.model.getLanguageId(),
+            hasSelection,
+            ...(sel && hasSelection ? { startLine: sel.startLineNumber, endLine: sel.endLineNumber, selectedText: d.model.getValueInRange(sel).slice(0, 20000) } : {})
+          }
+          pluginActions = menuItems(useEditor.getState().plugins, 'editor/context', ctx).map((it, i) =>
+            editor.addAction({ id: `plugin.${it.key}`, label: it.command.title, contextMenuGroupId: '8_plugins', contextMenuOrder: i, run: () => runMenuItem(it, ctx) })
+          )
+        })
+      )
+      subs.push({ dispose: () => pluginActions.forEach((a) => a.dispose()) })
       // Tasto destro sulla selezione: spiegazione di Haiku (solo se la funzione è attiva).
       editor.addAction({
         id: 'cct.explain',
@@ -307,7 +328,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
 
   const sendReview = async (notes: ReviewNote[]) => {
     if (!target) {
-      setComposeError('Nessuna sessione Claude aperta in questo foglio: aprine una con «Terminale».')
+      setComposeError('Nessuna sessione Claude aperta in questo spazio: aprine una con «Terminale».')
       return
     }
     if (dirty) {
@@ -386,7 +407,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
   const STATE: Record<string, string> = { starting: 'avvio…', ready: 'pronto', error: 'errore', stopped: 'fermo' }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full flex-col">
       {missingPlugin && (
         <div className="flex shrink-0 items-center gap-3 border-b border-info/30 bg-info/10 px-3 py-2 text-[12px]">
           <Puzzle size={14} className="shrink-0 text-info" />
@@ -415,7 +436,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
         </div>
       )}
       {isMarkdown && (
-        <div className="flex shrink-0 items-center gap-1 border-b border-border bg-surface px-2 py-1">
+        <div className="mg-bar flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
           {(
             [
               ['preview', 'Anteprima', BookOpen],
@@ -461,7 +482,7 @@ export default function EditorView({ filePath, workspace, onDirty }: { filePath:
           onCancel={() => setComposing(false)}
         />
       )}
-      <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-surface px-2 font-mono text-[11px] text-text-subtle">
+      <div className="mg-bar flex h-6 shrink-0 items-center gap-3 border-t border-border px-2 font-mono text-[11px] text-text-subtle">
         <span className="truncate" title={filePath}>
           {filePath}
         </span>

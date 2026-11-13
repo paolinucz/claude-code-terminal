@@ -39,7 +39,7 @@ export function PluginsPanel() {
   const sorted = [...plugins].sort((a, b) => a.manifest.name.localeCompare(b.manifest.name))
 
   return (
-    <div className="flex h-full flex-col bg-surface">
+    <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
         <Puzzle size={15} className="text-text-subtle" />
         <h2 className="text-[14px] font-semibold text-foreground">Plugin</h2>

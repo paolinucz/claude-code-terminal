@@ -9,7 +9,7 @@ import {
   DialogTitle
 } from '@/components/ui-kit'
 
-/** Salva la disposizione del foglio attivo come layout con un nome (L5). */
+/** Salva la disposizione dello spazio attivo come layout con un nome (L5). */
 export function SaveLayoutDialog(props: {
   open: boolean
   defaultName: string
@@ -37,7 +37,7 @@ export function SaveLayoutDialog(props: {
           <DialogHeader>
             <DialogTitle>Salva layout</DialogTitle>
             <DialogDescription>
-              Salva solo la disposizione dei pannelli, non le sessioni. Puoi riapplicarla a qualsiasi foglio.
+              Salva solo la disposizione dei pannelli, non le sessioni. Puoi riapplicarla a qualsiasi spazio.
             </DialogDescription>
           </DialogHeader>
           <label htmlFor="layout-name" className="mt-4 block text-[12px] text-text-subtle">

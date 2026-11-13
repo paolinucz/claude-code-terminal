@@ -6,11 +6,11 @@ import { useWorkspace } from '@/state/workspace'
 import { dockRegistry } from './registry'
 
 /**
- * La sessione Claude a cui mandare un prompt predefinito: il terminale attivo del foglio, altrimenti uno visibile,
- * altrimenti il primo. Restituisce un messaggio d'errore se nel foglio non c'è nessuna sessione Claude viva.
+ * La sessione Claude a cui mandare un prompt predefinito: il terminale attivo dello spazio, altrimenti uno visibile,
+ * altrimenti il primo. Restituisce un messaggio d'errore se nello spazio non c'è nessuna sessione Claude viva.
  */
 export function targetClaudeSession(): { id: string; title: string } | { error: string } {
-  const dock = dockRegistry.get(useWorkspace.getState().activeSheetId)
+  const dock = dockRegistry.get(useWorkspace.getState().activeSpaceId)
   const sessions = useSessions.getState().sessions
   const claude = (dock?.panels ?? []).filter((p) => {
     const sid = (p.params as PanelParams | undefined)?.sessionId
@@ -19,7 +19,7 @@ export function targetClaudeSession(): { id: string; title: string } | { error: 
   })
   const chosen = claude.find((p) => p.api.isActive) ?? claude.find((p) => p.api.isVisible) ?? claude[0]
   const sid = (chosen?.params as PanelParams | undefined)?.sessionId
-  if (!sid) return { error: 'Nessuna sessione Claude aperta in questo foglio: aprine una con «Terminale».' }
+  if (!sid) return { error: 'Nessuna sessione Claude aperta in questo spazio: aprine una con «Terminale».' }
   return { id: sid, title: sessions[sid]?.title ?? 'sessione' }
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { diffLines } from 'diff'
-import { ArrowDown, Check, ChevronLeft, ChevronRight, Copy, Hand, Square } from 'lucide-react'
+import { ArrowDown, Check, ChevronLeft, ChevronRight, Copy, Square } from 'lucide-react'
 import type { SessionInfo } from '@shared/sessions'
 import type { AskQuestion, ChatItem, FileEdit as Edit } from '@shared/transcript'
 import { renderMarkdown } from '@/docs/markdown'
@@ -9,8 +9,15 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { openFile } from '@/state/editor'
 import { useSessions } from '@/state/sessions'
-
-type ToolItem = ChatItem & { kind: 'tool' }
+import { isOpen } from '@shared/changes'
+import { normPath } from '@shared/files'
+import { CHANGE_STATUS_COLORS, CHANGE_STATUS_LABELS, useChanges } from '@/state/changes'
+import { useReviewUi } from '@/state/review'
+import { FindBar } from '@/docs/FindBar'
+import { ChatHeader, PermissionBar, SystemRow, ThinkingRow, TurnFooter, UserBubble, type TurnStats } from './chat/ChatBits'
+import { Dot, Spinner, timeOf, type ToolItem } from './chat/common'
+import { useCodeHighlight } from './chat/highlight'
+import { PlanCard, TodoCard, ToolDetail } from './chat/ToolViews'
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit'])
 /** Quanti elementi mostrare all'inizio: i più vecchi si aprono su richiesta. */
@@ -22,7 +29,7 @@ type Block = { kind: 'item'; item: ChatItem } | { kind: 'tools'; items: ToolItem
 function toBlocks(items: ChatItem[]): Block[] {
   const out: Block[] = []
   for (const item of items) {
-    if (item.kind === 'tool' && !EDIT_TOOLS.has(item.name) && !item.questions) {
+    if (item.kind === 'tool' && !EDIT_TOOLS.has(item.name) && !item.questions && !item.todos && !item.plan) {
       const last = out.at(-1)
       if (last?.kind === 'tools') last.items.push(item)
       else out.push({ kind: 'tools', items: [item] })
@@ -33,18 +40,22 @@ function toBlocks(items: ChatItem[]): Block[] {
 
 /**
  * Vista grafica della conversazione («bridge»): gli stessi messaggi del terminale di Claude Code, impaginati.
- * Risposte in Markdown con «Copia» sui blocchi di codice, modifiche ai file come diff, strumenti raggruppati e
- * richiudibili, risposta ai permessi e interruzione con i pulsanti. Legge la trascrizione che Claude Code scrive
- * in locale; il terminale vero resta in esecuzione sotto.
+ * Risposte in Markdown con codice evidenziato, ragionamento ripiegabile, strumenti per tipo (Bash con l'output, Read con i numeri
+ * di riga, Grep, Web, agenti), lista delle cose da fare, piano, modifiche ai file come diff, domande e permessi con il dettaglio di
+ * cosa si chiede, durata e token di ogni turno, indice dei messaggi e ricerca (Ctrl+F). Legge la trascrizione che Claude Code
+ * scrive in locale; il terminale vero resta in esecuzione sotto (nascosto).
  */
 export function ConversationView({ session, onShowTerminal }: { session: SessionInfo; onShowTerminal(): void }) {
   const [items, setItems] = useState<ChatItem[]>([])
   const [loaded, setLoaded] = useState(false)
   const [shown, setShown] = useState(PAGE)
   const [atBottom, setAtBottom] = useState(true)
+  const [find, setFind] = useState<{ n: number } | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
+  const touchedRef = useRef(false)
   const attention = useSessions((s) => s.attention[session.id])
 
   useEffect(() => {
@@ -101,15 +112,90 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
     return () => ro.disconnect()
   }, [])
 
+  // Ctrl+F cerca nella conversazione quando ci si è cliccato dentro (come per i Markdown impaginati).
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      touchedRef.current = Boolean(rootRef.current?.contains(e.target as Node))
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f')) return
+      const root = rootRef.current
+      if (!root || root.getClientRects().length === 0 || !(touchedRef.current || root.contains(document.activeElement))) return
+      e.preventDefault()
+      e.stopPropagation()
+      setFind((f) => ({ n: (f?.n ?? 0) + 1 }))
+    }
+    window.addEventListener('mousedown', onDown, true)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [])
+
   const blocks = useMemo(() => toBlocks(items.slice(Math.max(0, items.length - shown))), [items, shown])
   const hidden = Math.max(0, items.length - shown)
   const working = session.status === 'working'
-  // Una domanda interattiva di Claude senza risposta: ha la sua scheda e sostituisce la barra dei permessi.
+  // Una domanda interattiva (o un piano) di Claude senza risposta ha la sua scheda e sostituisce la barra dei permessi.
   const pendingQuestion = useMemo(() => items.some((it) => it.kind === 'tool' && it.questions && it.result === undefined), [items])
-  const waiting = session.status === 'waiting' && !pendingQuestion
+  const pendingPlan = useMemo(() => items.some((it) => it.kind === 'tool' && it.plan && it.result === undefined), [items])
+  const waiting = session.status === 'waiting' && !pendingQuestion && !pendingPlan
+  // Lo strumento che sta aspettando il permesso: l'ultima chiamata senza esito (a parte domande, piani e liste).
+  const pendingTool = useMemo(() => {
+    const last = [...items].reverse().find((it): it is ToolItem => it.kind === 'tool' && it.result === undefined && !it.questions && !it.plan && !it.todos)
+    return last
+  }, [items])
+  // Lista delle cose da fare: vale l'ultima chiamata a TodoWrite.
+  const lastTodo = useMemo(() => [...items].reverse().find((it): it is ToolItem => it.kind === 'tool' && Boolean(it.todos)), [items])
+  const users = useMemo(() => items.filter((it): it is ChatItem & { kind: 'user' } => it.kind === 'user'), [items])
+  // Durata, token e strumenti di ogni turno (dal tuo messaggio al successivo), mostrati dopo l'ultimo elemento del turno.
+  const turnStats = useMemo(() => {
+    const out = new Map<string, TurnStats>()
+    let first: ChatItem | undefined
+    let last: ChatItem | undefined
+    let tools = 0
+    const perMsg = new Map<string, number>()
+    const flush = () => {
+      if (!first || !last) return
+      const t0 = Date.parse(first.ts ?? '')
+      const t1 = Date.parse(last.ts ?? '')
+      let tokens = 0
+      for (const v of perMsg.values()) tokens += v
+      out.set(last.id, { ms: Number.isFinite(t0) && Number.isFinite(t1) ? Math.max(0, t1 - t0) : 0, tokens, tools })
+    }
+    for (const it of items) {
+      if (it.kind === 'user') {
+        flush()
+        first = it
+        last = undefined
+        tools = 0
+        perMsg.clear()
+        continue
+      }
+      if (!first) continue
+      if (it.kind !== 'system') last = it
+      if (it.kind === 'tool') tools++
+      if ('msgId' in it && it.msgId && it.usage) perMsg.set(it.msgId, it.usage.output)
+    }
+    // Il turno in corso non ha ancora un riepilogo.
+    if (!working) flush()
+    return out
+  }, [items, working])
+
+  const jumpTo = (id: string) => {
+    stickRef.current = false
+    setAtBottom(false)
+    const go = () => scrollRef.current?.querySelector(`[data-item="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    if (scrollRef.current?.querySelector(`[data-item="${CSS.escape(id)}"]`)) go()
+    else {
+      setShown(items.length)
+      window.setTimeout(go, 80)
+    }
+  }
 
   return (
-    <div className="cct-chat absolute inset-0 z-10 flex flex-col bg-surface">
+    <div ref={rootRef} className="cct-chat mg-glass-content absolute inset-0 z-10 flex flex-col">
+      <ChatHeader session={session} todos={lastTodo?.todos} users={users} onJump={jumpTo} onSearch={() => setFind((f) => ({ n: (f?.n ?? 0) + 1 }))} />
       <div
         ref={scrollRef}
         onScroll={(e) => {
@@ -120,7 +206,7 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
         }}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-3 px-5 py-5 text-[13.5px] leading-relaxed">
+        <div ref={contentRef} className="cct-chat-body flex max-w-3xl flex-col gap-3 px-5 py-5">
           {hidden > 0 && (
             <button type="button" onClick={() => setShown((n) => n + PAGE)} className="self-center rounded-lg border border-border px-3 py-1 text-[12px] text-text-subtle hover:bg-border hover:text-foreground">
               Mostra {Math.min(hidden, PAGE)} messaggi precedenti ({hidden})
@@ -131,19 +217,38 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
               {loaded ? 'Nessun messaggio ancora: scrivi qui sotto e la conversazione comparirà in questa vista.' : 'Caricamento della conversazione…'}
             </p>
           )}
-          {blocks.map((b, i) =>
-            b.kind === 'tools' ? (
-              <ToolGroup key={b.items[0].id} items={b.items} />
-            ) : b.item.kind === 'user' ? (
-              <UserBubble key={b.item.id} text={b.item.text} ts={b.item.ts} />
-            ) : b.item.kind === 'assistant' ? (
-              <AssistantBlock key={b.item.id} text={b.item.text} ts={b.item.ts} />
-            ) : b.item.questions ? (
-              <QuestionCard key={b.item.id} item={b.item} sessionId={session.id} live={session.status !== 'exited'} onShowTerminal={onShowTerminal} />
+          {blocks.map((b, i) => {
+            const lastId = b.kind === 'tools' ? b.items[b.items.length - 1].id : b.item.id
+            const stats = turnStats.get(lastId)
+            const node =
+              b.kind === 'tools' ? (
+                <ToolGroup key={b.items[0].id} items={b.items} cwd={session.cwd} />
+              ) : b.item.kind === 'user' ? (
+                <UserBubble key={b.item.id} item={b.item} cwd={session.cwd} />
+              ) : b.item.kind === 'assistant' ? (
+                <AssistantBlock key={b.item.id} item={b.item} />
+              ) : b.item.kind === 'thinking' ? (
+                <ThinkingRow key={b.item.id} item={b.item} />
+              ) : b.item.kind === 'system' ? (
+                <SystemRow key={b.item.id} item={b.item} />
+              ) : b.item.questions ? (
+                <QuestionCard key={b.item.id} item={b.item} sessionId={session.id} live={session.status !== 'exited'} onShowTerminal={onShowTerminal} />
+              ) : b.item.plan ? (
+                <PlanCard key={b.item.id} item={b.item} sessionId={session.id} live={session.status !== 'exited'} onShowTerminal={onShowTerminal} />
+              ) : b.item.todos ? (
+                <TodoCard key={b.item.id} todos={b.item.todos} compact={b.item.id !== lastTodo?.id} />
+              ) : (
+                <EditCard key={b.item.id + i} item={b.item} sessionId={session.id} />
+              )
+            return stats ? (
+              <div key={'t' + lastId} className="flex flex-col gap-3">
+                {node}
+                <TurnFooter stats={stats} />
+              </div>
             ) : (
-              <EditCard key={b.item.id + i} item={b.item} />
+              node
             )
-          )}
+          })}
           {working && (
             <div className="flex items-center gap-2 text-[13px] text-text-subtle" role="status">
               <Spinner /> Claude sta lavorando…
@@ -169,68 +274,24 @@ export function ConversationView({ session, onShowTerminal }: { session: Session
         </button>
       )}
 
-      {waiting && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-warn/40 bg-warn/10 px-4 py-2 text-[12px]" role="alert">
-          <Hand size={14} className="shrink-0 text-warn" />
-          <span className="min-w-0 flex-1 text-foreground">{attention?.message || 'Claude aspetta una tua risposta (permesso o domanda).'}</span>
-          <button type="button" onClick={() => api.sessions.key(session.id, '1')} title="Invia «1» al terminale: la prima scelta, di solito «Sì»" className="h-7 rounded-md bg-ok px-3 font-semibold text-on-brand hover:opacity-90">
-            Sì (1)
-          </button>
-          <button type="button" onClick={() => api.sessions.key(session.id, 'esc')} title="Invia Esc al terminale: rifiuta o annulla" className="h-7 rounded-md border border-danger/50 px-3 text-danger hover:bg-danger/10">
-            No (Esc)
-          </button>
-          <button type="button" onClick={onShowTerminal} className="h-7 rounded-md px-3 text-text-subtle hover:bg-border hover:text-foreground">
-            Rispondi nel terminale
-          </button>
-        </div>
-      )}
+      {waiting && <PermissionBar session={session} pending={pendingTool} message={attention?.message} onShowTerminal={onShowTerminal} />}
+      {find && scrollRef.current && <FindBar key={find.n} root={scrollRef.current} onClose={() => setFind(null)} />}
     </div>
   )
 }
 
-const timeOf = (ts?: string) => (ts ? new Date(ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '')
-
-const SPIN = ['✻', '✺', '✹', '✸', '✷', '✶']
-/** Asterisco animato, come quello di Claude Code mentre lavora. */
-function Spinner() {
-  const [i, setI] = useState(0)
-  useEffect(() => {
-    const t = window.setInterval(() => setI((n) => (n + 1) % SPIN.length), 140)
-    return () => window.clearInterval(t)
-  }, [])
-  return <span className="inline-block w-4 text-center text-brand">{SPIN[i]}</span>
-}
-
-/** Puntino a sinistra di ogni voce: pieno e acceso a fine lavoro, rosso se fallita, lampeggiante mentre gira. */
-function Dot({ state }: { state: 'run' | 'ok' | 'err' | 'text' }) {
-  return (
-    <span
-      aria-hidden
-      className={cn('mt-[3px] w-4 shrink-0 text-center leading-none select-none', state === 'run' && 'animate-pulse text-brand', state === 'ok' && 'text-ok', state === 'err' && 'text-danger', state === 'text' && 'text-foreground')}
-    >
-      ●
-    </span>
-  )
-}
-
-function UserBubble({ text, ts }: { text: string; ts?: string }) {
-  return (
-    <div title={timeOf(ts)} className="flex gap-2 rounded-md bg-surface-2 px-3 py-2 text-foreground">
-      <span aria-hidden className="w-4 shrink-0 text-center text-text-faint select-none">
-        ›
-      </span>
-      <div className="min-w-0 flex-1 whitespace-pre-wrap">{text}</div>
-    </div>
-  )
-}
-
-function AssistantBlock({ text, ts }: { text: string; ts?: string }) {
+function AssistantBlock({ item }: { item: ChatItem & { kind: 'assistant' } }) {
+  const text = item.text
   const html = useMemo(() => renderMarkdown(text, '', '').html, [text])
   const [copied, setCopied] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  useCodeHighlight(bodyRef, html)
   return (
-    <div className="group relative flex gap-2" title={timeOf(ts)}>
+    <div data-item={item.id} className="group relative flex gap-2" title={timeOf(item.ts)}>
       <Dot state="text" />
-      <MarkdownView html={html} className="min-w-0 flex-1 !overflow-visible !px-0 !py-0" />
+      <div ref={bodyRef} className="min-w-0 flex-1">
+        <MarkdownView html={html} className="!overflow-visible !px-0 !py-0" />
+      </div>
       <button
         type="button"
         aria-label="Copia la risposta"
@@ -252,7 +313,7 @@ function resultLine(result: string): string {
 }
 
 /** Voce di strumento nello stile di Claude Code: «● Nome(dettaglio)» e sotto «⎿ esito», che si apre per i dettagli. */
-function ToolRow({ item }: { item: ToolItem }) {
+function ToolRow({ item, cwd }: { item: ToolItem; cwd: string }) {
   const [open, setOpen] = useState(false)
   const done = item.result !== undefined
   const state = !done ? 'run' : item.isError ? 'err' : 'ok'
@@ -272,8 +333,7 @@ function ToolRow({ item }: { item: ToolItem }) {
         )}
         {open && (
           <div className="mt-1 space-y-2">
-            <pre className="max-h-48 overflow-auto rounded-md bg-background/60 p-2 font-mono text-[11.5px] leading-snug whitespace-pre-wrap text-text-muted">{item.input}</pre>
-            {done && <pre className={cn('max-h-72 overflow-auto rounded-md bg-background/60 p-2 font-mono text-[11.5px] leading-snug whitespace-pre-wrap', item.isError ? 'text-danger' : 'text-text-muted')}>{item.result || '(nessun output)'}</pre>}
+            <ToolDetail item={item} cwd={cwd} />
             <button type="button" onClick={() => setOpen(false)} className="text-[11px] text-text-faint hover:text-foreground">
               Chiudi dettagli
             </button>
@@ -285,13 +345,13 @@ function ToolRow({ item }: { item: ToolItem }) {
 }
 
 /** Gruppo di strumenti consecutivi: da tre in su è un riepilogo («Read ×5, Bash ×4») che si apre. */
-function ToolGroup({ items }: { items: ToolItem[] }) {
+function ToolGroup({ items, cwd }: { items: ToolItem[]; cwd: string }) {
   const [open, setOpen] = useState(false)
   if (items.length < 3) {
     return (
       <div className="space-y-1.5">
         {items.map((t) => (
-          <ToolRow key={t.id} item={t} />
+          <ToolRow key={t.id} item={t} cwd={cwd} />
         ))}
       </div>
     )
@@ -313,7 +373,7 @@ function ToolGroup({ items }: { items: ToolItem[] }) {
         {open && (
           <div className="mt-1.5 space-y-1.5 border-l border-border pl-3">
             {items.map((t) => (
-              <ToolRow key={t.id} item={t} />
+              <ToolRow key={t.id} item={t} cwd={cwd} />
             ))}
           </div>
         )}
@@ -325,10 +385,12 @@ function ToolGroup({ items }: { items: ToolItem[] }) {
 const MAX_DIFF_LINES = 14
 
 /** Modifica a un file come in Claude Code: «● Update(file)», «⎿ Aggiunte N righe, rimosse M» e il diff sotto. */
-function EditCard({ item }: { item: ToolItem }) {
+function EditCard({ item, sessionId }: { item: ToolItem; sessionId: string }) {
   const [expanded, setExpanded] = useState(false)
   const edits: Edit[] = item.edits ?? []
   const file = edits[0]?.file ?? item.summary
+  // Stato di revisione di questo file nella sessione: da qui si apre il cassetto accanto al terminale sul file giusto.
+  const change = useChanges((s) => s.changes.find((c) => c.sessionId === sessionId && normPath(c.filePath) === normPath(file)))
   const rows = useMemo(() => {
     const out: { sign: '+' | '-' | ' '; text: string }[] = []
     for (const e of edits) {
@@ -362,6 +424,21 @@ function EditCard({ item }: { item: ToolItem }) {
           <button type="button" onClick={() => openFile(file)} title={`Apri ${file}`} className="font-mono text-[12px] text-info hover:underline">
             ({file.split(/[\\/]/).pop()})
           </button>
+          {change && (isOpen(change) ? (
+            <button
+              type="button"
+              onClick={() => useReviewUi.getState().openReview(sessionId, change.id)}
+              title="Apri questo file nella revisione accanto al terminale"
+              className="ml-2 rounded border px-1.5 text-[11px] hover:bg-border"
+              style={{ color: CHANGE_STATUS_COLORS[change.status], borderColor: CHANGE_STATUS_COLORS[change.status] }}
+            >
+              {CHANGE_STATUS_LABELS[change.status]} · Rivedi
+            </button>
+          ) : (
+            <span className="ml-2 text-[11px]" style={{ color: CHANGE_STATUS_COLORS[change.status] }}>
+              {CHANGE_STATUS_LABELS[change.status]}
+            </span>
+          ))}
         </div>
         <div className="mt-0.5 flex gap-1.5 font-mono text-[12px] text-text-faint">
           <span aria-hidden>⎿</span>
